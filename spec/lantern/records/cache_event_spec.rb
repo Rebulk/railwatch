@@ -59,4 +59,18 @@ RSpec.describe "cache_event record" do
   ensure
     Lantern.config.capture_default_vendor_cache_keys = false
   end
+
+  it "reports type fail when the store raises during a write" do
+    store = Rails.cache
+    allow(store).to receive(:write_entry).and_raise(IOError, "disk full")
+    run_in_execution do
+      begin
+        store.write("broken", 1)
+      rescue IOError
+        nil
+      end
+    end
+
+    expect(lantern_records(:cache_event).find { |e| e[:key] == "broken" }).to include(type: "fail")
+  end
 end

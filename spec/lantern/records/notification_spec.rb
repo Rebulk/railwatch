@@ -23,6 +23,13 @@ RSpec.describe "notification record" do
     Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
   end
 
+  it "derives channel from the Noticed delivery class" do
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Noticed::TestDelivery.perform_now(notification_class: "WelcomeNotification")
+    finish!
+    expect(lantern_records(:notification).sole[:channel]).to eq("test")
+  end
+
   it "captures the notifier class, delivery_method, duration, and failed false for a clean delivery" do
     Lantern.start_execution(source: :command, sample_kind: :commands)
     Noticed::TestDelivery.new(notification_class: "WidgetNotifier").perform_now

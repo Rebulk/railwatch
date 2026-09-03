@@ -59,7 +59,7 @@ module Lantern
               **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
               store: store,
               key: key[0, 255],
-              type: type_of.call(p),
+              type: p[:exception] ? "fail" : type_of.call(p),
               duration: micros(event),
               ttl: p[:expires_in].to_i,
               hits: p[:hits].is_a?(Array) ? p[:hits].size : nil

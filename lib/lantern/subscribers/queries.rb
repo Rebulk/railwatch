@@ -19,14 +19,18 @@ module Lantern
       module_function
 
       # adapter name and db config name never change for a connection object.
+      # Adapter, database name, and the multi-DB role the connection was
+      # checked out for ("writing"/"reading"; Nightwatch calls this the
+      # connection type). Memoised per connection object.
       def connection_info(conn)
         @connection_info[conn] ||= begin
           adapter = conn.adapter_name.to_s.downcase
           db = (conn.pool.db_config.name rescue nil)
-          [ adapter, db ].freeze
+          role = (conn.role.to_s rescue "writing")
+          [ adapter, db, role ].freeze
         end
       rescue StandardError
-        [ "", nil ].freeze
+        [ "", nil, "writing" ].freeze
       end
 
       # The app frame that issues a query shape rarely changes, so the
@@ -52,7 +56,7 @@ module Lantern
           next unless recording?
 
           sql = p[:sql]
-          adapter, db = p[:connection] ? connection_info(p[:connection]) : [ "", nil ]
+          adapter, db, role = p[:connection] ? connection_info(p[:connection]) : [ "", nil, "writing" ]
           # One cache lookup gets both the group hash and the normalized SQL,
           # so the (rare) n+1 branch below never re-normalizes the same text.
           group, normalized = SqlNormalizer.group_and_normalized(sql, adapter: adapter, connection_name: db)
@@ -78,6 +82,7 @@ module Lantern
             duration: duration,
             connection: db,
             adapter: adapter,
+            role: role,
             async: p[:async] ? true : false,
             row_count: p[:row_count],
             affected_rows: p[:affected_rows],

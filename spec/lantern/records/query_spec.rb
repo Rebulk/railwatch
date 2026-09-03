@@ -17,6 +17,7 @@ RSpec.describe "query record", type: :request do
     expect(q[:row_count]).to eq(3)
     expect(q[:in_transaction]).to be(false)
     expect(q[:allocations]).to be_a(Integer)
+    expect(q[:role]).to eq("writing") # the multi-DB role the connection was checked out for
   end
 
   it "captures affected_rows and in_transaction for a write made inside a transaction" do

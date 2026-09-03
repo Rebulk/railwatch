@@ -24,6 +24,7 @@ module Lantern
             timestamp: started_at(event),
             notifier: (job.arguments.first.is_a?(Hash) ? job.arguments.first[:notification_class] : nil).to_s,
             delivery_method: job.class.name.demodulize,
+            channel: job.class.name.demodulize.delete_suffix("Delivery").downcase,
             duration: micros(event),
             failed: event.payload[:exception].present?)
         rescue StandardError => e

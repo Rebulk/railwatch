@@ -167,6 +167,7 @@ going through `Lantern.record`.
 | `name` | ActiveRecord's own query name (e.g. `"User Load"`). |
 | `duration` | Microseconds. |
 | `connection` | Database config name (e.g. `"primary"`). |
+| `role` | Multi-DB role the connection was checked out for: `"writing"` or `"reading"`. |
 | `adapter` | `"sqlite"`, `"postgresql"`, etc. |
 | `async` | Whether this was an async query (`load_async`). |
 | `row_count` | Rows returned, when the adapter reports it. |
@@ -248,7 +249,7 @@ a `fetch` (`lib/lantern/subscribers/cache.rb`). Vendor cache key prefixes
 | `_group` | Hash of store class + key shape (digits/long-hex stripped so `"users/123"` and `"users/456"` share a group). |
 | `store` | Cache store class, demodulized. |
 | `key` | Truncated to 255 chars. |
-| `type` | `"hit"`, `"miss"`, `"read_multi"`, `"generate"`, `"write"`, `"write_multi"`, `"delete"`, `"delete_multi"`, `"delete_matched"`, `"increment"`, `"decrement"`, or `"exist"`. |
+| `type` | `"hit"`, `"miss"`, `"read_multi"`, `"generate"`, `"write"`, `"write_multi"`, `"delete"`, `"delete_multi"`, `"delete_matched"`, `"increment"`, `"decrement"`, `"exist"`, or `"fail"` when the store raised. |
 | `duration` | Microseconds. |
 | `ttl` | Seconds, from `expires_in`, or 0. |
 | `hits` | Count of hits, for a `read_multi`. |
@@ -302,6 +303,7 @@ No-ops entirely if the `noticed` gem isn't loaded.
 |---|---|
 | `group` | Hash of the Noticed delivery job's class name. |
 | `notifier` | The `notification_class` from the job's first argument, if present. |
+| `channel` | Delivery class with `Delivery` stripped and lowercased, e.g. `"email"`, `"slack"`. |
 | `delivery_method` | Delivery job class, demodulized (e.g. `"EmailDelivery"`). |
 | `duration` | Microseconds. |
 | `failed` | Whether the delivery job raised. |
