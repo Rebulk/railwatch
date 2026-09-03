@@ -57,9 +57,10 @@ module Lantern
           p = event.payload
           released = job.instance_variable_get(:@__lantern_released)
           status = if released then "released"
-                   elsif p[:exception_object] then "failed"
-                   elsif p[:aborted] then "aborted"
-                   else "processed" end
+          elsif p[:exception_object] then "failed"
+          elsif p[:aborted] then "aborted"
+          else "processed"
+          end
           if p[:exception_object]
             Exceptions.capture(p[:exception_object], handled: false, severity: :error, source: "application.active_job")
           end
@@ -170,17 +171,41 @@ module Lantern
         nil
       end
 
+      # Solid Queue's recurring task table changes when config/recurring.yml
+      # is reloaded or dynamic tasks are scheduled, so the lookup tables are
+      # re-read every RECURRING_TTL seconds instead of once per process.
+      RECURRING_TTL = 60
+
+      def recurring_tasks
+        now = Clock.monotonic
+        if @recurring_tasks.nil? || now - @recurring_read_at > RECURRING_TTL
+          @recurring_tasks = Lantern.ignore { load_recurring_tasks }
+          @recurring_read_at = now
+        end
+        @recurring_tasks
+      end
+
+      def load_recurring_tasks
+        rows = ::SolidQueue::RecurringTask.pluck(:key, :class_name, :schedule)
+        { keys: rows.map(&:first), classes: rows.filter_map { |_k, c, _s| c }.uniq, schedules: rows.to_h { |k, _c, sch| [ k, sch ] } }
+      rescue StandardError
+        { keys: [], classes: [], schedules: {} }
+      end
+
+      def refresh_recurring_tasks!
+        @recurring_tasks = nil
+      end
+
       def recurring_keys
-        @recurring_keys ||= (::SolidQueue::RecurringTask.pluck(:key) rescue [])
+        recurring_tasks[:keys]
       end
 
       def recurring_job_classes
-        @recurring_job_classes ||= (::SolidQueue::RecurringTask.pluck(:class_name).compact rescue [])
+        recurring_tasks[:classes]
       end
 
       def schedule_for(key)
-        @schedules ||= (::SolidQueue::RecurringTask.pluck(:key, :schedule).to_h rescue {})
-        @schedules[key]
+        recurring_tasks[:schedules][key]
       end
     end
   end

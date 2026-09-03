@@ -22,11 +22,13 @@ require "lantern/redactor"
 require "lantern/sql_normalizer"
 require "lantern/backtrace"
 require "lantern/context"
-# Faraday::Middleware doesn't exist unless the host app depends on Faraday,
-# and Lantern::Faraday subclasses it at load time -- so this only loads when
-# Faraday is already available (Bundler.require runs before an app's own
-# `require "lantern"`, so this is reliable in the normal boot order).
-require "lantern/faraday" if defined?(::Faraday)
+# Lantern::Faraday subclasses ::Faraday::Middleware at load time, so it can't
+# be required here: `gemspec` puts this gem in the Gemfile's :default group,
+# and Bundler.require(*Rails.groups) requires gems in Gemfile declaration
+# order, so lantern itself is often required *before* an app's own `gem
+# "faraday"` line further down the Gemfile. lib/lantern/engine.rb requires it
+# instead, from a Rails initializer, which always runs after Bundler.require
+# has finished loading every gem.
 
 # Public API. Mirrors the Laravel Nightwatch facade: user, sample, dontSample,
 # ignore, pause, resume, report, redact*, reject*, plus context and deploy.

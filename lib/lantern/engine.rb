@@ -19,6 +19,14 @@ module Lantern
       Lantern::Patches.install!
     end
 
+    # Runs unconditionally (not gated on Lantern.enabled?) so `Lantern::Faraday`
+    # is a valid constant for apps to reference in their Faraday stack setup
+    # regardless of whether Lantern itself is enabled -- Lantern.record already
+    # no-ops when disabled, so the middleware is inert either way.
+    initializer "lantern.faraday" do
+      require "lantern/faraday" if defined?(::Faraday)
+    end
+
     initializer "lantern.active_job" do
       ActiveSupport.on_load(:active_job) { include Lantern::JobTracing }
     end

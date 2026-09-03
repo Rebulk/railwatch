@@ -15,6 +15,12 @@ Lantern.configure do |c|
   # :notifications, :outgoing_requests, :storage_ops, :view_renders, :logs, :transactions
   # c.ignore = []
 
+  # Default vendor rake tasks (db:migrate, assets:precompile, ...) and default
+  # vendor cache-key prefixes (rack::attack, flipper, ...) are excluded unless
+  # you opt back in.
+  # c.capture_default_vendor_commands = false    # LANTERN_CAPTURE_DEFAULT_VENDOR_COMMANDS
+  # c.capture_default_vendor_cache_keys = false  # LANTERN_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS
+
   # c.log_level = :info
   # c.capture_request_payload = false   # only captured for requests that raised, always redacted
   # c.redact_headers += %w[X-Api-Key]
@@ -24,7 +30,15 @@ Lantern.configure do |c|
   # c.user { |user| { id: user.id, name: user.name, email: user.email } }
 end
 
-# Lantern.reject_cache_keys %w[rack::attack flipper/]
+# A trailing "*" matches as a prefix; a string starting with "^" (or another
+# regex metacharacter) is compiled as a Regexp; anything else must match the
+# cache key exactly.
+# Lantern.reject_cache_keys %w[session: rack::attack* ^feature_flag_\d+$]
 # Lantern.reject_outgoing_requests { |r| r[:host] == "127.0.0.1" }
 # Lantern.redact_queries { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
 # Lantern.before_ingest { |batch| batch.size < 10_000 }   # return false to drop a batch
+
+# Called whenever Lantern rescues one of its own internal errors (a
+# subscriber raising, or delivery failing after its retry), instead of only
+# logging to Lantern.debug.
+# Lantern.on_unrecoverable { |error| Rails.error.report(error, handled: true) }

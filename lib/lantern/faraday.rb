@@ -14,12 +14,22 @@ module Lantern
     def call(env)
       start = Clock.monotonic
       started_at = Clock.now
-      @app.call(env).on_complete do |response_env|
-        record(response_env, start, started_at)
+      # Faraday's default adapter is Net::HTTP, which Patches::NetHttp already
+      # instruments globally -- without this, a Faraday call would produce two
+      # outgoing_request records. Reuse its reentry flag for the duration of
+      # @app.call so it defers to this middleware's own (more accurate) record.
+      previous = Thread.current[Patches::NetHttp::REENTRY]
+      Thread.current[Patches::NetHttp::REENTRY] = true
+      begin
+        @app.call(env).on_complete do |response_env|
+          record(response_env, start, started_at)
+        end
+      rescue StandardError => e
+        record(env, start, started_at, error: e)
+        raise
+      ensure
+        Thread.current[Patches::NetHttp::REENTRY] = previous
       end
-    rescue StandardError => e
-      record(env, start, started_at, error: e)
-      raise
     end
 
     private

@@ -229,6 +229,29 @@ RSpec.describe Lantern do
     end
   end
 
+  describe Lantern::Faraday do
+    it "records an outgoing_request for a Faraday connection using the middleware" do
+      require "rake"
+      stub_request(:get, "https://api.example.test/things").to_return(status: 204)
+      conn = ::Faraday.new("https://api.example.test") { |f| f.use Lantern::Faraday }
+      Rake::Task.define_task(:lantern_faraday_demo) { conn.get("/things") }
+      Rake::Task[:lantern_faraday_demo].execute
+      out = lantern_records(:outgoing_request).sole
+      expect(out).to include(host: "api.example.test", method: "GET", url: "https://api.example.test/things", status_code: 204)
+      expect(out[:duration]).to be >= 0
+    end
+
+    it "records the error and re-raises when the connection fails" do
+      require "rake"
+      stub_request(:get, "https://api.example.test/things").to_raise(Faraday::ConnectionFailed.new("down"))
+      conn = ::Faraday.new("https://api.example.test") { |f| f.use Lantern::Faraday }
+      Rake::Task.define_task(:lantern_faraday_error_demo) { conn.get("/things") }
+      expect { Rake::Task[:lantern_faraday_error_demo].execute }.to raise_error(Faraday::ConnectionFailed)
+      out = lantern_records(:outgoing_request).sole
+      expect(out[:error]).to include("down")
+    end
+  end
+
   describe "Lantern.instrument_outgoing" do
     it "records an outgoing_request and returns the block's value" do
       require "rake"
