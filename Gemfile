@@ -9,6 +9,9 @@ gem "solid_cache"
 gem "solid_cable"
 
 group :development, :test do
+  # Profiler backends (optional at runtime; apps add one to their Gemfile).
+  gem "stackprof"
+  gem "vernier"
   gem "rspec-rails", "~> 8.0"
   gem "webmock"
   gem "rubocop-rails-omakase", require: false
@@ -20,5 +23,4 @@ end
 group :bench do
   gem "benchmark-ips"
   gem "memory_profiler"
-  gem "stackprof"
 end

@@ -52,7 +52,9 @@ module Lantern
                   :capture_framework_events,
                   :tail_sample_slow_ms, :propagate_traces, :trace_propagation_hosts,
                   :health_interval, :capture_query_explain, :explain_threshold_ms,
-                  :ignored_exceptions, :capture_rescued_exceptions
+                  :ignored_exceptions, :capture_rescued_exceptions,
+                  :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
+                  :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes
 
     attr_reader :user_resolver, :redactors, :rejectors, :before_ingest
 
@@ -103,6 +105,16 @@ module Lantern
       @explain_threshold_ms = env_float("LANTERN_EXPLAIN_THRESHOLD_MS", 100.0)
       @ignored_exceptions = ENV["LANTERN_IGNORED_EXCEPTIONS"]&.split(",")&.map(&:strip) || DEFAULT_IGNORED_EXCEPTIONS.dup
       @capture_rescued_exceptions = env_bool("LANTERN_CAPTURE_RESCUED_EXCEPTIONS", true)
+      # Sampling profiler: profile this fraction of sampled-in requests/jobs
+      # (0 = off), and always profile ones slower than profile_slow_ms once
+      # tail sampling keeps them. Uses vernier when available, else stackprof.
+      @profile_sample = env_float("LANTERN_PROFILE_SAMPLE_RATE", 0.0)
+      @profile_slow_ms = ENV["LANTERN_PROFILE_SLOW_MS"]&.then { |v| Float(v) }
+      @profile_interval_us = env_int("LANTERN_PROFILE_INTERVAL_US", 1_000)
+      @profiler = ENV["LANTERN_PROFILER"]&.to_sym
+      @capture_job_arguments = env_bool("LANTERN_CAPTURE_JOB_ARGUMENTS", false)
+      @capture_response_body_on_error = env_bool("LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR", false)
+      @max_attachment_bytes = env_int("LANTERN_MAX_ATTACHMENT_BYTES", 1_048_576)
       @user_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }
