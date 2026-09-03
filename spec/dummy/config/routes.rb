@@ -16,6 +16,7 @@ Rails.application.routes.draw do
   get "many", to: "widgets#many"
   get "storage", to: "widgets#storage"
   get "override_sample", to: "widgets#override_sample"
+  get "deprecated", to: "widgets#deprecated_action"
   post "upload", to: "widgets#upload"
   get "ssr_widgets", to: "ssr_widgets#index"
 end

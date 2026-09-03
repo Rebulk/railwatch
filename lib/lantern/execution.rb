@@ -109,11 +109,27 @@ module Lantern
       end
     end
 
-    # Resident set size in bytes, Linux only. Read once at execution end.
-    def capture_memory
-      @peak_memory = File.read("/proc/self/statm").split[1].to_i * 4096
+    # Resident set size in bytes, Linux only. Reading /proc costs ~14µs, so
+    # it is sampled at most once per MEMORY_SAMPLE_INTERVAL per process and
+    # every execution in between reports the last sample; RSS moves slowly
+    # compared with request rates, so the value stays representative.
+    MEMORY_SAMPLE_INTERVAL = 1.0
+    @memory_sample = nil
+    @memory_sampled_at = 0.0
+
+    def self.sampled_memory
+      now = Clock.monotonic
+      if now - @memory_sampled_at > MEMORY_SAMPLE_INTERVAL
+        @memory_sampled_at = now
+        @memory_sample = File.read("/proc/self/statm").split(" ", 3)[1].to_i * 4096
+      end
+      @memory_sample
     rescue StandardError
-      nil
+      @memory_sample
+    end
+
+    def capture_memory
+      @peak_memory = self.class.sampled_memory
     end
 
     def count(counter, by = 1)

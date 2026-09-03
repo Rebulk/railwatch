@@ -83,7 +83,7 @@ module Lantern
           unpermitted_parameters: env["lantern.unpermitted_parameters"],
           rate_limited: env["lantern.rate_limited"],
           inertia: inertia,
-          headers: Lantern.redactor.headers(request_headers(env)),
+          headers: request_headers(env),
           payload: payload,
           user_agent: req.user_agent.to_s[0, 256],
           files: env["lantern.files"] || uploaded_files(req.params)
@@ -124,11 +124,15 @@ module Lantern
         end
       end
 
+      # Builds the (already redacted) header hash in one pass over env so the
+      # redactor does not have to walk a second, intermediate hash.
       def request_headers(env)
+        redactor = Lantern.redactor
         out = {}
         env.each_pair do |k, v|
           next unless k.start_with?("HTTP_") || k == "CONTENT_TYPE" || k == "CONTENT_LENGTH"
-          out[header_name(k)] = v
+          name = header_name(k)
+          out[name] = redactor.redact_header?(name) ? Redactor::FILTERED : v.to_s[0, 512]
         end
         out
       end

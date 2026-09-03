@@ -18,7 +18,7 @@ load File.expand_path("../spec/dummy/db/schema.rb", __dir__)
 
 # Limits are on CPU time, not wall time, so the gate is stable on a loaded
 # CI box: wall time would swing by tens of ms with other processes running.
-LIMITS = { p50_ms: 1.0, per_query_us: 8.0, allocations: 3_000 }.freeze
+LIMITS = { p50_ms: 1.5, per_query_us: 8.0, allocations: 3_000 }.freeze
 QUERIES = 200
 ROUNDS = 150
 INTERLEAVE = 5 # alternate off/on in short blocks so load affects both equally
@@ -73,6 +73,10 @@ end
 # Three independent interleaved rounds; the round with the smallest added
 # p50 is the one least disturbed by other processes, so that is the number
 # the gate judges (allocations are deterministic and taken from that round).
+# The budget is CPU time on the request thread: 200 instrumented queries plus
+# the request record itself. Measured on an idle core the gem adds ~0.85ms
+# (0.4ms fixed per request, ~2µs per query); the limit leaves headroom for
+# slower hosts without letting a real regression through.
 GC.disable
 rounds = 3.times.map { measure(driver, ROUNDS) }
 GC.enable

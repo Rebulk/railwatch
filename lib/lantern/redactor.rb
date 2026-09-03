@@ -15,8 +15,18 @@ module Lantern
 
     def headers(hash)
       hash.each_with_object({}) do |(k, v), out|
-        out[k] = @header_keys.include?(k.to_s.downcase) ? FILTERED : v.to_s[0, 512]
+        out[k] = redact_header?(k) ? FILTERED : v.to_s[0, 512]
       end
+    end
+
+    # Header names arrive already capitalised ("Authorization"); the lookup
+    # set is lower-case, so cache the downcased form per distinct name.
+    def redact_header?(name)
+      @header_case ||= {}
+      hit = @header_case[name]
+      return hit unless hit.nil?
+      @header_case.clear if @header_case.size > 512
+      @header_case[name] = @header_keys.include?(name.to_s.downcase)
     end
 
     def params(hash)

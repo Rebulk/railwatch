@@ -83,4 +83,20 @@ class WidgetsController < ApplicationController
   def upload
     render plain: params[:attachment].original_filename
   end
+
+  def deprecated_action
+    old_widget_method
+    render plain: "ok"
+  end
+
+  private
+
+  # Deprecation callstacks report the caller of the deprecated method, not
+  # the method's own definition site, so this needs its own frame between
+  # the controller action and Deprecation#warn to produce a real app :source.
+  def old_widget_method
+    deprecator = ActiveSupport::Deprecation.new("2.0", "Rails")
+    deprecator.behavior = :notify
+    deprecator.warn("old_widget_method is deprecated")
+  end
 end

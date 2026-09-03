@@ -121,8 +121,10 @@ RSpec.describe Lantern::Execution do
       expect(exe.peak_memory).to be > 0
     end
 
-    it "returns nil when /proc/self/statm is unreadable" do
+    it "keeps the last good sample when /proc/self/statm becomes unreadable" do
       exe = new_execution
+      Lantern::Execution.instance_variable_set(:@memory_sampled_at, 0.0)
+      Lantern::Execution.instance_variable_set(:@memory_sample, nil)
       allow(File).to receive(:read).with("/proc/self/statm").and_raise(Errno::ENOENT)
 
       exe.capture_memory
