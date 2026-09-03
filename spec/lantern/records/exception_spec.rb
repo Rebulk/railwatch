@@ -74,4 +74,27 @@ RSpec.describe "exception record", type: :request do
     expect(ex[:class]).to eq("ActiveRecord::StatementInvalid")
     expect(ex[:sql_state]).to be_nil # sqlite3's adapter error does not expose #sql_state
   end
+
+  it "captures redacted local variables at the raise site when capture_exception_locals is on" do
+    Lantern.config.capture_exception_locals = true
+    Lantern::Subscribers::Exceptions::Locals.install!
+    begin
+      Lantern.start_execution(source: :command, sample_kind: :commands)
+      begin
+        widget_id = 42
+        password = "hunter2"
+        raise ArgumentError, "with locals #{widget_id} #{password.size}"
+      rescue ArgumentError => e
+        Rails.error.report(e, handled: true)
+      end
+      Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+      locals = lantern_records(:exception).sole[:locals]
+      expect(locals["widget_id"]).to eq("42")
+      expect(locals["password"]).to eq("[FILTERED]")
+    ensure
+      Lantern::Subscribers::Exceptions::Locals.uninstall!
+      Lantern.config.capture_exception_locals = false
+    end
+  end
 end

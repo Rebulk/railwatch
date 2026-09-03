@@ -22,7 +22,7 @@ module Lantern
 
     attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
-                  :capture_exception_source, :redact_headers, :redact_params,
+                  :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :flush_interval, :flush_threshold,
                   :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
@@ -51,6 +51,7 @@ module Lantern
       @log_level = (ENV["LANTERN_LOG_LEVEL"] || "info").to_sym
       @capture_request_payload = env_bool("LANTERN_CAPTURE_REQUEST_PAYLOAD", false)
       @capture_exception_source = env_bool("LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE", true)
+      @capture_exception_locals = env_bool("LANTERN_CAPTURE_EXCEPTION_LOCALS", false)
       @redact_headers = ENV.fetch("LANTERN_REDACT_HEADERS", "Authorization,Cookie,Set-Cookie,Proxy-Authorization,X-CSRF-Token,X-XSRF-TOKEN").split(",").map(&:strip)
       @redact_params = ENV.fetch("LANTERN_REDACT_PARAMS", "password,password_confirmation,authenticity_token,_token").split(",").map(&:strip)
       @buffer_size = env_int("LANTERN_BUFFER_SIZE", 5_000)

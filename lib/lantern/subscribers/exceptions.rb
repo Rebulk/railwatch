@@ -19,6 +19,57 @@ module Lantern
 
       def install!(_app)
         Rails.error.subscribe(ErrorSubscriber.new) if defined?(Rails) && Rails.respond_to?(:error)
+        Locals.install! if Lantern.config.capture_exception_locals
+      end
+
+      # Local variables at the raise site, like Sentry's "locals" panel.
+      # Opt-in (LANTERN_CAPTURE_EXCEPTION_LOCALS): a TracePoint on :raise
+      # snapshots the raising frame's binding onto the exception object,
+      # already stringified, truncated, and run through the param filter so
+      # a `password` local ships as [FILTERED]. Costs one binding walk per
+      # raise, nothing on the happy path.
+      module Locals
+        MAX_LOCALS = 25
+        MAX_VALUE = 200
+
+        module_function
+
+        def install!
+          return if @trace
+          @trace = TracePoint.new(:raise) do |tp|
+            error = tp.raised_exception
+            next if error.instance_variable_defined?(:@__lantern_locals)
+            error.instance_variable_set(:@__lantern_locals, snapshot(tp.binding))
+          rescue StandardError
+            nil
+          end
+          @trace.enable
+        end
+
+        def uninstall!
+          @trace&.disable
+          @trace = nil
+        end
+
+        def snapshot(binding)
+          return nil unless binding
+          names = binding.local_variables.first(MAX_LOCALS)
+          raw = names.to_h { |n| [ n.to_s, inspect_value(binding.local_variable_get(n)) ] }
+          Lantern.redactor.params(raw)
+        end
+
+        def inspect_value(value)
+          s = value.inspect
+          s.length > MAX_VALUE ? s[0, MAX_VALUE] + "…" : s
+        rescue StandardError
+          "#<#{value.class}>"
+        end
+
+        def for(error)
+          error.instance_variable_get(:@__lantern_locals)
+        rescue StandardError
+          nil
+        end
       end
 
       def capture(error, handled:, severity:, context: {}, source: nil)
@@ -51,6 +102,7 @@ module Lantern
           context: Context.serialized_with(context),
           code: error_code(error),
           sql_state: sql_state_for(error),
+          locals: Lantern.config.capture_exception_locals ? Locals.for(error) : nil,
           ruby_version: RUBY_VERSION,
           rails_version: (Rails.version rescue nil)
         }

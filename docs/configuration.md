@@ -223,6 +223,7 @@ defaults and always applies.
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
 | `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Include source snippet lines with each exception's backtrace frames. |
+| `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
 
 ## Logging
