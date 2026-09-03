@@ -12,6 +12,17 @@ module Lantern
           env["lantern.inertia_component"] = @component.to_s if env
           super
         end
+
+        # Private on InertiaRails::Renderer, only called when SSR is enabled
+        # and the request isn't itself an Inertia XHR visit -- so this adds
+        # no cost to the common (non-SSR) render path.
+        def ssr_render
+          start = Clock.monotonic
+          super
+        ensure
+          env = @request&.env
+          env["lantern.inertia_ssr_ms"] = ((Clock.monotonic - start) * 1000).round(2) if env
+        end
       end
 
       def self.install!

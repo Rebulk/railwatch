@@ -3,8 +3,12 @@ default: &default
   pool: 5
   timeout: 5000
 test:
-  <<: *default
-  database: storage/test.sqlite3
+  primary:
+    <<: *default
+    database: storage/test.sqlite3
+  queue:
+    <<: *default
+    database: storage/test_queue.sqlite3
 development:
   <<: *default
   database: storage/development.sqlite3

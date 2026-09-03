@@ -29,8 +29,10 @@ module Lantern
         exe&.count(:exceptions)
         exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255] if exe
 
-        # Sampled-out executions still report unhandled errors (exceptions rate).
-        return if exe && !exe.sampled? && (handled || !Sampler.decide(:exceptions))
+        # Sampled-out executions still report an unhandled error, governed by
+        # the exceptions sample rate. Decided once per execution and memoized,
+        # so a burst of errors doesn't re-roll the dice each time.
+        return if exe && !exe.sampled? && (handled || !exception_sampled?(exe))
         return if exe&.paused?
 
         cause = error.cause
@@ -47,6 +49,8 @@ module Lantern
           frames: frames,
           cause: cause && { class: cause.class.name, message: cause.message.to_s[0, 1024] },
           context: Context.serialized_with(context),
+          code: error_code(error),
+          sql_state: sql_state_for(error),
           ruby_version: RUBY_VERSION,
           rails_version: (Rails.version rescue nil)
         }
@@ -68,6 +72,37 @@ module Lantern
 
       def normalize_message(message)
         message.to_s.gsub(/\b\d+\b/, "?").gsub(/0x[0-9a-f]+/i, "0x?")[0, 200]
+      end
+
+      # Decided once per execution and memoized on exception_sampled, so the
+      # sampling roll happens exactly once even across many exceptions.
+      def exception_sampled?(exe)
+        return exe.exception_sampled unless exe.exception_sampled.nil?
+        exe.exception_sampled = Sampler.decide(:exceptions)
+      end
+
+      # errno-style code: SystemCallError subclasses (Errno::ECONNREFUSED etc)
+      # define an Errno class constant; some drivers expose #errno or #code.
+      def error_code(error)
+        if error.class.const_defined?(:Errno)
+          error.class.const_get(:Errno)
+        elsif error.respond_to?(:errno)
+          error.errno
+        elsif error.respond_to?(:code)
+          error.code
+        end
+      rescue StandardError
+        nil
+      end
+
+      # Database SQLSTATE for ActiveRecord::StatementInvalid, when the
+      # underlying driver error exposes one (e.g. pg; sqlite3 does not).
+      def sql_state_for(error)
+        return nil unless defined?(ActiveRecord::StatementInvalid) && error.is_a?(ActiveRecord::StatementInvalid)
+        cause = error.cause
+        cause.respond_to?(:sql_state) ? cause.sql_state : nil
+      rescue StandardError
+        nil
       end
     end
   end

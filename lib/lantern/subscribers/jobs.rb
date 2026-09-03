@@ -44,6 +44,7 @@ module Lantern
             preview: job.class.name)
           exe.enter_stage(:action)
           exe.user_id = Users.resolve_from_current
+          exe.queue_latency = queue_latency_micros(job)
           job.instance_variable_set(:@__lantern_execution, exe)
           job.instance_variable_set(:@__lantern_recurring_key, scheduled)
         end
@@ -54,7 +55,9 @@ module Lantern
           Lantern::Current.execution = exe
           exe.finish_stages
           p = event.payload
-          status = if p[:exception_object] then "failed"
+          released = job.instance_variable_get(:@__lantern_released)
+          status = if released then "released"
+                   elsif p[:exception_object] then "failed"
                    elsif p[:aborted] then "aborted"
                    else "processed" end
           if p[:exception_object]
@@ -70,9 +73,11 @@ module Lantern
             name: job.class.name,
             queue: job.queue_name.to_s,
             adapter: adapter_name(p[:adapter]),
+            connection: adapter_name(p[:adapter]),
+            concurrency_key: job.respond_to?(:concurrency_key) ? job.concurrency_key : nil,
             priority: job.priority,
             status: status,
-            queue_latency: queue_latency(job),
+            queue_latency: exe.queue_latency,
             db_runtime: p[:db_runtime]&.round(2),
             arguments_preview: arguments_preview(job)
           }
@@ -85,8 +90,12 @@ module Lantern
         end
 
         subscribe("enqueue_retry.active_job") do |event|
-          next unless recording?
           p = event.payload
+          # Flag the job so perform.active_job reports "released" instead of
+          # "failed" -- the exception was handled internally by retry_on and
+          # never escaped perform_now, so this is the only signal we get.
+          p[:job]&.instance_variable_set(:@__lantern_released, true)
+          next unless recording?
           Lantern.record(:log, level: "warn", message: "Retrying #{p[:job].class.name} in #{p[:wait]}s: #{p[:error]&.class}",
                          tags: [ "active_job", "retry" ], context: "{}")
         end
@@ -102,13 +111,18 @@ module Lantern
         end
 
         # Solid Queue: jobs whose worker was killed or pruned never fire perform.active_job.
+        # Each pruned job gets its own throwaway execution so its job_attempt
+        # record carries a fresh execution_id/trace_id instead of borrowing
+        # whatever happens to be Current at the time the sweep runs.
         subscribe("fail_many_claimed.solid_queue") do |event|
           p = event.payload
           Array(p[:job_ids]).each do |job_id|
-            Lantern.record_now(:job_attempt, group: Record.group_hash("SolidQueue::Pruned"),
-                               job_id: nil, provider_job_id: job_id.to_s, name: "(pruned)", status: "failed",
-                               queue: nil, duration: 0, attempt: nil, stages: {}, counters: {},
-                               exception_preview: p[:error].to_s[0, 255])
+            Lantern::Current.with(Lantern::Execution.new(source: :job, sampled: true)) do
+              Lantern.record_now(:job_attempt, group: Record.group_hash("SolidQueue::Pruned"),
+                                 job_id: nil, provider_job_id: job_id.to_s, name: "(pruned)", status: "failed",
+                                 queue: nil, duration: 0, attempt: nil, stages: {}, counters: {},
+                                 exception_preview: p[:error].to_s[0, 255])
+            end
           end
         end
 
@@ -125,10 +139,12 @@ module Lantern
         adapter.class.name.to_s.demodulize.delete_suffix("Adapter")
       end
 
-      def queue_latency(job)
-        return nil unless job.enqueued_at
+      # Measured at perform-start (stored on the execution), not at
+      # completion -- otherwise a slow perform inflates its own queue latency.
+      def queue_latency_micros(job)
         started = job.scheduled_at || job.enqueued_at
-        ((Time.now.utc - started.to_time.utc) * 1_000_000).round - 0
+        return nil unless started
+        ((Clock.now - started.to_time.utc.to_f) * 1_000_000).round
       rescue StandardError
         nil
       end

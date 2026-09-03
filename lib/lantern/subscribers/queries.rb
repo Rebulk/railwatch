@@ -10,6 +10,8 @@ module Lantern
 
       SKIP_NAMES = %w[SCHEMA TRANSACTION EXPLAIN].freeze
       MAX_SQL = 16_384
+      # Computed once so the hot query record doesn't look these up per call.
+      QUERY_VERSION = Record::VERSIONS.fetch(:query)
 
       @connection_info = {}.compare_by_identity
       @sources = {}
@@ -51,15 +53,26 @@ module Lantern
 
           sql = p[:sql]
           adapter, db = p[:connection] ? connection_info(p[:connection]) : [ "", nil ]
-          group = SqlNormalizer.group(sql, adapter: adapter, connection_name: db)
+          # One cache lookup gets both the group hash and the normalized SQL,
+          # so the (rare) n+1 branch below never re-normalizes the same text.
+          group, normalized = SqlNormalizer.group_and_normalized(sql, adapter: adapter, connection_name: db)
           exe&.track_query_group(group)
           duration = micros(event)
-          slow = event.duration >= Lantern.config.slow_query_threshold_ms
+          cfg = Lantern.config
+          slow = event.duration >= cfg.slow_query_threshold_ms
           n = exe ? exe.query_groups[group] : 0
 
-          Lantern.record(:query,
-            group: group,
+          # One hash literal (base keys + envelope + fields) instead of
+          # kwargs-packing into Lantern.record and merging through
+          # Record.build -- this is the hottest record type in the gem.
+          Lantern.push(:query, {
+            v: QUERY_VERSION,
+            t: "query",
             timestamp: started_at(event),
+            deploy: cfg.deploy,
+            server: cfg.server,
+            _group: group,
+            **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
             sql: sql.length > MAX_SQL ? sql[0, MAX_SQL] : sql,
             name: p[:name],
             duration: duration,
@@ -70,12 +83,27 @@ module Lantern
             affected_rows: p[:affected_rows],
             in_transaction: p[:transaction] ? true : false,
             source: source_for(group, slow),
-            allocations: event.allocations)
+            allocations: event.allocations
+          })
 
-          if exe && n == Lantern.config.n_plus_one_threshold
-            Lantern.record(:n_plus_one, group: group, sql: SqlNormalizer.normalize(p[:sql], adapter: adapter)[0, 2048],
+          if exe && n == cfg.n_plus_one_threshold
+            Lantern.record(:n_plus_one, group: group, sql: normalized[0, 2048],
                            count: n, source: Backtrace.caller_location(skip: 3))
           end
+        end
+
+        # Separate from the sql.active_record subscriber above (which stays a
+        # tight hot path): counts statements against the currently-open
+        # transaction, keyed by AR's transaction object identity. Payload
+        # carries the same transaction object as the query subscriber sees
+        # (current_transaction.user_transaction), so the two correlate.
+        # Gated entirely behind "was there a transaction" — no per-query cost
+        # outside that branch.
+        subscribe("sql.active_record") do |event|
+          p = event.payload
+          next if SKIP_NAMES.include?(p[:name]) || p[:cached]
+          txn = p[:transaction]
+          execution&.count_transaction_statement(txn.object_id) if txn
         end
 
         subscribe("transaction.active_record") do |event|
@@ -83,9 +111,12 @@ module Lantern
           exe&.count(:transactions)
           next unless recording?
           p = event.payload
-          Lantern.record(:transaction, group: nil, timestamp: started_at(event),
-                         duration: micros(event), outcome: p[:outcome].to_s,
-                         connection: (p[:connection]&.pool&.db_config&.name rescue nil))
+          connection_name = (p[:connection]&.pool&.db_config&.name rescue nil)
+          outcome = p[:outcome].to_s
+          statement_count = p[:transaction] ? exe&.transaction_statement_count(p[:transaction].object_id) : nil
+          Lantern.record(:transaction, group: Record.group_hash(connection_name, outcome),
+                         timestamp: started_at(event), duration: micros(event), outcome: outcome,
+                         connection: connection_name, statement_count: statement_count)
         end
 
         subscribe("instantiation.active_record") do |event|

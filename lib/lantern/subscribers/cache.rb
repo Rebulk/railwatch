@@ -22,6 +22,15 @@ module Lantern
         "cache_exist?.active_support" => ->(_p) { "exist" }
       }.freeze
 
+      # Bounded cache of key => shape, so a given cache key's id-stripping
+      # regexes only run once. Keys repeat heavily (same fetch in a loop).
+      KEY_SHAPE_CACHE_LIMIT = 2_048
+      @key_shape_cache = {}
+      @key_shape_mutex = Mutex.new
+
+      # Computed once so the hot cache_event record doesn't look this up per call.
+      CACHE_EVENT_VERSION = Record::VERSIONS.fetch(:cache_event)
+
       module_function
 
       def install!(_app)
@@ -37,15 +46,24 @@ module Lantern
             next unless recording?
 
             store = p[:store].to_s.demodulize
-            Lantern.record(:cache_event,
-              group: Record.group_hash(store, key_shape(key)),
+            cfg = Lantern.config
+            # One hash literal instead of kwargs-packing into Lantern.record --
+            # cache_event is a high-frequency type.
+            Lantern.push(:cache_event, {
+              v: CACHE_EVENT_VERSION,
+              t: "cache_event",
               timestamp: started_at(event),
+              deploy: cfg.deploy,
+              server: cfg.server,
+              _group: Record.group_hash(store, key_shape(key)),
+              **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
               store: store,
               key: key[0, 255],
               type: type_of.call(p),
               duration: micros(event),
               ttl: p[:expires_in].to_i,
-              hits: p[:hits].is_a?(Array) ? p[:hits].size : nil)
+              hits: p[:hits].is_a?(Array) ? p[:hits].size : nil
+            })
           end
         end
       end
@@ -61,11 +79,22 @@ module Lantern
 
       # Strip ids so "users/123" and "users/456" share a group.
       def key_shape(key)
-        key.gsub(/\b\d+\b/, "?").gsub(/[0-9a-f]{16,}/i, "?")
+        cached = @key_shape_cache[key]
+        return cached if cached
+
+        shape = key.gsub(/\b\d+\b/, "?").gsub(/[0-9a-f]{16,}/i, "?")
+        @key_shape_mutex.synchronize do
+          @key_shape_cache.clear if @key_shape_cache.size >= KEY_SHAPE_CACHE_LIMIT
+          @key_shape_cache[key] = shape
+        end
+        shape
       end
 
       def ignored_key?(key)
-        Lantern.config.ignored_cache_key_prefixes.any? { |pre| key.start_with?(pre) }
+        config = Lantern.config
+        return true if config.ignored_cache_key_prefixes.any? { |pattern| Configuration.match_cache_key?(pattern, key) }
+        return false if config.capture_default_vendor_cache_keys
+        Configuration::DEFAULT_VENDOR_CACHE_KEYS.any? { |pattern| pattern.match?(key) }
       end
     end
   end

@@ -17,7 +17,8 @@ module Lantern
     attr_reader :source, :id, :trace_id, :parent_id, :started_at, :started_mono, :counters,
                 :stages, :stage_durations, :query_groups, :records, :dropped_records
     attr_accessor :sampled, :exception_preview, :paused_depth,
-                  :peak_memory, :allocations_start, :gc_time_start
+                  :peak_memory, :allocations_start, :gc_time_start,
+                  :queue_latency, :exception_sampled, :parent_execution
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)
@@ -58,6 +59,7 @@ module Lantern
       @tenant = nil
       @records = []
       @dropped_records = 0
+      @transaction_statement_counts = Hash.new(0)
       @allocations_start = GC.stat(:total_allocated_objects)
       @gc_time_start = GC.stat(:time) if GC.stat.key?(:time)
     end
@@ -120,6 +122,18 @@ module Lantern
 
     def track_query_group(group)
       @query_groups[group] += 1
+    end
+
+    # Statement counting for the currently-open transaction(s), keyed by the
+    # AR transaction object's identity so nested/concurrent transactions on
+    # the same execution don't collide. Read once (at transaction end) and
+    # discarded, so this never grows across an execution's lifetime.
+    def count_transaction_statement(transaction_object_id)
+      @transaction_statement_counts[transaction_object_id] += 1
+    end
+
+    def transaction_statement_count(transaction_object_id)
+      @transaction_statement_counts.delete(transaction_object_id) || 0
     end
 
     def duration

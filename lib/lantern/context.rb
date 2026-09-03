@@ -6,6 +6,7 @@ module Lantern
   # Lantern records; Lantern.context writes to all three.
   module Context
     LIMIT = 65_536
+    EMPTY_JSON = "{}".freeze
 
     module_function
 
@@ -26,7 +27,9 @@ module Lantern
     end
 
     def serialized
-      json = JSON.generate(current)
+      ctx = current
+      return EMPTY_JSON if ctx.empty?
+      json = JSON.generate(ctx)
       json.bytesize > LIMIT ? json.byteslice(0, LIMIT) : json
     rescue StandardError
       "{}"

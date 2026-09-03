@@ -26,5 +26,7 @@ module Dummy
     config.active_record.strict_loading_by_default = false
     config.hosts.clear
     config.secret_key_base = "dummy"
+    config.solid_queue.connects_to = { database: { writing: :queue } }
+    config.filter_parameters += [ :secret_code ]
   end
 end

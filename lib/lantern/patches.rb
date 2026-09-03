@@ -2,6 +2,7 @@
 
 require "lantern/patches/net_http"
 require "lantern/patches/rake_task"
+require "lantern/patches/runner_command"
 require "lantern/patches/inertia"
 
 module Lantern
@@ -12,7 +13,19 @@ module Lantern
       ::Net::HTTP.prepend(NetHttp) unless ::Net::HTTP.ancestors.include?(NetHttp)
       require "rake"
       ::Rake::Task.prepend(RakeTask) unless ::Rake::Task.ancestors.include?(RakeTask)
+      install_runner_command!
       Inertia.install!
+    end
+
+    # rails/command/runner_command isn't always loaded (e.g. under a plain
+    # rake or server boot), so this is best-effort.
+    def install_runner_command!
+      require "rails/command/runner_command"
+      unless ::Rails::Command::RunnerCommand.ancestors.include?(RunnerCommand)
+        ::Rails::Command::RunnerCommand.prepend(RunnerCommand)
+      end
+    rescue LoadError, StandardError
+      nil
     end
   end
 end

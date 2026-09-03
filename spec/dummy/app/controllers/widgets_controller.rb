@@ -57,4 +57,30 @@ class WidgetsController < ApplicationController
     Lantern.ignore { Widget.count }
     render plain: "ok"
   end
+
+  def many
+    @gadgets = Gadget.all
+    render :many
+  end
+
+  def storage
+    ActiveStorage::Current.url_options = { host: "example.com" }
+    widget = Widget.first
+    widget.photo.attach(io: StringIO.new("fake image bytes"), filename: "photo.png", content_type: "image/png")
+    widget.photo.download
+    widget.photo.url
+    widget.photo.purge
+    render plain: "ok"
+  end
+
+  def override_sample
+    Lantern.dont_sample if params[:mode] == "dont"
+    Lantern.sample(1.0) if params[:mode] == "on"
+    Widget.count
+    render plain: "ok"
+  end
+
+  def upload
+    render plain: params[:attachment].original_filename
+  end
 end

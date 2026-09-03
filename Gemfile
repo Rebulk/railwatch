@@ -13,9 +13,12 @@ group :development, :test do
   gem "webmock"
   gem "rubocop-rails-omakase", require: false
   gem "debug", require: "debug/prelude"
+  gem "inertia_rails", "~> 3.21"
+  gem "faraday"
 end
 
 group :bench do
   gem "benchmark-ips"
   gem "memory_profiler"
+  gem "stackprof"
 end

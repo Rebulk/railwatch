@@ -1,0 +1,3 @@
+<%= render partial: "gadgets/gadget", locals: { gadget: @gadgets.first } %>
+<%= render partial: "gadgets/gadget", collection: @gadgets %>
+<% @gadgets.each do |gadget| %><%= render partial: "gadgets/gadget", locals: { gadget: gadget } %><% end %>

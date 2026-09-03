@@ -13,8 +13,12 @@ module Lantern
     WHITESPACE = /\s+/
     COMMENT = %r{/\*.*?\*/|--[^\n]*}m
 
-    CACHE_LIMIT = 5_000
-    @cache = {}
+    CACHE_LIMIT = 2_048
+    # Two-level cache (connection_name => { sql => [group_hash, normalized] })
+    # avoids building an interpolated "#{connection_name}\0#{sql}" key string
+    # on every query; almost every process only ever sees one connection_name,
+    # so the outer lookup is a single cheap hash hit.
+    @cache = Hash.new { |h, k| h[k] = {} }
     @cache_mutex = Mutex.new
 
     module_function
@@ -22,14 +26,22 @@ module Lantern
     # Same SQL text always maps to the same group, so the regex passes and the
     # digest run once per distinct statement per process.
     def group(sql, adapter: nil, connection_name: nil)
-      key = connection_name ? "#{connection_name}\0#{sql}" : sql
-      cached = @cache[key]
+      group_and_normalized(sql, adapter: adapter, connection_name: connection_name)[0]
+    end
+
+    # Returns [group_hash, normalized_sql] from a single cache lookup, so
+    # callers that need both (the query record and its possible n+1 sibling)
+    # never normalize or digest the same SQL twice.
+    def group_and_normalized(sql, adapter: nil, connection_name: nil)
+      bucket = @cache[connection_name]
+      cached = bucket[sql]
       return cached if cached
 
-      value = Record.group_hash(connection_name, normalize(sql, adapter: adapter))
+      normalized = normalize(sql, adapter: adapter)
+      value = [ Record.group_hash(connection_name, normalized), normalized ].freeze
       @cache_mutex.synchronize do
-        @cache.clear if @cache.size >= CACHE_LIMIT
-        @cache[key] = value
+        bucket.clear if bucket.size >= CACHE_LIMIT
+        bucket[sql] = value
       end
       value
     end

@@ -7,14 +7,29 @@ module Lantern
     RECORD_TYPES = %i[queries cache_events mail broadcasts notifications outgoing_requests
                       storage_ops view_renders logs transactions deprecations].freeze
 
+    # Framework/vendor noise excluded by default so a fresh install isn't
+    # dominated by Rails' own housekeeping. Both lists are opt-in to disable
+    # via capture_default_vendor_commands / capture_default_vendor_cache_keys.
+    DEFAULT_VENDOR_COMMANDS = %w[
+      db:migrate db:schema:load db:schema:dump db:seed db:prepare
+      assets:precompile assets:clobber tmp:cache:clear log:clear
+    ].freeze
+
+    DEFAULT_VENDOR_CACHE_KEYS = [
+      /\Arack::attack/, /\Aflipper/, /\Asolid_cable/,
+      /\Aactive_storage/, /\Amigration_/, /\Aschema_cache/
+    ].freeze
+
     attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
-                  :sample, :ignore, :log_level, :capture_request_payload,
+                  :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :redact_headers, :redact_params,
                   :buffer_size, :flush_interval, :flush_threshold,
                   :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
-                  :beacon_enabled, :debug
+                  :beacon_enabled, :debug, :capture_default_vendor_commands,
+                  :capture_default_vendor_cache_keys, :on_unrecoverable,
+                  :capture_framework_events
 
     attr_reader :user_resolver, :redactors, :rejectors, :before_ingest
 
@@ -32,7 +47,7 @@ module Lantern
         scheduled_tasks: env_float("LANTERN_SCHEDULED_TASK_SAMPLE_RATE", 1.0),
         exceptions: env_float("LANTERN_EXCEPTION_SAMPLE_RATE", 1.0)
       }
-      @ignore = RECORD_TYPES.select { |t| env_bool("LANTERN_IGNORE_#{t.to_s.upcase}", false) }
+      self.ignore = RECORD_TYPES.select { |t| env_bool("LANTERN_IGNORE_#{t.to_s.upcase}", false) }
       @log_level = (ENV["LANTERN_LOG_LEVEL"] || "info").to_sym
       @capture_request_payload = env_bool("LANTERN_CAPTURE_REQUEST_PAYLOAD", false)
       @capture_exception_source = env_bool("LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE", true)
@@ -47,7 +62,11 @@ module Lantern
       @slow_query_threshold_ms = env_float("LANTERN_SLOW_QUERY_MS", 5.0)
       @n_plus_one_threshold = env_int("LANTERN_N_PLUS_ONE_THRESHOLD", 5)
       @max_view_renders_per_execution = 20
-      @ignored_cache_key_prefixes = %w[rack::attack flipper/ solid_cable]
+      @ignored_cache_key_prefixes = []
+      @capture_default_vendor_commands = env_bool("LANTERN_CAPTURE_DEFAULT_VENDOR_COMMANDS", false)
+      @capture_default_vendor_cache_keys = env_bool("LANTERN_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS", false)
+      @capture_framework_events = env_bool("LANTERN_CAPTURE_FRAMEWORK_EVENTS", false)
+      @on_unrecoverable = nil
       @beacon_enabled = env_bool("LANTERN_BEACON", true)
       @debug = env_bool("LANTERN_DEBUG", false)
       @user_resolver = nil
@@ -64,8 +83,17 @@ module Lantern
       @enabled && token.present?
     end
 
+    attr_reader :ignore
+
+    # Stored alongside a frozen Set so the per-record ignored? check is a
+    # single Set lookup instead of an Array#include? scan on every record.
+    def ignore=(value)
+      @ignore = value
+      @ignored_set = Set.new(value).freeze
+    end
+
     def ignored?(type)
-      @ignore.include?(type)
+      @ignored_set.include?(type)
     end
 
     def sample_rate(kind)
@@ -74,6 +102,29 @@ module Lantern
 
     def environment_name
       @environment || (defined?(Rails) ? Rails.env.to_s : "production")
+    end
+
+    # Matches Lantern.reject_cache_keys entries and DEFAULT_VENDOR_CACHE_KEYS
+    # against a cache key. A Regexp is used as-is. A String starting with "^"
+    # or containing another regex metacharacter is compiled as a Regexp; a
+    # String ending in "*" matches as a prefix; any other String must match
+    # exactly (so "session:" no longer accidentally matches "usersession:").
+    CACHE_KEY_METACHARS = /[.?+()|{}\[\]]/
+    def self.match_cache_key?(pattern, key)
+      case pattern
+      when Regexp
+        pattern.match?(key)
+      when String
+        if pattern.start_with?("^") || CACHE_KEY_METACHARS.match?(pattern)
+          Regexp.new(pattern).match?(key)
+        elsif pattern.end_with?("*")
+          key.start_with?(pattern[0..-2])
+        else
+          key == pattern
+        end
+      else
+        false
+      end
     end
 
     private

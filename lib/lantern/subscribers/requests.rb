@@ -8,6 +8,11 @@ module Lantern
     module Requests
       extend Base
 
+      # Only a multipart request can carry an UploadedFile, so the (recursive)
+      # params walk below is skipped entirely for the vast majority of
+      # requests instead of running once per action.
+      EMPTY_FILES = [].freeze
+
       module_function
 
       def install!(_app)
@@ -17,8 +22,12 @@ module Lantern
           exe.enter_stage(:action)
           env = p[:request]&.env
           next unless env
-          env["lantern.route"] = { pattern: route_pattern(p[:request]), controller: p[:controller].to_s.delete_suffix("Controller").underscore, action: p[:action] }
+          env["lantern.route"] = { pattern: route_pattern(p[:request]), controller: p[:controller].to_s.delete_suffix("Controller").underscore, action: p[:action], verb: p[:method] }
           exe.preview = "#{p[:controller]}##{p[:action]}"
+          # Captured here, not in the closing middleware, because Rack's
+          # TempfileReaper (nested inside us) has already closed and unlinked
+          # upload tempfiles by the time the middleware unwinds.
+          env["lantern.files"] = env["CONTENT_TYPE"]&.start_with?("multipart/form-data") ? uploaded_files(p[:request].params) : EMPTY_FILES
         end
 
         subscribe("process_action.action_controller") do |event|
@@ -64,6 +73,21 @@ module Lantern
         request.route_uri_pattern
       rescue StandardError
         nil
+      end
+
+      def uploaded_files(value, name = nil)
+        case value
+        when ActionDispatch::Http::UploadedFile
+          [ { name: name, size: (value.tempfile.size rescue nil), content_type: value.content_type, error: nil } ]
+        when Hash
+          value.flat_map { |k, v| uploaded_files(v, k.to_s) }
+        when Array
+          value.flat_map { |v| uploaded_files(v, name) }
+        else
+          []
+        end
+      rescue StandardError
+        []
       end
     end
   end

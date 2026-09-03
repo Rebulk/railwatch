@@ -11,7 +11,7 @@ module Lantern
       module_function
 
       def install!(app)
-        boot = defined?(Rails) && Rails.respond_to?(:application) ? (Clock.now - $PROGRAM_START_TIME.to_f rescue nil) : nil
+        boot = Clock.monotonic - Lantern::BOOTED_AT
         Lantern.record(:process,
           pid: Process.pid,
           role: role,

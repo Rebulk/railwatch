@@ -14,6 +14,24 @@ RSpec.describe Lantern do
     it "treats $1 binds as placeholders on Postgres" do
       expect(described_class.normalize("SELECT 1 WHERE a = $1", adapter: "postgresql")).to eq("SELECT ? WHERE a = ?")
     end
+
+    it "returns the same group hash for a repeated exact SQL string, served from cache" do
+      a = described_class.group("SELECT * FROM users WHERE id = 1", connection_name: "primary")
+      b = described_class.group("SELECT * FROM users WHERE id = 1", connection_name: "primary")
+      expect(a).to eq(b)
+    end
+
+    it "returns the cached normalized SQL alongside the group hash" do
+      group, normalized = described_class.group_and_normalized("SELECT * FROM users WHERE id = 1")
+      expect(group).to eq(described_class.group("SELECT * FROM users WHERE id = 1"))
+      expect(normalized).to eq("SELECT * FROM users WHERE id = ?")
+    end
+
+    it "bounds its cache instead of growing without limit" do
+      bucket = described_class.instance_variable_get(:@cache)["primary"]
+      (described_class::CACHE_LIMIT + 5).times { |i| described_class.group("SELECT #{i}", connection_name: "primary") }
+      expect(bucket.size).to be <= described_class::CACHE_LIMIT
+    end
   end
 
   describe Lantern::Buffer do
@@ -93,6 +111,135 @@ RSpec.describe Lantern do
       expect(attempt[:status]).to eq("failed")
       expect(ex[:execution_id]).to eq(attempt[:execution_id])
       expect(ex[:execution_source]).to eq("job")
+    end
+  end
+
+  describe "job attempts" do
+    it "reports released, not failed, when retry_on catches the error and re-enqueues" do
+      FlakyJob.perform_later
+      perform_enqueued_jobs
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:status]).to eq("released")
+      expect(lantern_records(:exception)).to be_empty
+    end
+
+    it "measures queue_latency at perform-start, not after the job runs" do
+      SlowJob.perform_later
+      perform_enqueued_jobs
+      attempt = lantern_records(:job_attempt).sole
+      # queue_latency is the enqueue -> perform-start gap; duration is the
+      # perform itself (a 50ms sleep). If queue_latency were measured after
+      # the job ran instead of at perform-start, it would include the sleep
+      # and be roughly equal to (or larger than) duration.
+      expect(attempt[:queue_latency]).to be < attempt[:duration]
+      expect(attempt[:duration]).to be >= 50_000
+    end
+
+    it "reports the adapter as connection and includes the job's concurrency_key" do
+      ConcurrentJob.perform_later
+      perform_enqueued_jobs
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:connection]).to eq("Test")
+      expect(attempt[:concurrency_key]).to eq("ConcurrentJob/widget")
+    end
+
+    it "gives a pruned job attempt a fresh execution_id and trace_id" do
+      ActiveSupport::Notifications.instrument("fail_many_claimed.solid_queue", job_ids: [ 123 ], error: "worker died")
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:provider_job_id]).to eq("123")
+      expect(attempt[:status]).to eq("failed")
+      expect(attempt[:execution_id]).to be_a(String)
+      expect(attempt[:trace_id]).to be_a(String)
+    end
+  end
+
+  describe "process info" do
+    it "reports boot_seconds measured from Lantern::BOOTED_AT, not an unset global" do
+      Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+      proc_record = lantern_records(:process).sole
+      expect(proc_record[:boot_seconds]).to be_between(0, 60)
+    end
+  end
+
+  describe "bin/rails runner instrumentation" do
+    it "records a command execution for a runner invocation" do
+      fake = Class.new do
+        prepend Lantern::Patches::RunnerCommand
+        def perform(code_or_file = nil, *)
+          code_or_file
+        end
+      end
+      fake.new.perform("Widget.count")
+      cmd = lantern_records(:command).sole
+      expect(cmd).to include(name: "runner", class: "Rails::Command::RunnerCommand", exit_code: 0)
+      expect(cmd[:command]).to eq("rails runner Widget.count")
+    end
+  end
+
+  describe "exception code and sql_state" do
+    it "captures the errno for a SystemCallError" do
+      Lantern.report(Errno::ECONNREFUSED.new("refused"), handled: true)
+      ex = lantern_records(:exception).sole
+      expect(ex[:code]).to eq(Errno::ECONNREFUSED::Errno)
+    end
+  end
+
+  describe "transactions" do
+    it "reports statement_count for the writes made inside a transaction" do
+      require "rake"
+      Rake::Task.define_task(:lantern_txn_demo) do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "t1")
+          Widget.create!(name: "t2")
+          Widget.create!(name: "t3")
+        end
+      end
+      Rake::Task[:lantern_txn_demo].execute
+      txn = lantern_records(:transaction).sole
+      expect(txn[:outcome]).to eq("commit")
+      expect(txn[:statement_count]).to eq(3)
+      expect(txn[:_group]).to be_a(String)
+    end
+  end
+
+  describe "default vendor command exclusion" do
+    it "emits no command record for a default vendor rake task unless opted in" do
+      require "rake"
+      Rake::Task.define_task(:"db:migrate") { Widget.count }
+      Rake::Task[:"db:migrate"].execute
+      expect(lantern_records(:command)).to be_empty
+
+      Lantern.config.capture_default_vendor_commands = true
+      Rake::Task[:"db:migrate"].execute
+      expect(lantern_records(:command).sole[:name]).to eq("db:migrate")
+    ensure
+      Lantern.config.capture_default_vendor_commands = false
+    end
+  end
+
+  describe "self-monitoring" do
+    it "calls on_unrecoverable once when delivery still fails after its retry" do
+      stub_request(:post, "http://lantern.test/ingest").to_raise(StandardError.new("boom"))
+      errors = []
+      Lantern.on_unrecoverable { |e| errors << e }
+      Lantern::Transport::Http.new(Lantern.config).deliver([ { t: "log" } ])
+      expect(errors.map(&:message)).to eq([ "boom" ])
+    ensure
+      Lantern.config.on_unrecoverable = nil
+    end
+  end
+
+  describe "Lantern.instrument_outgoing" do
+    it "records an outgoing_request and returns the block's value" do
+      require "rake"
+      result = nil
+      Rake::Task.define_task(:lantern_outgoing_demo) do
+        result = Lantern.instrument_outgoing(:get, "https://api.example.test/things") { Struct.new(:status).new(204) }
+      end
+      Rake::Task[:lantern_outgoing_demo].execute
+      expect(result.status).to eq(204)
+      out = lantern_records(:outgoing_request).sole
+      expect(out).to include(host: "api.example.test", method: "GET", status_code: 204)
     end
   end
 end

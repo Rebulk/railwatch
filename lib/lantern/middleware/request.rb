@@ -7,9 +7,15 @@ module Lantern
     # unhandled exception, and emits the request record at the end.
     class Request
       IGNORED_PATHS = %w[/up /lantern/beacon].freeze
+      # Env keys repeat request after request (same client/proxy headers), so
+      # the Rack key -> "Header-Name" conversion is cached instead of
+      # split/map/capitalize/join-ing on every request.
+      HEADER_NAME_CACHE_LIMIT = 512
 
       def initialize(app)
         @app = app
+        @header_name_cache = {}
+        @header_name_mutex = Mutex.new
       end
 
       def call(env)
@@ -61,6 +67,8 @@ module Lantern
           url: req.original_url.to_s[0, 2048],
           path: req.path,
           route: pattern,
+          route_methods: [ route[:verb] ].compact,
+          route_domain: req.host,
           controller: controller,
           action: action,
           format: (req.format&.symbol rescue nil).to_s,
@@ -77,12 +85,17 @@ module Lantern
           inertia: inertia,
           headers: Lantern.redactor.headers(request_headers(env)),
           payload: payload,
-          user_agent: req.user_agent.to_s[0, 256]
+          user_agent: req.user_agent.to_s[0, 256],
+          files: env["lantern.files"] || uploaded_files(req.params)
         }
       end
 
       def inertia_fields(env, headers)
-        return nil unless env["HTTP_X_INERTIA"] == "true" || (headers && (headers["X-Inertia"] || headers["x-inertia"]))
+        # The X-Inertia response header is only set on the XHR-follow-up
+        # branch; a full-page (SSR or not) Inertia render never sets it, so
+        # the presence of the component env var (set on every Inertia
+        # render) also has to open this gate or SSR timing is silently lost.
+        return nil unless env["HTTP_X_INERTIA"] == "true" || (headers && (headers["X-Inertia"] || headers["x-inertia"])) || env["lantern.inertia_component"]
 
         {
           component: env["lantern.inertia_component"],
@@ -95,12 +108,41 @@ module Lantern
         }.compact
       end
 
-      def request_headers(env)
-        env.each_with_object({}) do |(k, v), out|
-          next unless k.start_with?("HTTP_") || %w[CONTENT_TYPE CONTENT_LENGTH].include?(k)
-          name = k.delete_prefix("HTTP_").split("_").map(&:capitalize).join("-")
-          out[name] = v
+      # Recursively pulls ActionDispatch::Http::UploadedFile metadata out of
+      # request.params -- never its contents. Handles both a single file
+      # field and array-of-files fields (e.g. `attachments[]`).
+      def uploaded_files(value, name = nil)
+        case value
+        when ActionDispatch::Http::UploadedFile
+          [ { name: name, size: (value.tempfile.size rescue nil), content_type: value.content_type, error: nil } ]
+        when Hash
+          value.flat_map { |k, v| uploaded_files(v, k.to_s) }
+        when Array
+          value.flat_map { |v| uploaded_files(v, name) }
+        else
+          []
         end
+      end
+
+      def request_headers(env)
+        out = {}
+        env.each_pair do |k, v|
+          next unless k.start_with?("HTTP_") || k == "CONTENT_TYPE" || k == "CONTENT_LENGTH"
+          out[header_name(k)] = v
+        end
+        out
+      end
+
+      def header_name(key)
+        cached = @header_name_cache[key]
+        return cached if cached
+
+        name = key.delete_prefix("HTTP_").split("_").map(&:capitalize).join("-")
+        @header_name_mutex.synchronize do
+          @header_name_cache.clear if @header_name_cache.size >= HEADER_NAME_CACHE_LIMIT
+          @header_name_cache[key] = name
+        end
+        name
       end
     end
   end

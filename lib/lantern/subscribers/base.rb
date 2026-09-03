@@ -10,6 +10,7 @@ module Lantern
           block.call(event)
         rescue StandardError => e
           Lantern.debug { "#{name} subscriber raised #{e.class}: #{e.message}" }
+          Lantern.notify_unrecoverable(e)
         end
       end
 

@@ -101,6 +101,16 @@ RSpec.describe "request instrumentation", type: :request do
     expect(req[:inertia][:props_bytes]).to be > 0
   end
 
+  it "times the Inertia SSR render for a full-page (non-XHR) visit" do
+    stub_request(:post, "http://ssr.test/render")
+      .to_return(status: 200, body: { head: [], body: "<div>ssr</div>" }.to_json, headers: { "Content-Type" => "application/json" })
+    get "/ssr_widgets"
+    expect(response.body).to include("<div>ssr</div>")
+    req = lantern_records(:request).sole
+    expect(req[:inertia][:ssr_ms]).to be_a(Numeric)
+    expect(req[:inertia][:ssr_ms]).to be >= 0
+  end
+
   it "ships nothing for a route sampled out with lantern_sample" do
     get "/sampled"
     expect(lantern_records).to be_empty
@@ -117,5 +127,30 @@ RSpec.describe "request instrumentation", type: :request do
     expect(lantern_records(:exception).size).to eq(1)
     expect(lantern_records(:request).size).to eq(1)
     expect(lantern_records(:query)).to be_empty
+  end
+
+  it "ships nothing for an unhandled exception when both requests and exceptions are sampled out" do
+    Lantern.config.sample[:requests] = 0.0
+    Lantern.config.sample[:exceptions] = 0.0
+    get "/boom"
+    expect(lantern_records).to be_empty
+  ensure
+    Lantern.config.sample[:exceptions] = 1.0
+  end
+
+  it "reports the request's verb, domain, and any uploaded files" do
+    file = Tempfile.new(%w[upload .txt])
+    file.write("hello")
+    file.rewind
+    post "/upload", params: { attachment: Rack::Test::UploadedFile.new(file.path, "text/plain") }
+    req = lantern_records(:request).sole
+    expect(req[:route_methods]).to eq([ "POST" ])
+    expect(req[:route_domain]).to eq("www.example.com")
+    expect(req[:files].size).to eq(1)
+    expect(req[:files].first).to include(name: "attachment", content_type: "text/plain")
+    expect(req[:files].first[:size]).to be > 0
+  ensure
+    file.close
+    file.unlink
   end
 end

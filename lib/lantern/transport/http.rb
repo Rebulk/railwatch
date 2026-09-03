@@ -25,6 +25,7 @@ module Lantern
           parse(response)
         rescue StandardError => e
           retry if attempt < 2
+          Lantern.notify_unrecoverable(e)
           Result.new(ok: false, error: "#{e.class}: #{e.message}")
         end
       end

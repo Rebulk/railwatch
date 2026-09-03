@@ -15,13 +15,24 @@ module Lantern
       cleaner ? cleaner.clean(frames) : frames
     end
 
-    # First application frame as "app/models/user.rb:12", or nil.
+    # First application frame as "app/models/user.rb:12", or nil. 25 frames
+    # is enough to clear framework internals in practice and keeps the walk
+    # (and the array it allocates) cheap on the hot query path.
+    # The gem's own directory, so frames inside Lantern are skipped by prefix
+    # rather than by a substring that would also match any app whose
+    # checkout happens to live under a folder named "lantern".
+    GEM_ROOT = File.expand_path("../..", __dir__) + "/"
+
+    def gem_root
+      GEM_ROOT
+    end
+
     def caller_location(skip: 2)
       locations = caller_locations(skip, 40) or return nil
       locations.each do |loc|
         path = loc.path
         next unless path.start_with?(app_root)
-        next if path.include?("/lantern/")
+        next if path.start_with?(gem_root) && !path.start_with?(app_root + "spec/dummy/")
         return "#{path.delete_prefix(app_root)}:#{loc.lineno}"
       end
       nil

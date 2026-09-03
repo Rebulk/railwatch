@@ -2,6 +2,7 @@
 
 require "digest"
 require "set"
+require "uri"
 require "active_support"
 require "active_support/core_ext/object/blank"
 require "active_support/isolated_execution_state"
@@ -21,10 +22,20 @@ require "lantern/redactor"
 require "lantern/sql_normalizer"
 require "lantern/backtrace"
 require "lantern/context"
+# Faraday::Middleware doesn't exist unless the host app depends on Faraday,
+# and Lantern::Faraday subclasses it at load time -- so this only loads when
+# Faraday is already available (Bundler.require runs before an app's own
+# `require "lantern"`, so this is reliable in the normal boot order).
+require "lantern/faraday" if defined?(::Faraday)
 
 # Public API. Mirrors the Laravel Nightwatch facade: user, sample, dontSample,
 # ignore, pause, resume, report, redact*, reject*, plus context and deploy.
 module Lantern
+  # Monotonic clock reading taken the moment this file loads, i.e. as early in
+  # process boot as Lantern can observe. `process` records measure boot_seconds
+  # from here, not from an unset global.
+  BOOTED_AT = Clock.monotonic
+
   class << self
     def config
       @config ||= Configuration.new
@@ -65,6 +76,12 @@ module Lantern
       exe = Execution.new(source: source, sampled: Sampler.decide(sample_kind),
                           trace_id: trace_id, parent_id: parent_id, preview: preview)
       exe.tenant = Context.current_tenant
+      # A job (or command) can run inline, nested inside a request's own
+      # execution -- e.g. ActiveJob::TestHelper's inline test adapter, or a
+      # controller action that calls perform_now. Remembering the execution
+      # this one is nested inside lets finish_execution restore it instead of
+      # clearing the thread-local outright and losing the outer parent.
+      exe.parent_execution = Current.execution
       Current.execution = exe
       exe
     end
@@ -84,12 +101,14 @@ module Lantern
         exe.records.each { |r| reporter.write(r) }
         reporter.buffer.instance_variable_set(:@dropped, reporter.buffer.dropped + exe.dropped_records) if exe.dropped_records.positive?
         reporter.write(parent) if parent
-      elsif parent && exe.counters[:exceptions].positive?
+      elsif parent && exe.exception_sampled
         reporter.write(parent)
       end
       parent
     ensure
-      Current.clear
+      # Restores the execution this one was nested inside (nil at the
+      # outermost level, which behaves the same as the old Current.clear).
+      Current.execution = exe&.parent_execution
     end
 
     # --- record writing --------------------------------------------------------
@@ -98,22 +117,27 @@ module Lantern
     # Every other type is dropped when nothing is executing, matching Nightwatch.
     STANDALONE_TYPES = %i[process user visit exception].freeze
 
+    # Low-level write for a record hash the caller already built (hot-path
+    # subscribers assemble one hash literal instead of packing kwargs, then
+    # hand it here). Same enabled/ignored/recording/redact checks as record.
+    def push(type, rec)
+      return unless enabled?
+
+      exe = Current.execution
+      return unless recordable?(type, exe)
+
+      finish(type, rec, exe)
+    end
+
     # Write a child record for the current execution. Silently no-ops when
     # disabled, sampled out, paused, or the type is ignored.
     def record(type, group: nil, timestamp: nil, **fields)
       return unless enabled?
 
       exe = Current.execution
-      return if exe.nil? && !STANDALONE_TYPES.include?(type)
-      return if exe && !exe.recording?
-      return if config.ignored?(type_plural(type))
+      return unless recordable?(type, exe)
 
-      rec = Record.build(type, exe, group: group, timestamp: timestamp, **fields)
-      rec = run_redactors(type, rec) or return
-      return if rejected?(type, rec)
-
-      exe ? exe.buffer(rec) : reporter.write(rec)
-      rec
+      finish(type, Record.build(type, exe, group: group, timestamp: timestamp, **fields), exe)
     end
 
     def build_parent(type, exe, group: nil, **fields)
@@ -200,6 +224,43 @@ module Lantern
       config.ignored_cache_key_prefixes.concat(Array(prefixes))
     end
 
+    # --- self-monitoring --------------------------------------------------------
+
+    def on_unrecoverable(&block)
+      config.on_unrecoverable = block
+    end
+
+    # Called (rescued) whenever the gem itself rescues an internal exception:
+    # a subscriber block raising, or delivery failing after its retry.
+    # Falls back to the debug log when no callback is registered.
+    def notify_unrecoverable(error)
+      if config.on_unrecoverable
+        config.on_unrecoverable.call(error)
+      else
+        debug { "unrecoverable internal error: #{error.class}: #{error.message}" }
+      end
+    rescue StandardError => e
+      debug { "on_unrecoverable callback raised #{e.class}: #{e.message}" }
+    end
+
+    # --- outgoing request helper -------------------------------------------------
+
+    # For HTTP clients without a dedicated patch (e.g. Faraday adapters other
+    # than Net::HTTP). Wraps the block, returns its value untouched, and
+    # records an outgoing_request child when the result exposes a status.
+    def instrument_outgoing(method, url)
+      start = Clock.monotonic
+      started_at = Clock.now
+      result = yield
+      if result.respond_to?(:status)
+        host = (URI(url.to_s).host rescue nil)
+        record(:outgoing_request, group: Record.group_hash(host, method.to_s.upcase),
+               timestamp: started_at, host: host, method: method.to_s.upcase,
+               url: url.to_s[0, 2048], duration: Clock.micros_since(start), status_code: result.status.to_i)
+      end
+      result
+    end
+
     def before_ingest(&block)
       config.before_ingest << block
     end
@@ -238,8 +299,31 @@ module Lantern
       PLURALS.fetch(type, type)
     end
 
+    # Shared by push and record: is this type allowed to be written right now?
+    def recordable?(type, exe)
+      return false if exe.nil? && !STANDALONE_TYPES.include?(type)
+      return false if exe && !exe.recording?
+      !config.ignored?(type_plural(type))
+    end
+
+    # Shared tail of push and record: redact/reject, then buffer or ship.
+    def finish(type, rec, exe)
+      unless config.redactors.empty? && config.rejectors.empty?
+        rec = run_redactors(type, rec) or return
+        return if rejected?(type, rec)
+      end
+
+      exe ? exe.buffer(rec) : reporter.write(rec)
+      rec
+    end
+
+    # config.redactors/rejectors default their Hash on write (Lantern.redact_*)
+    # so a registered type gets its own array; #fetch on read means a type
+    # with no hooks never triggers that default proc and allocates one.
+    EMPTY_HOOKS = [].freeze
+
     def run_redactors(type, rec)
-      hooks = config.redactors[type_plural(type)]
+      hooks = config.redactors.fetch(type_plural(type), EMPTY_HOOKS)
       return rec if hooks.empty?
       hooks.each { |h| h.call(rec) }
       rec
@@ -249,7 +333,7 @@ module Lantern
     end
 
     def rejected?(type, rec)
-      hooks = config.rejectors[type_plural(type)]
+      hooks = config.rejectors.fetch(type_plural(type), EMPTY_HOOKS)
       return false if hooks.empty?
       hooks.any? { |h| h.call(rec) }
     rescue StandardError
