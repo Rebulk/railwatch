@@ -4,4 +4,12 @@ require "bundler/setup"
 require "rspec/core/rake_task"
 
 RSpec::Core::RakeTask.new(:spec)
+
+desc "Overhead and no-app-DB-writes gates"
+task :bench do
+  %w[bench/overhead.rb bench/no_db_writes.rb].each do |script|
+    sh "bundle exec ruby #{script}"
+  end
+end
+
 task default: :spec
