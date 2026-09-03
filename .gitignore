@@ -1,0 +1,4 @@
+tmp/
+spec/dummy/log/
+spec/dummy/storage/
+spec/dummy/tmp/

@@ -89,7 +89,35 @@ class WidgetsController < ApplicationController
     render plain: "ok"
   end
 
+  before_action :halt_it, only: :halted
+  rate_limit to: 1, within: 1.minute, only: :rate_limited
+
+  def redirected
+    redirect_to "/widgets"
+  end
+
+  def halted
+    render plain: "unreachable"
+  end
+
+  def unpermitted
+    params.permit(:allowed)
+    render plain: "ok"
+  end
+
+  def rate_limited
+    render plain: "ok"
+  end
+
   private
+
+  # Rendering here (not throw(:abort)) is what halts the process_action
+  # callback chain -- its terminator checks controller.performed?, it does
+  # not catch :abort the way the default ActiveSupport::Callbacks terminator
+  # does.
+  def halt_it
+    render plain: "halted", status: :forbidden
+  end
 
   # Deprecation callstacks report the caller of the deprecated method, not
   # the method's own definition site, so this needs its own frame between

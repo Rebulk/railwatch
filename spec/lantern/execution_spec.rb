@@ -114,6 +114,12 @@ RSpec.describe Lantern::Execution do
   end
 
   describe "#capture_memory" do
+    # sampled_memory memoizes across the whole process (at most once per
+    # MEMORY_SAMPLE_INTERVAL), so each example must force a fresh sample --
+    # otherwise whichever example runs first within that window decides the
+    # sample every other example in this block observes.
+    before { Lantern::Execution.instance_variable_set(:@memory_sampled_at, 0.0) }
+
     it "returns the process RSS in bytes on Linux" do
       exe = new_execution
       exe.capture_memory
@@ -123,7 +129,6 @@ RSpec.describe Lantern::Execution do
 
     it "keeps the last good sample when /proc/self/statm becomes unreadable" do
       exe = new_execution
-      Lantern::Execution.instance_variable_set(:@memory_sampled_at, 0.0)
       Lantern::Execution.instance_variable_set(:@memory_sample, nil)
       allow(File).to receive(:read).with("/proc/self/statm").and_raise(Errno::ENOENT)
 
