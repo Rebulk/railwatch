@@ -62,12 +62,6 @@ RSpec.describe "scheduled_task record" do
   end
 
   it "computes drift between the scheduled run and the actual perform" do
-    pending "bug: the spec-plan requires a scheduled_task :drift field (difference between the " \
-            "recurring task's scheduled run_at and when it actually started performing), but " \
-            "Lantern::Subscribers::Jobs never computes or ships one -- grep for \"drift\" across " \
-            "lib/ and app/ turns up nothing. SolidQueue::RecurringExecution#run_at is available at " \
-            "perform time (the same join recurring_task_key already performs), so drift could be " \
-            "computed as queue_latency is, in the perform_start.active_job subscriber."
     job = WidgetJob.new("bob")
     register_recurring("widget_recurring", job)
 

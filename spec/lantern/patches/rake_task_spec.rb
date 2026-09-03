@@ -64,14 +64,6 @@ RSpec.describe Lantern::Patches::RakeTask do
   end
 
   it "ships one command record per task instead of nesting a prerequisite inside its dependent's execution" do
-    pending "bug: Lantern::Patches::RakeTask's own comment says \"nested tasks (prerequisites) run " \
-            "inside\" the top-level task's command execution, guarded by `Lantern.execution.nil?` in " \
-            "#execute. But Rake::Task#invoke_with_call_chain calls invoke_prerequisites (which fully " \
-            "invokes AND executes each prerequisite, finishing its own Lantern execution via the " \
-            "`ensure` block) BEFORE calling the dependent task's own #execute -- so by the time the " \
-            "parent's #execute runs, Lantern.execution is nil again and it starts a second, unrelated " \
-            "top-level command execution. Only #execute is patched; prerequisites are dispatched via " \
-            "#invoke, which Lantern never intercepts, so nesting never actually happens."
     Rake::Task.define_task(:lantern_spec_child) { Rails.logger.info("child") }
     Rake::Task.define_task(lantern_spec_parent: :lantern_spec_child) { Rails.logger.info("parent") }
 

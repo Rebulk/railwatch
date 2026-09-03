@@ -112,10 +112,7 @@ RSpec.describe Lantern::Configuration do
   end
 
   describe "#ignore=" do
-    it "silently accepts a type outside RECORD_TYPES instead of rejecting it loudly" do
-      pending "bug: Configuration#ignore= has no validation against RECORD_TYPES, so " \
-              "Lantern.configure { |c| c.ignore = [:not_a_real_type] } is accepted without error or warning " \
-              "instead of the documented 'rejects unknown types loudly' behaviour"
+    it "raises ArgumentError for a type outside RECORD_TYPES" do
       config = described_class.new
       expect { config.ignore = [ :not_a_real_type ] }.to raise_error(ArgumentError)
     end

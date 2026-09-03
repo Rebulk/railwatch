@@ -35,18 +35,19 @@ module Lantern
 
         subscribe("perform_start.active_job") do |event|
           job = event.payload[:job]
-          scheduled = recurring_task_key(job)
+          key, run_at = recurring_task_key(job)
           exe = Lantern.start_execution(
-            source: scheduled ? :scheduled_task : :job,
-            sample_kind: scheduled ? :scheduled_tasks : :jobs,
+            source: key ? :scheduled_task : :job,
+            sample_kind: key ? :scheduled_tasks : :jobs,
             trace_id: job.respond_to?(:lantern_trace_id) ? job.lantern_trace_id : nil,
             parent_id: job.respond_to?(:lantern_parent_id) ? job.lantern_parent_id : nil,
             preview: job.class.name)
           exe.enter_stage(:action)
           exe.user_id = Users.resolve_from_current
           exe.queue_latency = queue_latency_micros(job)
+          exe.drift = drift_micros(run_at) if key
           job.instance_variable_set(:@__lantern_execution, exe)
-          job.instance_variable_set(:@__lantern_recurring_key, scheduled)
+          job.instance_variable_set(:@__lantern_recurring_key, key)
         end
 
         subscribe("perform.active_job") do |event|
@@ -84,7 +85,7 @@ module Lantern
           }
           if key
             Lantern.finish_execution(:scheduled_task, group: Record.group_hash(key), task_key: key,
-                                     schedule: schedule_for(key), **fields)
+                                     schedule: schedule_for(key), drift: exe.drift, **fields)
           else
             Lantern.finish_execution(:job_attempt, group: Record.group_hash(job.class.name), **fields)
           end
@@ -150,6 +151,16 @@ module Lantern
         nil
       end
 
+      # Difference between the recurring task's scheduled run_at and when
+      # this perform actually started, in the same units and at the same
+      # point in the lifecycle as queue_latency_micros.
+      def drift_micros(run_at)
+        return nil unless run_at
+        ((Clock.now - run_at.to_f) * 1_000_000).round
+      rescue StandardError
+        nil
+      end
+
       def arguments_preview(job)
         job.arguments.map { |a| a.respond_to?(:to_global_id) ? a.to_global_id.to_s : a.class.name }.first(10)
       rescue StandardError
@@ -158,14 +169,15 @@ module Lantern
 
       # A job is a scheduled task when Solid Queue recorded a RecurringExecution
       # for it. Cheap lookup by job_id, memoised per job, only when Solid Queue
-      # is the adapter and recurring tasks are configured.
+      # is the adapter and recurring tasks are configured. Returns [task_key,
+      # run_at], or nil when there is no matching RecurringExecution.
       def recurring_task_key(job)
         return nil unless defined?(::SolidQueue::RecurringExecution)
         return nil if recurring_keys.empty?
-        return job.class.name if job.is_a?(::SolidQueue::RecurringJob)
+        return [ job.class.name, nil ] if job.is_a?(::SolidQueue::RecurringJob)
         return nil unless recurring_job_classes.include?(job.class.name)
         Lantern.ignore do
-          ::SolidQueue::RecurringExecution.joins(:job).where(solid_queue_jobs: { active_job_id: job.job_id }).pick(:task_key)
+          ::SolidQueue::RecurringExecution.joins(:job).where(solid_queue_jobs: { active_job_id: job.job_id }).pick(:task_key, :run_at)
         end
       rescue StandardError
         nil

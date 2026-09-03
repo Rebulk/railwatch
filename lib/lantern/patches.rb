@@ -17,10 +17,13 @@ module Lantern
       Inertia.install!
     end
 
-    # rails/command/runner_command isn't always loaded (e.g. under a plain
-    # rake or server boot), so this is best-effort.
+    # rails/commands/runner/runner_command isn't always loaded (e.g. under a
+    # plain rake or server boot), so this is best-effort. "rails/command"
+    # must be required first -- it declares the autoload for Base that
+    # RunnerCommand subclasses, and isn't guaranteed loaded yet this early.
     def install_runner_command!
-      require "rails/command/runner_command"
+      require "rails/command"
+      require "rails/commands/runner/runner_command"
       unless ::Rails::Command::RunnerCommand.ancestors.include?(RunnerCommand)
         ::Rails::Command::RunnerCommand.prepend(RunnerCommand)
       end

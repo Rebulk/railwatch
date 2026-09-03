@@ -79,13 +79,6 @@ RSpec.describe "outgoing_request record" do
   end
 
   it "computes a caller source location for an outgoing request" do
-    pending "bug: Backtrace.caller_location excludes any frame whose path includes the literal " \
-            "substring \"/lantern/\", meant to skip the gem's own lib/lantern/ source. This repo's " \
-            "own checkout directory is named \"lantern\", so every calling frame -- including this " \
-            "spec file itself -- also matches that substring and gets excluded too, leaving :source " \
-            "permanently nil for every outgoing_request record (same root cause already documented " \
-            "in records/query_spec.rb)."
-
     Lantern.start_execution(source: :command, sample_kind: :commands)
     Net::HTTP.get(URI("http://example.test/widgets"))
     finish!

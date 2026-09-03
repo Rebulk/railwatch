@@ -67,15 +67,7 @@ RSpec.describe Lantern::Transport::Http do
       expect(result.error).to include("Net::OpenTimeout")
     end
 
-    it "has no HTTP-status-aware retry policy: 5xx responses are never retried" do
-      pending "bug/missing feature: Transport::Http#deliver only retries when the request itself " \
-              "raises (timeout, connection error). An HTTP 5xx comes back as an ordinary Net::HTTP " \
-              "response (no exception), so #parse just returns a failed Result and #deliver never " \
-              "retries it -- the documented '5xx retried once' behaviour does not exist. There is " \
-              "also no persistent backoff state anywhere in Transport::Http or Reporter, so a 402 " \
-              "(quota) response cannot 'back off for 60s' before the next flush attempt, and a 401 " \
-              "has no special handling to stop future attempts either -- every status code is " \
-              "treated identically as a single failed, non-retried Result."
+    it "retries a 5xx response once and succeeds on the retry" do
       stub_request(:post, "http://lantern.test/ingest")
         .to_return({ status: 503, body: "unavailable" }, { status: 200, body: '{"accepted":1}' })
 

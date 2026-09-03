@@ -39,9 +39,9 @@ module Lantern
       at_exit { Lantern.reporter.shutdown if Lantern.enabled? }
     end
 
-    rake_tasks do
-      load File.expand_path("../tasks/lantern_tasks.rake", __dir__)
-    end
+    # lib/tasks/lantern_tasks.rake is already picked up by Rails::Engine's
+    # default lib/tasks convention (Rails::Engine#run_tasks_blocks), so no
+    # explicit rake_tasks registration is needed here.
   end
 end
 

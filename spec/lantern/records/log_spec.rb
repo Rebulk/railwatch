@@ -18,6 +18,7 @@ RSpec.describe "log record" do
   end
 
   it "drops lines below config.log_level and keeps lines at or above it" do
+    old_log_level = Lantern.config.log_level
     Lantern.config.log_level = "warn"
     Lantern.start_execution(source: :command, sample_kind: :commands)
     Rails.logger.info("should be dropped")
@@ -26,7 +27,7 @@ RSpec.describe "log record" do
 
     expect(lantern_records(:log).map { |r| r[:message] }).to eq([ "should be kept" ])
   ensure
-    Lantern.config.log_level = "debug"
+    Lantern.config.log_level = old_log_level
   end
 
   it "strips ANSI color codes and captures current_tags when the logger supports tagged logging" do

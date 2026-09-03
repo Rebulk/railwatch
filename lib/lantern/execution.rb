@@ -18,7 +18,7 @@ module Lantern
                 :stages, :stage_durations, :query_groups, :records, :dropped_records
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
-                  :queue_latency, :exception_sampled, :parent_execution
+                  :queue_latency, :drift, :exception_sampled, :parent_execution
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)
@@ -172,6 +172,7 @@ module Lantern
         trace_id: @trace_id,
         execution_source: @source.name,
         execution_id: @id,
+        parent_id: @parent_id,
         execution_preview: @preview,
         execution_stage: @current_stage&.name,
         user: @user_id,

@@ -46,13 +46,7 @@ RSpec.describe Lantern::JobTracing, type: :request do
     expect(attempt[:trace_id]).to eq(req[:trace_id])
   end
 
-  it "does not surface the enqueuing execution's id on the shipped job_attempt record" do
-    pending "bug: Execution#parent_id is captured (job_tracing.rb sets lantern_parent_id from " \
-            "the enqueuing exe.id, and perform_start.active_job passes it into Execution.new " \
-            "as parent_id:), but Execution#envelope never includes parent_id, so no shipped " \
-            "record -- job_attempt or otherwise -- ever carries the id of the execution that " \
-            "enqueued it. trace_id links attempt to request correctly, but there is no field " \
-            "that lets a consumer walk from a job_attempt back to the specific parent execution_id."
+  it "surfaces the enqueuing execution's id as parent_id on the shipped job_attempt record" do
     get "/enqueue"
     req = lantern_records(:request).sole
 

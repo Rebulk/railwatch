@@ -16,19 +16,10 @@ RSpec.describe "command record" do
     expect(Widget.exists?(name: "from_rake")).to be(true)
   end
 
-  it "never installs Lantern::Patches::RunnerCommand on Rails::Command::RunnerCommand, because the require path is wrong" do
-    pending "bug: Lantern::Patches.install_runner_command! does `require \"rails/command/runner_command\"` " \
-            "(singular \"command\"), but Rails 8.1's real file is " \
-            "rails/commands/runner/runner_command.rb (plural \"commands\", nested under a runner/ " \
-            "directory) -- there is no rails/command/runner_command.rb anywhere in railties. The " \
-            "require always raises LoadError, which install_runner_command!'s `rescue LoadError, " \
-            "StandardError; nil` swallows silently, so Rails::Command::RunnerCommand is NEVER " \
-            "prepended at boot. Every `bin/rails runner ...` invocation in this Rails version runs " \
-            "completely uninstrumented -- no command record, no exception capture -- with no error " \
-            "or log line anywhere to indicate it. Fix: require \"rails/commands/runner/runner_command\"."
-      require "rails/command"
-      require "rails/commands/runner/runner_command"
-      expect(Rails::Command::RunnerCommand.ancestors).to include(Lantern::Patches::RunnerCommand)
+  it "installs Lantern::Patches::RunnerCommand on Rails::Command::RunnerCommand at boot" do
+    require "rails/command"
+    require "rails/commands/runner/runner_command"
+    expect(Rails::Command::RunnerCommand.ancestors).to include(Lantern::Patches::RunnerCommand)
   end
 
   context "once Rails::Command::RunnerCommand is actually prepended (simulating the require path being fixed)" do

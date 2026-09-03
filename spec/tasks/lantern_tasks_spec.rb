@@ -36,22 +36,7 @@ RSpec.describe "lantern rake tasks" do
       expect(WebMock).to have_requested(:get, "http://lantern.test/ingest/ping").at_least_once
     end
 
-    it "pending: invokes its ping exactly once per rake invocation" do
-      pending "bug: Lantern::Engine (lib/lantern/engine.rb) registers lib/tasks/lantern_tasks.rake " \
-              "twice for every task. Its explicit `rake_tasks do load File.expand_path(...) end` block " \
-              "is redundant -- Rails::Engine#run_tasks_blocks (railties-8.1.3.1/lib/rails/engine.rb:685-686) " \
-              "already auto-loads every *.rake file under an engine's lib/tasks directory by convention " \
-              "(`paths[\"lib/tasks\"].existent.sort.each { |ext| load(ext) }`, run right after the explicit " \
-              "rake_tasks blocks via `super`). Because Rake's `task name do .. end` APPENDS a block to an " \
-              "existing task's actions instead of replacing them, lantern_tasks.rake being loaded twice " \
-              "means Rake::Task[\"lantern:status\"].actions.size == 2 (confirmed by instrumenting Kernel#load " \
-              "and Rails::Application#run_tasks_blocks: two `load` calls for the same absolute path, one from " \
-              "Lantern::Engine's own block, one from Rails::Engine's automatic lib/tasks glob). A single " \
-              "`rake lantern:status` invocation therefore pings and prints \"Lantern OK\" twice, and a single " \
-              "`rake lantern:deploy` POSTs the deploy payload twice. Fix: delete the `rake_tasks do ... end` " \
-              "block from lib/lantern/engine.rb entirely -- lib/tasks/lantern_tasks.rake is already picked up " \
-              "by Rails::Engine's default convention with no explicit registration needed."
-
+    it "invokes its ping exactly once per rake invocation" do
       stub_request(:get, "http://lantern.test/ingest/ping").to_return(status: 200, body: "ok")
 
       Rake::Task["lantern:status"].invoke
@@ -89,11 +74,7 @@ RSpec.describe "lantern rake tasks" do
       }.at_least_once
     end
 
-    it "pending: posts the deploy payload exactly once per rake invocation" do
-      pending "bug: same double lib/tasks/lantern_tasks.rake registration described on the " \
-              "lantern:status pending spec above -- a single `rake lantern:deploy` invocation POSTs " \
-              "to /ingest/deploys twice, not once."
-
+    it "posts the deploy payload exactly once per rake invocation" do
       stub_request(:post, "http://lantern.test/ingest/deploys").to_return(status: 200, body: "ok")
 
       Rake::Task["lantern:deploy"].invoke("myref", "myname", "myurl")

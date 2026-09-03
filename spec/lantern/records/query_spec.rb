@@ -47,14 +47,6 @@ RSpec.describe "query record", type: :request do
   end
 
   it "computes a caller source location for a query shape" do
-    pending "bug: Backtrace.caller_location excludes any frame whose path includes the literal " \
-            "substring \"/lantern/\", meant to skip the gem's own lib/lantern/ source. This repo's " \
-            "own checkout directory is named \"lantern\", so every file under spec/dummy/ -- " \
-            "including every app frame that could ever be a query's source -- also matches that " \
-            "substring and gets excluded too, leaving :source permanently nil for every query and " \
-            "n_plus_one record in this dummy app (and for any real app deployed to a path containing " \
-            "\"/lantern/\", e.g. /opt/lantern/app). The check should scope to the gem's own install " \
-            "path (e.g. via a precomputed lib/lantern/ prefix) instead of a bare substring match."
     get "/many"
     sources = lantern_records(:query).select { |r| r[:sql].include?("FROM \"gadgets\"") }.map { |r| r[:source] }
     expect(sources.compact).not_to be_empty

@@ -88,6 +88,9 @@ module Lantern
     # Stored alongside a frozen Set so the per-record ignored? check is a
     # single Set lookup instead of an Array#include? scan on every record.
     def ignore=(value)
+      unknown = Array(value) - RECORD_TYPES
+      raise ArgumentError, "unknown record type(s): #{unknown.join(', ')}" if unknown.any?
+
       @ignore = value
       @ignored_set = Set.new(value).freeze
     end
