@@ -29,6 +29,11 @@ RSpec.describe "exception fingerprinting" do
   describe "normalize_message" do
     def normalize(message) = exceptions.normalize_message(message)
 
+    it "collapses a SQL bind list so an IN (...) of any length groups together" do
+      expect(normalize("no such table: logs_fts: ... WHERE id IN (?,?)")).to eq(normalize("no such table: logs_fts: ... WHERE id IN (?, ?, ?, ?)"))
+      expect(normalize("WHERE id IN (1, 2, 3)")).to eq("WHERE id IN (?)")
+    end
+
     it "replaces a UUID" do
       expect(normalize("order 3f1b6c1e-6b6e-4f2a-9c3d-2b7a1f0e5d44 missing")).to eq("order ? missing")
     end

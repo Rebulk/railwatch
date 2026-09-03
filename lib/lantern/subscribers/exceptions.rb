@@ -234,6 +234,10 @@ module Lantern
         /\b\d+\b/                                            # plain integers
       ].freeze
 
+      # After the rules above every value in a SQL bind list is "?", so
+      # collapse "(?, ?, ?)" to "(?)": an IN (...) groups the same at any length.
+      BIND_LIST = /\(\s*\?(?:\s*,\s*\?)*\s*\)/
+
       # Classes whose message is mostly the data that varied -- the record
       # that wasn't found, the key that was missing, the receiver that had no
       # method. For those the default key keeps only the message prefix, up
@@ -248,7 +252,7 @@ module Lantern
 
       def normalize_message(message)
         text = MESSAGE_NOISE.inject(message.to_s) { |m, pattern| m.gsub(pattern, "?") }
-        text.gsub(/\s+/, " ").strip[0, 200]
+        text.gsub(BIND_LIST, "(?)").gsub(/\s+/, " ").strip[0, 200]
       end
 
       def message_key(error)
