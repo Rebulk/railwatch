@@ -1,0 +1,475 @@
+# Record types
+
+Every record Lantern ships is a flat hash (`lib/lantern/record.rb`). This
+lists all 21, field by field, sourced from the subscriber or patch that
+builds each one. Field names below are the hash keys as sent over the
+wire (symbols in Ruby, strings in the gzip NDJSON payload).
+
+## Shared envelope
+
+Every record carries these (`Record.build`, `lib/lantern/record.rb`):
+
+| Field | Meaning |
+|---|---|
+| `v` | Record schema version for this type (`Record::VERSIONS`). |
+| `t` | Type string, e.g. `"query"`. |
+| `timestamp` | Unix seconds (float) when the event started. |
+| `deploy` | `Lantern.config.deploy` — `LANTERN_DEPLOY`, `KAMAL_VERSION`, or `GIT_REV`. |
+| `server` | `Lantern.config.server` — hostname by default. |
+| `_group` | 128-bit grouping hash (MD5 of type-specific parts, `Record.group_hash`) the platform uses to bucket occurrences into one issue/row. |
+
+Records created inside an execution (everything except the four parent
+types, plus `user`/`process`/`visit`, which stand alone) also merge in the
+execution's envelope (`Execution#envelope`, `lib/lantern/execution.rb`):
+
+| Field | Meaning |
+|---|---|
+| `trace_id` | Shared by a request and every job it enqueues (`JobTracing`), so a chain of async work traces back to the request that started it. |
+| `execution_source` | `"request"`, `"job"`, `"scheduled_task"`, or `"command"`. |
+| `execution_id` | UUID of the parent execution this child belongs to. |
+| `parent_id` | UUID of the execution that enqueued this one (e.g. the request that enqueued a job), or nil. |
+| `execution_preview` | Human label for the parent, e.g. `"GET /posts"` or `"PostsController#index"`. |
+| `execution_stage` | Lifecycle stage active when the record was created (`middleware_before`, `action`, `render`, `middleware_after`, ...). |
+| `user` | Resolved user id (`Subscribers::Users`), or nil. |
+| `tenant` | `Lantern.context(tenant: ...)` / `Context.current_tenant`, or nil. |
+
+## Parent records
+
+`request`, `job_attempt`, `scheduled_task`, and `command` are the four
+parent types (`Lantern::PARENT_TYPES`). Each opens an `Execution` and, in
+addition to its own fields below, always carries (`Lantern.build_parent`,
+`lib/lantern.rb`):
+
+| Field | Meaning |
+|---|---|
+| `duration` | Wall time in microseconds, execution start to finish. |
+| `stages` | Hash of stage name → microseconds spent in it (e.g. `{"middleware_before" => 120, "action" => 4300, "render" => 900}`). |
+| `counters` | Hash of child-record counts for this execution — `queries`, `cached_queries`, `exceptions`, `logs`, `cache_events`, `jobs_enqueued`, `mail`, `broadcasts`, `notifications`, `outgoing_requests`, `storage_ops`, `view_renders`, `transactions`, `hydrated_models`, `lazy_loads`, `deprecations` (`Execution::COUNTERS`). Counted even when the execution is sampled out, so aggregate rates don't depend on the sample rate. |
+| `peak_memory` | RSS in bytes, sampled at most once per second process-wide (`Execution.sampled_memory`) — cheap enough to read but not per-execution-accurate to the microsecond. |
+| `allocations` | Objects allocated during the execution (`GC.stat(:total_allocated_objects)` delta). |
+| `gc_time` | GC time in the execution's window, when the Ruby build exposes `GC.stat(:time)`. |
+| `exception_preview` | First unhandled exception's `"Class: message"`, truncated to 255 chars, or nil. |
+| `context` | Serialized `Lantern.context(...)` key/values active for this execution. |
+
+A sampled-out execution still ships its parent record if it raised an
+unhandled exception (`Lantern.finish_execution`) — sampling controls
+whether child records ship, not whether an error is visible.
+
+### `request`
+
+Built by the outermost Rack middleware (`lib/lantern/middleware/request.rb`),
+which also owns the `middleware_before`/`action`/`render`/`middleware_after`
+stage boundaries (the `action`/`render` boundaries come from
+`start_processing.action_controller` and `render_template.action_view` in
+`lib/lantern/subscribers/requests.rb`).
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of `method` + route `pattern`. |
+| `method` | HTTP verb. |
+| `url` | Full request URL, truncated to 2048 chars. |
+| `path` | Request path. |
+| `route` | Matched route pattern (`request.route_uri_pattern`), or `"unmatched"` for a 404. |
+| `route_methods` | Array with the route's declared verb, if known. |
+| `route_domain` | `request.host`. |
+| `controller` | Controller name, `Controller` suffix stripped, underscored. |
+| `action` | Action name. |
+| `format` | Negotiated response format (`"html"`, `"json"`, ...). |
+| `ip` | `request.remote_ip`. |
+| `status_code` | Response status. |
+| `request_size` / `response_size` | Bytes, from `Content-Length`. |
+| `view_runtime` / `db_runtime` | Milliseconds, from Action Controller's own `process_action.action_controller` payload. |
+| `redirect_to` | Redirect target, truncated to 512 chars, if `redirect_to` was called. |
+| `halted_callback` | Filter that halted the callback chain (`throw :abort`), if any. |
+| `unpermitted_parameters` | Array of param keys strong parameters rejected. |
+| `rate_limited` | `{name:, count:, to:}` if `ActionController::RateLimiting` fired, else nil. |
+| `inertia` | Present only on an Inertia request (`X-Inertia` header or an Inertia render happened): `{component, version, partial_component, partial_only, partial_except, props_bytes, ssr_ms}`. `ssr_ms` is only set when `inertia_rails` SSR actually rendered this request (`lib/lantern/patches/inertia.rb`). |
+| `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/lantern/redactor.rb`). |
+| `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
+| `user_agent` | Truncated to 256 chars. |
+| `files` | Array of `{name, size, content_type, error}` for each uploaded file (metadata only, never contents). |
+
+### `job_attempt`
+
+One per Active Job `perform` (`perform.active_job`,
+`lib/lantern/subscribers/jobs.rb`), for jobs Solid Queue's own recurring
+scheduler didn't originate (see `scheduled_task` below for the ones it did).
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the job class name. |
+| `job_id` | Active Job's `job_id`. |
+| `provider_job_id` | Queue adapter's own id (e.g. Solid Queue job row id). |
+| `attempt_id` | This execution's id (same as `execution_id`). |
+| `attempt` | `job.executions` — the retry count. |
+| `name` | Job class name. |
+| `queue` | Queue name. |
+| `adapter` / `connection` | Queue adapter class, demodulized, `Adapter` suffix stripped (both fields carry the same value). |
+| `concurrency_key` | If the job responds to `concurrency_key` (e.g. `good_job`/custom concurrency controls). |
+| `priority` | Job priority. |
+| `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = a `retry_on` caught the error internally — see `enqueue_retry.active_job` below). |
+| `queue_latency` | Microseconds between `scheduled_at`/`enqueued_at` and this attempt starting. |
+| `db_runtime` | Milliseconds of DB time during the attempt, from Active Job's own payload. |
+| `arguments_preview` | Up to 10 arguments — GlobalID string for AR objects/GlobalID-capable arguments, class name otherwise (never raw argument values). |
+
+Also has a special case with no `Execution`: **Solid Queue pruned jobs**
+(`fail_many_claimed.solid_queue`) never reach `perform.active_job` because
+their worker was killed or reaped. Each gets its own throwaway execution
+and reports `job_attempt` with `job_id: nil`, `name: "(pruned)"`,
+`status: "failed"`, `duration: 0`, and `exception_preview` set to the
+pruning error, truncated to 255 chars.
+
+### `scheduled_task`
+
+Same `perform.active_job` subscriber as `job_attempt`, but for a job
+Solid Queue's `RecurringExecution` table shows was triggered by
+`config/recurring.yml` rather than an ad hoc enqueue (`recurring_task_key`,
+`lib/lantern/subscribers/jobs.rb`). Carries every `job_attempt` field
+above, plus:
+
+| Field | Meaning |
+|---|---|
+| `task_key` | The `config/recurring.yml` key. |
+| `group` | Hash of the task key (not the class name). |
+| `schedule` | The task's configured schedule string (e.g. `"every day at 3am"`), looked up from `SolidQueue::RecurringTask`, refreshed at most once per 60s. |
+| `drift` | Microseconds between the task's scheduled `run_at` and when this attempt actually started. |
+
+### `command`
+
+One per top-level `bin/rails runner` invocation or Rake task invocation
+(prerequisites nest inside the same command instead of opening their own —
+see `lib/lantern/patches/rake_task.rb`'s comment on `Rake::Task#invoke`
+vs `#execute`). `db:migrate` and other tasks in
+`Configuration::DEFAULT_VENDOR_COMMANDS` are skipped unless
+`config.capture_default_vendor_commands` is on.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the task/command name. |
+| `class` | `"Rake::Task"` or `"Rails::Command::RunnerCommand"`. |
+| `name` | Task name, or `"runner"`. |
+| `command` | Full invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`. |
+| `exit_code` | 0 on success, `SystemExit`'s status, or 1 on an unhandled exception, clamped to 0-255. |
+
+## Child records
+
+### `query`
+
+Every non-cached `sql.active_record` notification except `SCHEMA`,
+`TRANSACTION`, and `EXPLAIN` statements (`lib/lantern/subscribers/queries.rb`).
+The hottest record type in the gem — built as one hash literal rather than
+going through `Lantern.record`.
+
+| Field | Meaning |
+|---|---|
+| `_group` | Hash of the normalized SQL shape + adapter + connection (`SqlNormalizer`). |
+| `sql` | Raw SQL text, truncated to 16,384 chars. |
+| `name` | ActiveRecord's own query name (e.g. `"User Load"`). |
+| `duration` | Microseconds. |
+| `connection` | Database config name (e.g. `"primary"`). |
+| `adapter` | `"sqlite"`, `"postgresql"`, etc. |
+| `async` | Whether this was an async query (`load_async`). |
+| `row_count` | Rows returned, when the adapter reports it. |
+| `affected_rows` | Rows affected (writes), when the adapter reports it. |
+| `in_transaction` | Whether an open transaction wrapped this statement. |
+| `source` | App-code call site that issued the query (`Backtrace.caller_location`) — resolved once per query shape per process, not per query, except when the query is slow (`config.slow_query_threshold_ms`), where it's always resolved fresh. |
+| `allocations` | Ruby object allocations for this query (`event.allocations`). |
+
+A cached query (`payload[:cached]`) only increments the execution's
+`cached_queries` counter — it never becomes a `query` record.
+
+### `n_plus_one`
+
+Fired once per query group when its count within the current execution
+crosses `config.n_plus_one_threshold` (`lib/lantern/subscribers/queries.rb`)
+— not on every repeat, just the crossing.
+
+| Field | Meaning |
+|---|---|
+| `group` | Same group hash as the triggering `query` record. |
+| `sql` | Normalized (parameter-stripped) SQL shape, truncated to 2048 chars. |
+| `count` | How many times this group had run in the execution when the threshold was crossed. |
+| `source` | App-code call site. |
+
+### `transaction`
+
+One per `transaction.active_record` (`lib/lantern/subscribers/queries.rb`).
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of connection name + outcome. |
+| `duration` | Microseconds. |
+| `outcome` | `"commit"`, `"rollback"`, etc. (`payload[:outcome]`). |
+| `connection` | Database config name. |
+| `statement_count` | Number of `sql.active_record` statements counted against this transaction object while it was open. |
+
+### `exception`
+
+Every error that reaches `Rails.error` (handled or not), plus anything
+the request middleware or command patches catch directly
+(`lib/lantern/subscribers/exceptions.rb`). Standalone-capable — reports
+even with no execution open (console, boot). Deduplicated per error
+object (`error.instance_variable_get(:@__lantern_seen)`), so a re-raised
+error is only captured once. Unhandled exceptions bypass the execution
+buffer (`Lantern.record_now`) so a crashing process still reports even if
+it never reaches the point where buffered records would flush.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of class + top in-app frame's file/line + normalized message (digits and hex replaced with `?`). |
+| `class` | Exception class name. |
+| `message` | Truncated to 4096 chars. |
+| `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
+| `severity` | `:error`/`:warning`/etc., as a string. |
+| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"lantern.middleware"`. |
+| `file` / `line` | Top in-app backtrace frame. |
+| `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. |
+| `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
+| `context` | Serialized `Lantern.context(...)` active when the error was captured. |
+| `code` | `Errno` constant, or `error.errno`/`error.code` if the error exposes one. |
+| `sql_state` | Postgres SQLSTATE, for `ActiveRecord::StatementInvalid` wrapping a driver error that exposes one (not populated for SQLite). |
+| `ruby_version` / `rails_version` | Process versions. |
+
+A handled exception on a sampled-out execution is dropped entirely
+(matching everything else); an *unhandled* one still ships, governed by
+its own `exceptions` sample rate rolled once per execution
+(`exception_sampled?`).
+
+### `cache_event`
+
+Every `cache_*.active_support` notification except the inner read inside
+a `fetch` (`lib/lantern/subscribers/cache.rb`). Vendor cache key prefixes
+(rack-attack, flipper, solid_cable, by default) are skipped unless
+`config.capture_default_vendor_cache_keys` is on; keys matching
+`config.ignored_cache_key_prefixes` are always skipped.
+
+| Field | Meaning |
+|---|---|
+| `_group` | Hash of store class + key shape (digits/long-hex stripped so `"users/123"` and `"users/456"` share a group). |
+| `store` | Cache store class, demodulized. |
+| `key` | Truncated to 255 chars. |
+| `type` | `"hit"`, `"miss"`, `"read_multi"`, `"generate"`, `"write"`, `"write_multi"`, `"delete"`, `"delete_multi"`, `"delete_matched"`, `"increment"`, `"decrement"`, or `"exist"`. |
+| `duration` | Microseconds. |
+| `ttl` | Seconds, from `expires_in`, or 0. |
+| `hits` | Count of hits, for a `read_multi`. |
+
+### `mail`
+
+`deliver.action_mailer` (`lib/lantern/subscribers/mail.rb`).
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the mailer class name. |
+| `mailer` | Mailer class name. |
+| `subject` | Truncated to 255 chars. |
+| `to` / `cc` / `bcc` | Recipient **counts**, not addresses. |
+| `attachments` | Attachment count. |
+| `delivery_method` | E.g. `"SMTP"`, `"Test"`. |
+| `perform_deliveries` | Whether delivery actually ran (`perform_deliveries` wasn't disabled). |
+| `duration` | Microseconds. |
+| `failed` | Whether an exception occurred during delivery. |
+| `message_id` | Truncated to 255 chars. |
+
+A mailer's own template render is a separate `view_render` record (see
+below) via `process.action_mailer`, `kind: "mailer"`.
+
+### `broadcast`
+
+Action Cable broadcast/transmit/perform, which also covers Turbo Streams
+and `inertia_cable` since both go through `broadcast.action_cable`
+(`lib/lantern/subscribers/broadcasts.rb`). Three sub-shapes share the type:
+
+| Field | Present for | Meaning |
+|---|---|---|
+| `kind` | all | `"broadcast"`, `"transmit"`, or `"perform_action"`. |
+| `group` | all | Hash of stream shape (broadcast) or channel class (+ action). |
+| `stream` | broadcast | Broadcasting name, ids stripped, truncated to 255 chars. |
+| `bytes` | broadcast, transmit | Payload size. |
+| `coder` | broadcast | Serializer class name. |
+| `channel` | transmit, perform_action | Channel class name. |
+| `via` | transmit | How the transmit happened (`payload[:via]`), truncated to 255 chars. |
+| `action` | perform_action | Channel action name. |
+| `duration` | all | Microseconds. |
+
+### `notification`
+
+Noticed gem deliveries only (`lib/lantern/subscribers/notifications.rb`)
+— tagged by hooking the same `perform.active_job` event the `job_attempt`
+subscriber uses, filtered to jobs whose class starts with `Noticed::`.
+No-ops entirely if the `noticed` gem isn't loaded.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the Noticed delivery job's class name. |
+| `notifier` | The `notification_class` from the job's first argument, if present. |
+| `delivery_method` | Delivery job class, demodulized (e.g. `"EmailDelivery"`). |
+| `duration` | Microseconds. |
+| `failed` | Whether the delivery job raised. |
+
+### `outgoing_request`
+
+Any `Net::HTTP#request` call (covers Faraday's default adapter, HTTParty,
+RestClient, most of the HTTP ecosystem — `lib/lantern/patches/net_http.rb`),
+plus Faraday connections that explicitly add `Lantern::Faraday` middleware
+(`lib/lantern/faraday.rb`, for apps using a non-default Faraday adapter).
+Requests to Lantern's own ingest URL are always skipped so shipping
+telemetry never generates telemetry about itself. A Faraday connection
+using the default (Net::HTTP) adapter defers to the Net::HTTP patch via a
+thread-local reentry flag, so it's never double-recorded.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of host + method. |
+| `host` | Request host. |
+| `method` | HTTP verb. |
+| `url` | Scheme + host + path (query string stripped), truncated to 2048 chars. |
+| `duration` | Microseconds. |
+| `status_code` | Response status, 0 if the request errored before a response. |
+| `request_size` | Bytes (Net::HTTP path only). |
+| `response_size` | Bytes, from `Content-Length` or body size. |
+| `error` | `"Class: message"`, truncated to 255 chars, if the request raised. |
+| `source` | App-code call site (Net::HTTP path only). |
+
+### `storage_op`
+
+Every Active Storage service operation
+(`lib/lantern/subscribers/storage.rb`): upload, download, streaming
+download, delete, delete_prefixed, exist, url, update_metadata, analyze,
+transform, preview.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of service name + op. |
+| `service` | Active Storage service name. |
+| `op` | Operation, `service_` prefix stripped (e.g. `"upload"`, `"analyze"`). |
+| `key` | Blob key, truncated to 255 chars. |
+| `duration` | Microseconds. |
+| `exist` | For `exist` ops, whether the blob existed. |
+
+### `view_render`
+
+Template, partial, layout, and collection renders
+(`lib/lantern/subscribers/views.rb`), plus mailer template renders
+(`process.action_mailer`, `lib/lantern/subscribers/mail.rb`, `kind:
+"mailer"`). Only the first `config.max_view_renders_per_execution` per
+execution are stored as records — all are still counted toward the
+parent's `view_renders` counter regardless of the cap.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the template identifier. |
+| `identifier` | Template path, app-root prefix stripped, truncated to 255 chars. Mailer renders use `"Mailer#action"` instead. |
+| `kind` | `"template"`, `"partial"`, `"layout"`, `"collection"`, or `"mailer"`. |
+| `layout` | Layout name, for a `render_layout` event. |
+| `count` | Item count, for a `render_collection` event. |
+| `cache_hits` | Fragment cache hits, for a `render_collection` event. |
+| `duration` | Microseconds. |
+
+### `log`
+
+Two independent sources feed this type (`lib/lantern/subscribers/logs.rb`):
+`Rails.logger` lines, captured by broadcasting to a `Logger` subclass
+that intercepts every `add` call, and Rails 8.1's structured
+`Rails.event` framework events. Lines matching Rails' own per-request/job
+noise (`"Started GET"`, `"Processing by"`, `"Rendered"`, etc. — already
+covered by the `request`/`job_attempt` records) are dropped, as are lines
+below `config.log_level` and Lantern's own `[lantern]`-prefixed debug
+output. Framework structured events (`action_controller.*`,
+`active_record.*`, etc.) are dropped unless `config.capture_framework_events`
+is on, for the same reason.
+
+| Field | Meaning |
+|---|---|
+| `level` | `"debug"`/`"info"`/`"warn"`/`"error"`/`"fatal"`/`"unknown"` for a logger line, `"event"` for a structured event. |
+| `message` | Logger line text (ANSI color codes stripped), or the event name, truncated to 8192 chars. |
+| `tags` | Active `Rails.logger.tagged` tags, for a logger line; the event's own tags, for a structured event. |
+| `context` | Serialized `Lantern.context(...)`, for a logger line; the event payload as JSON (truncated to 8192 chars), for a structured event. |
+| `source` | File:line the structured event fired from, when available (structured events only). |
+
+### `enqueued_job`
+
+`enqueue`/`enqueue_at`/`enqueue_all.active_job`
+(`lib/lantern/subscribers/jobs.rb`) — one record per job enqueued, distinct
+from `job_attempt`/`scheduled_task` which record the later `perform`.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the job class name. |
+| `job_id` | Active Job's `job_id`. |
+| `name` | Job class name. |
+| `queue` | Queue name. |
+| `adapter` | Queue adapter class, demodulized. |
+| `priority` | Job priority. |
+| `scheduled_at` | Unix timestamp, for a delayed enqueue. |
+| `duration` | Microseconds spent in the enqueue call itself. |
+| `failed` | Whether enqueuing itself failed (an exception during enqueue, or `successfully_enqueued?` returning false). |
+
+### `user`
+
+Standalone — emitted once per distinct user id per process-hour
+(`lib/lantern/subscribers/users.rb`), not per request, so the platform
+can show names/emails without every other record carrying them. Resolved
+via `config.user` block if set, else `Current.user` (authentication-zero
+/ Rails 8 auth generator), else Warden (Devise).
+
+| Field | Meaning |
+|---|---|
+| `id` | Resolved user id, tenant-prefixed (`"tenant:id"`) if `Lantern.context(tenant:)` is set. |
+| `name` | Truncated to 255 chars. |
+| `email` | Truncated to 255 chars. |
+| `tenant` | Current tenant context, if any. |
+
+### `deprecation`
+
+`deprecation.rails` (`lib/lantern/subscribers/deprecations.rb`).
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of gem name + first 120 chars of the message. |
+| `message` | Truncated to 2048 chars. |
+| `gem_name` | Gem the deprecation came from. |
+| `horizon` | Deprecation horizon version string. |
+| `source` | First app-code frame in the deprecation's callstack, app-root prefix stripped. |
+
+### `visit`
+
+Standalone — Inertia page-visit timing reported by the browser client
+(`app/frontend/lib/lantern.ts`, generated by `lantern:install`), POSTed
+to `POST /lantern/beacon` and recorded server-side by
+`Lantern::BeaconController` (`app/controllers/lantern/beacon_controller.rb`).
+Batched client-side (flushed every 5s, on `pagehide`, or once 20 visits
+queue up) and capped at 50 visits per beacon request. No-ops entirely if
+`config.beacon_enabled` is off.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the Inertia component name. |
+| `component` | Truncated to 255 chars. |
+| `url` | Truncated to 2048 chars. |
+| `method` | Truncated to 10 chars. |
+| `duration` | Microseconds, client-measured (`Date.now()` start to `finish`). |
+| `status` | `"success"`, `"error"`, or `"cancelled"` (visit was superseded before finishing). |
+| `partial` | Whether this was a partial Inertia reload (`only`/`except` present). |
+| `only` | Up to 50 prop keys, for a partial reload. |
+| `props_bytes` | Serialized prop payload size, client-measured. |
+| `user` | Resolved server-side from the beacon request's session/cookies, same resolver as every other record. |
+| `tenant` | Current tenant context. |
+| `user_agent` | Truncated to 256 chars. |
+
+### `process`
+
+Standalone — one per process boot (`lib/lantern/subscribers/process_info.rb`),
+fired unconditionally during subscriber installation, not gated on
+sampling. Gives the platform a server/deploy inventory for free.
+
+| Field | Meaning |
+|---|---|
+| `pid` | Process id. |
+| `role` | `"web"` (Puma present), `"worker"` (Solid Queue supervisor, `$PROGRAM_NAME` includes `"jobs"`), `"console"`, `"command"` (`$PROGRAM_NAME` ends in `rake`), or `"process"`. |
+| `ruby_version` / `rails_version` / `lantern_version` | Versions. |
+| `app` | Top-level module name of the Rails app. |
+| `environment` | `config.environment_name` (defaults to `Rails.env`). |
+| `boot_seconds` | Monotonic time since `Lantern::BOOTED_AT` (this file's load time, i.e. as early in boot as the gem can observe). |
+| `database_adapter` | Primary DB adapter name. |
+| `queue_adapter` | Active Job queue adapter name. |
+| `cache_store` | `Rails.cache` class name. |

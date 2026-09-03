@@ -2,6 +2,11 @@
 
 ## 0.1.0 (unreleased)
 
+- Added `docs/records.md` (every wire record type, field by field) and
+  `docs/configuration.md` (every `Configuration` attribute, the public
+  facade, sampling, transport, Inertia beacon/SSR, the overhead gate, the
+  Kamal hook, and the rake tasks); README tightened to point at both,
+  plus a new "Replacing Sentry" section.
 - Initial release: requests, jobs, scheduled tasks, commands, queries (with
   N+1 detection), transactions, exceptions, cache, mail, Action Cable
   broadcasts, Noticed notifications, outgoing HTTP, Active Storage, view

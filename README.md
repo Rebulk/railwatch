@@ -40,49 +40,52 @@ generated `app/frontend/lib/lantern.ts`. Server-side rendering is timed
 automatically wherever `inertia_rails` SSR is already enabled — no extra
 configuration needed.
 
-Framework/vendor noise is excluded by default so a fresh install isn't
-dominated by Rails' own housekeeping: default vendor rake tasks (`db:migrate`,
-`assets:precompile`, ...) never get a `command` record, and default vendor
-cache-key prefixes (`rack::attack`, `flipper`, `active_storage`, ...) never
-get a `cache_event` record. Opt back in per app:
-
-```ruby
-Lantern.configure do |c|
-  c.capture_default_vendor_commands = true     # LANTERN_CAPTURE_DEFAULT_VENDOR_COMMANDS
-  c.capture_default_vendor_cache_keys = true    # LANTERN_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS
-end
-```
-
-Drop your own noisy cache keys the same way, in addition to the vendor list.
-A trailing `*` matches as a prefix, a string starting with `^` (or containing
-another regex metacharacter) is compiled as a `Regexp`, and anything else must
-match the key exactly:
-
-```ruby
-Lantern.reject_cache_keys(%w[session: rack::attack* ^feature_flag_\d+$])
-```
-
-`Lantern.on_unrecoverable` is Lantern watching itself: it's called whenever an
-internal error is rescued (a subscriber raising, or delivery failing after its
-retry) instead of only being logged to `Lantern.debug`:
-
-```ruby
-Lantern.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
-```
-
 Outgoing HTTP made through Faraday is instrumented by adding
 `Lantern::Faraday` to the connection's middleware stack (`Net::HTTP` is
-already covered globally, with no setup):
+already covered globally, with no setup); any other client can be wrapped
+with `Lantern.instrument_outgoing`:
 
 ```ruby
 Faraday.new(url) { |f| f.use Lantern::Faraday }
-```
-
-For any other HTTP client, wrap the call directly:
-
-```ruby
 Lantern.instrument_outgoing(:get, url) { http_client.get(url) }
 ```
+
+Every attribute, the full public facade, sampling, redaction/rejection,
+transport/buffering behavior, the overhead gate, and the Kamal deploy hook
+are documented field-by-field in [`docs/configuration.md`](docs/configuration.md).
+Every record type Lantern ships — `request`, `job_attempt`, `query`,
+`exception`, and the rest — is documented field-by-field, sourced directly
+from the code that builds it, in [`docs/records.md`](docs/records.md).
+
+## Replacing Sentry
+
+Lantern subscribes to `Rails.error` on install
+(`Rails.error.subscribe`), so any existing `Rails.error.report` or
+`Rails.error.handle` call — which is how Sentry's own Rails integration
+is normally wired in — is captured with no code changes. An unhandled
+exception ships immediately, bypassing sampling and buffering, so a
+crashing process reports even if it never reaches a normal flush.
+
+What differs from a dedicated error tracker: exceptions aren't reported in
+isolation — each one is linked (`execution_id`/`trace_id`) to the request,
+job, or command it happened inside, alongside every query, cache read,
+outgoing request, and log line from that same execution. There's no
+separate error-tracking SDK/config to maintain — `severity`, `handled`,
+and `context` all come from the same `Lantern.configure` block and
+`Lantern.context` calls used for everything else the gem instruments.
+
+To report an exception manually (the `Rails.error.report`-equivalent):
+
+```ruby
+Lantern.report(error, handled: true, context: { order_id: order.id })
+```
+
+`severity` defaults to `:warning` when `handled: true`, `:error`
+otherwise. See the `exception` section of
+[`docs/records.md`](docs/records.md) for the full field list, and
+[`docs/configuration.md`](docs/configuration.md) for redaction
+(`Lantern.redact_exceptions`), `capture_exception_source`, and
+`Lantern.on_unrecoverable` (Lantern watching its own internal failures).
 
 ## Development
 
