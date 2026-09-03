@@ -13,6 +13,9 @@ module Lantern
       def request(req, body = nil, &block)
         return super if Thread.current[REENTRY] || !Lantern.enabled? || lantern_self_request?
         exe = Lantern.execution
+        # Before the recording? gate: a sampled-out execution still propagates
+        # its trace context, just with the "not sampled" flag.
+        Lantern::Patches::NetHttp.propagate_trace(req, address)
         return super if exe && !exe.recording?
 
         Thread.current[REENTRY] = true
@@ -37,6 +40,16 @@ module Lantern
         address == ingest.host && port == ingest.port
       rescue StandardError
         false
+      end
+
+      # Never overwrites a traceparent the app set itself.
+      def self.propagate_trace(req, host)
+        return if req.key?("traceparent")
+
+        traceparent = Lantern.traceparent(host)
+        req["traceparent"] = traceparent if traceparent
+      rescue StandardError => e
+        Lantern.debug { "traceparent propagation failed: #{e.message}" }
       end
 
       def self.record(http, req, response, error, start, started_at)

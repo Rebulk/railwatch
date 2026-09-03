@@ -92,14 +92,17 @@ module Lantern
 
     # Ends the execution. A sampled-in execution ships all of its buffered
     # child records plus the parent; a sampled-out one ships only the parent,
-    # and only if it raised (so every unhandled exception has a parent).
+    # and only if it raised (so every unhandled exception has a parent) --
+    # unless the tail decision (tail_keep?) rescues the whole tree.
     def finish_execution(parent_type = nil, group: nil, **fields)
       exe = Current.execution
       return Current.clear unless exe
 
       exe.capture_memory
+      tail = !exe.sampled? && tail_keep?(exe)
+      fields[:tail_sampled] = true if tail
       parent = parent_type && build_parent(parent_type, exe, group: group, **fields)
-      if exe.sampled?
+      if exe.sampled? || tail
         exe.records.each { |r| reporter.write(r) }
         reporter.buffer.instance_variable_set(:@dropped, reporter.buffer.dropped + exe.dropped_records) if exe.dropped_records.positive?
         reporter.write(parent) if parent
@@ -169,6 +172,13 @@ module Lantern
 
     def dont_sample
       Current.execution&.sampled = false
+    end
+
+    # Tail sampling: keep this execution (and everything buffered for it)
+    # whatever the head decision was. Records made before this call were only
+    # buffered if tail sampling was already on for the execution.
+    def keep!
+      Current.execution&.keep!
     end
 
     def sampling?
@@ -263,6 +273,50 @@ module Lantern
       result
     end
 
+    # --- custom spans -------------------------------------------------------
+
+    SPAN_MAX_ATTRIBUTES = 25
+    SPAN_MAX_VALUE = 200
+
+    # Times an arbitrary block as a `span` child record and returns the
+    # block's value. A no-op wrapper (still yields) when Lantern is disabled
+    # or nothing is recording.
+    #
+    #   Lantern.span("pdf.render", pages: 12) { renderer.call }
+    def span(name, **attributes)
+      return yield unless enabled?
+
+      exe = Current.execution
+      return yield unless exe&.recording?
+
+      start = Clock.monotonic
+      started_at = Clock.now
+      status = "failed"
+      begin
+        result = yield
+        status = "ok"
+        result
+      ensure
+        exe.count(:spans)
+        record(:span, group: Record.group_hash(name), timestamp: started_at,
+               name: name.to_s[0, 255], duration: Clock.micros_since(start),
+               attributes: span_attributes(attributes), status: status)
+      end
+    end
+
+    # --- distributed tracing --------------------------------------------------
+
+    # W3C traceparent for an outgoing request to `host`: nil when propagation
+    # is off, no execution is running, or the host isn't on the allow list.
+    def traceparent(host)
+      return nil unless config.propagate_traces
+
+      exe = Current.execution
+      return nil unless exe && propagate_to?(host)
+
+      "00-#{exe.trace_id.delete('-')}-#{exe.id.delete('-')[0, 16]}-#{exe.sampled? ? '01' : '00'}"
+    end
+
     def before_ingest(&block)
       config.before_ingest << block
     end
@@ -291,7 +345,40 @@ module Lantern
 
     private
 
+    # Tail decision for a head-sampled-out execution. Only executions that
+    # were buffering for the tail can be rescued -- with tail sampling off
+    # nothing was buffered, and the exception_sampled path above still ships
+    # the lone parent exactly as it did before.
+    def tail_keep?(exe)
+      return false unless exe.tail_buffering?
+      return true if exe.keep || exe.exception_sampled
+
+      slow = config.tail_sample_slow_ms
+      !slow.nil? && exe.duration >= slow * 1_000
+    end
+
+    # Same treatment exception locals get: stringified, truncated, capped,
+    # and run through the app's parameter filter.
+    def span_attributes(attributes)
+      return nil if attributes.empty?
+
+      raw = attributes.first(SPAN_MAX_ATTRIBUTES).to_h do |k, v|
+        s = v.is_a?(String) ? v : v.inspect
+        [ k.to_s, s.length > SPAN_MAX_VALUE ? s[0, SPAN_MAX_VALUE] : s ]
+      end
+      redactor.params(raw)
+    end
+
+    def propagate_to?(host)
+      allowed = config.trace_propagation_hosts
+      return true if allowed.nil?
+
+      host = host.to_s
+      allowed.any? { |h| h.start_with?(".") ? host.end_with?(h) : host == h }
+    end
+
     PLURALS = {
+      request: :requests, exception: :exceptions, command: :commands,
       query: :queries, n_plus_one: :queries, transaction: :transactions, cache_event: :cache_events,
       mail: :mail, broadcast: :broadcasts, notification: :notifications, outgoing_request: :outgoing_requests,
       storage_op: :storage_ops, view_render: :view_renders, log: :logs, deprecation: :deprecations

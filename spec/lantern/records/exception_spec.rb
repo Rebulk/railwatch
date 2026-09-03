@@ -75,6 +75,66 @@ RSpec.describe "exception record", type: :request do
     expect(ex[:sql_state]).to be_nil # sqlite3's adapter error does not expose #sql_state
   end
 
+  describe "ignored_exceptions" do
+    # Around a config change, so a leaked list can't silence later examples.
+    def with_ignored(list)
+      original = Lantern.config.ignored_exceptions
+      Lantern.config.ignored_exceptions = list
+      yield
+    ensure
+      Lantern.config.ignored_exceptions = original
+    end
+
+    # Rails never reports an exception with a rescue_response (RecordNotFound
+    # -> 404) to Rails.error, so the interesting path for these is a job or an
+    # explicit report, not a request.
+    def report_missing_widget
+      Lantern.start_execution(source: :job, sample_kind: :jobs)
+      Lantern.report(ActiveRecord::RecordNotFound.new("Couldn't find Widget with 'id'=999"), handled: true)
+      Lantern.finish_execution
+    end
+
+    it "drops ActiveRecord::RecordNotFound, which the default list carries over from Sentry" do
+      expect(Lantern.config.ignored_exceptions).to include("ActiveRecord::RecordNotFound")
+
+      report_missing_widget
+
+      expect(lantern_records(:exception)).to be_empty
+    end
+
+    it "captures that same error once it is removed from the list" do
+      with_ignored(Lantern.config.ignored_exceptions - [ "ActiveRecord::RecordNotFound" ]) { report_missing_widget }
+
+      expect(lantern_records(:exception).sole[:class]).to eq("ActiveRecord::RecordNotFound")
+    end
+
+    it "drops a subclass of an ignored exception, not just an exact class match" do
+      subclass = Class.new(ArgumentError)
+      stub_const("IgnoredSubclass", subclass)
+
+      with_ignored([ "ArgumentError" ]) do
+        Lantern.start_execution(source: :command, sample_kind: :commands)
+        Lantern.report(IgnoredSubclass.new("child of an ignored class"), handled: true)
+        Lantern.finish_execution
+      end
+
+      expect(lantern_records(:exception)).to be_empty
+    end
+
+    it "drops an unhandled exception too, not only handled ones" do
+      with_ignored([ "ArgumentError" ]) { get "/boom" }
+
+      expect(response).to have_http_status(:internal_server_error)
+      expect(lantern_records(:exception)).to be_empty
+    end
+
+    it "leaves an unlisted exception alone" do
+      with_ignored([ "SomeOtherError" ]) { get "/handled" }
+
+      expect(lantern_records(:exception).sole[:class]).to eq("RuntimeError")
+    end
+  end
+
   it "captures redacted local variables at the raise site when capture_exception_locals is on" do
     Lantern.config.capture_exception_locals = true
     Lantern::Subscribers::Exceptions::Locals.install!

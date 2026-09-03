@@ -39,12 +39,23 @@ module Lantern
       at_exit { Lantern.reporter.shutdown if Lantern.enabled? }
     end
 
+    # Declared after "lantern.shutdown" so its at_exit is registered later and
+    # therefore runs first (at_exit is LIFO): the health thread is stopped
+    # before the reporter's final flush, not after it.
+    initializer "lantern.health", after: "lantern.subscribe" do
+      next unless Lantern.enabled?
+
+      Lantern::Health.start!
+      at_exit { Lantern::Health.stop! }
+    end
+
     # lib/tasks/lantern_tasks.rake is already picked up by Rails::Engine's
     # default lib/tasks convention (Rails::Engine#run_tasks_blocks), so no
     # explicit rake_tasks registration is needed here.
   end
 end
 
+require "lantern/health"
 require "lantern/middleware/request"
 require "lantern/job_tracing"
 require "lantern/controller_helpers"

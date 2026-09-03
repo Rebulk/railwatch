@@ -20,6 +20,18 @@ module Lantern
       def install!(_app)
         Rails.error.subscribe(ErrorSubscriber.new) if defined?(Rails) && Rails.respond_to?(:error)
         Locals.install! if Lantern.config.capture_exception_locals
+
+        # An exception a controller swallows with `rescue_from` never reaches
+        # Rails.error or the middleware, so without this it is invisible.
+        # Rails instruments the moment a matching handler is found, which is
+        # exactly Sentry's report_rescued_exceptions. Active Job's equivalents
+        # (retry_on / discard_on) are already covered by the
+        # retry_stopped/discard subscriptions in Subscribers::Jobs.
+        subscribe("rescue_from_callback.action_controller") do |event|
+          next unless Lantern.config.capture_rescued_exceptions
+          capture(event.payload[:exception], handled: true, severity: :warning,
+                  source: "action_controller.rescue_from")
+        end
       end
 
       # Local variables at the raise site, like Sentry's "locals" panel.
@@ -74,6 +86,7 @@ module Lantern
 
       def capture(error, handled:, severity:, context: {}, source: nil)
         return unless Lantern.enabled?
+        return if ignored?(error)
         return if seen?(error)
 
         exe = execution
@@ -112,6 +125,16 @@ module Lantern
         else
           Lantern.record_now(:exception, group: group, **rec)
         end
+      end
+
+      # config.ignored_exceptions, matched against the error's own class name
+      # and every named ancestor, so an app's subclass of an ignored error is
+      # ignored too. Sentry's excluded_exceptions equivalent, and it applies to
+      # handled and unhandled errors alike.
+      def ignored?(error)
+        ignored = Lantern.config.ignored_exceptions
+        return false if ignored.empty?
+        error.class.ancestors.any? { |ancestor| (name = ancestor.name) && ignored.include?(name) }
       end
 
       def seen?(error)

@@ -56,6 +56,64 @@ Programmatically: `Lantern.sample(rate)` re-rolls the current execution's
 sampling decision; `Lantern.dont_sample` forces it off; `Lantern.sampling?`
 reads the current decision.
 
+### Tail-based sampling
+
+Head sampling decides at the *start* of an execution, before anything is
+known about it — cheap, but it throws away exactly the slow requests you
+wanted to see. Tail sampling keeps buffering a head-sampled-out
+execution's child records and decides at the *end*, once the duration and
+outcome are known.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `tail_sample_slow_ms` | `LANTERN_TAIL_SAMPLE_SLOW_MS` | nil (off) | Keep a head-sampled-out execution that ran at least this many milliseconds. |
+
+With it set (or after `Lantern.keep!`), a head-sampled-out execution
+ships its whole tree when it ran at least `tail_sample_slow_ms`, when
+`Lantern.keep!` was called, or when it raised an unhandled exception
+(subject to the `exceptions` rate); otherwise the buffered records are
+discarded at the end and nothing ships. Such a tree's parent record
+carries `tail_sampled: true`, so a tail-kept execution is
+distinguishable from a head-sampled one.
+
+```ruby
+c.sample = { requests: 0.05 }   # keep 5% of requests...
+c.tail_sample_slow_ms = 500     # ...plus every request slower than 500ms
+Lantern.keep!                   # keep this one, whatever the head decision was
+```
+
+**The trade-off is memory**: with tail sampling on, every sampled-out
+execution buffers its child records (queries, logs, cache events, ...)
+for its lifetime instead of discarding them as they happen, capped at
+`Execution::MAX_RECORDS` (10,000) per execution. With it off — the
+default — `Execution#recording?` is false for a sampled-out execution and
+nothing is built or buffered at all, which is the cheapest path and
+exactly the behaviour Lantern had before. `Lantern.keep!` can only keep
+records made *after* the call unless tail sampling was already on: what
+was never buffered can't be resurrected.
+
+## Distributed tracing
+
+Lantern propagates W3C trace context, so a request that fans out to
+other Lantern-instrumented services shows up as one trace.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `propagate_traces` | `LANTERN_PROPAGATE_TRACES` | `true` | Send a `traceparent` header on outgoing Net::HTTP and `Lantern::Faraday` requests. |
+| `trace_propagation_hosts` | `LANTERN_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.internal` matches `api.internal`); anything else must match the host exactly. |
+
+Outgoing: `traceparent: 00-<trace_id>-<execution_id[0,16]>-<flags>`, with
+flags `01` when the execution is sampled and `00` when it isn't — a
+sampled-out execution still propagates, it just says so. A `traceparent`
+the app set itself is never overwritten.
+
+Inbound: the Rack middleware parses `HTTP_TRACEPARENT` and adopts its
+trace id and parent id for this execution (a malformed header is
+ignored, and the execution starts its own trace). If the upstream flags
+say the trace is sampled, the downstream execution is kept
+(`Lantern.keep!`, above) whatever its own head decision was — otherwise
+the trace would have a hole exactly where this service should be.
+
 ## Ignoring whole record types
 
 `ignore` drops a record type before it's ever built — cheaper than
@@ -202,6 +260,18 @@ never reaches a normal flush.
 | `slow_query_threshold_ms` | `LANTERN_SLOW_QUERY_MS` | `5.0` | Above this, a query's source location is resolved fresh instead of reused from the group cache (see `query` in `docs/records.md`). |
 | `n_plus_one_threshold` | `LANTERN_N_PLUS_ONE_THRESHOLD` | `5` | Same query group repeating this many times in one execution fires one `n_plus_one` record. |
 | `max_view_renders_per_execution` | — (code only) | `20` | Caps stored `view_render` records per execution; all renders still count toward the parent's `view_renders` counter regardless of the cap. |
+| `capture_query_explain` | `LANTERN_CAPTURE_QUERY_EXPLAIN` | `false` | Attach the adapter's own query plan to slow `SELECT`s as the `query` record's `explain` field. The EXPLAIN runs on the same connection the query just used, with Lantern paused so it never records itself, and is rate-limited to one per query shape per process per 10 minutes. Off by default: it doubles the round trips for the queries it fires on. |
+| `explain_threshold_ms` | `LANTERN_EXPLAIN_THRESHOLD_MS` | `100.0` | Minimum query duration before `capture_query_explain` will explain it. |
+
+## Process health
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `health_interval` | `LANTERN_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
+
+In a clustered, preloaded Puma, add `on_worker_boot { Lantern::Health.start! }`
+to `config/puma.rb` — the thread started at boot lives in the master and
+does not survive `fork`.
 
 ## Vendor noise defaults
 
@@ -225,6 +295,26 @@ defaults and always applies.
 | `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Include source snippet lines with each exception's backtrace frames. |
 | `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
+| `ignored_exceptions` | `LANTERN_IGNORED_EXCEPTIONS` (comma-separated) | `Configuration::DEFAULT_IGNORED_EXCEPTIONS` | Class names never captured, handled or not. Matched against the error's class *and every named ancestor*, so your own subclass of a listed error is ignored too. Setting the env var replaces the default list; append instead with `c.ignored_exceptions += ["MyApp::Expected"]`. |
+| `capture_rescued_exceptions` | `LANTERN_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |
+
+`DEFAULT_IGNORED_EXCEPTIONS` is the Rails-relevant subset of Sentry's own
+`excluded_exceptions` defaults — routine 4xx plumbing rather than
+application bugs:
+
+`ActionController::BadRequest`, `ActionController::InvalidAuthenticityToken`,
+`ActionController::RoutingError`, `ActionController::UnknownFormat`,
+`ActionController::UnknownHttpMethod`,
+`ActionDispatch::Http::MimeNegotiation::InvalidType`,
+`ActionDispatch::Http::Parameters::ParseError`,
+`ActiveRecord::RecordNotFound`, `Puma::HttpParserError`,
+`Puma::HttpParserError501`, `Rack::QueryParser::InvalidParameterError`,
+`Rack::QueryParser::ParameterTypeError`.
+
+Note that Rails never reports an exception that has a `rescue_response`
+(`ActiveRecord::RecordNotFound` → 404) to `Rails.error` in the first
+place, so several of these are belt-and-braces for the paths that *do*
+reach Lantern — jobs, `Lantern.report`, and `rescue_from`.
 
 ## Logging
 
@@ -331,7 +421,7 @@ Mirrors Laravel Nightwatch's facade shape. All on the `Lantern` module
 (`lib/lantern.rb`) unless noted:
 
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
-`sampling?`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
+`keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
 are the ignore block's building blocks — nestable), `record(type, **fields)`,
 `report(error, ...)`, `context(**attrs)`, `user(&block)`, `redact_*`,
 `reject_*`, `reject_cache_keys`, `before_ingest`, `on_unrecoverable`,
@@ -344,28 +434,58 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention
 
 - **`lantern:status`** — pings `{ingest_url}/ingest/ping` with the
   configured token; aborts if `LANTERN_TOKEN` is unset or the ping fails.
+- **`lantern:doctor`** — prints a ✓/✗ checklist of the whole install: token,
+  ingest URL, `GET /ingest/ping`, `Lantern::Middleware::Request` in the
+  middleware stack, the mounted engine's beacon route, `config.deploy` and
+  which env var it came from, sample rates, ignored record types, the Kamal
+  `post-deploy` hook, `app/frontend/lib/lantern.ts`, and whether
+  `lantern/rspec` (or `lantern/minitest`) is required by the test helper.
+  The last five are informational; it exits non-zero only when the token is
+  missing or the ping fails.
 - **`lantern:deploy[ref,name,url]`** — POSTs `{deploy, ref, name, url,
-  server, timestamp}` to `{ingest_url}/ingest/deploys`. `deploy` comes
-  from `config.deploy`; aborts if that's unset. `ref` defaults to
-  `git rev-parse HEAD` when not passed.
+  server, timestamp, performer, destination, service, commits}` to
+  `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`; aborts
+  if that's unset. `ref` defaults to `git rev-parse HEAD` when not passed.
+  `performer`/`destination`/`service` come from `KAMAL_PERFORMER`,
+  `KAMAL_DESTINATION`, and `KAMAL_SERVICE`. `commits` is up to 50
+  `{sha, author, message, at}` objects, newest first, from `git log` — empty
+  inside an app container, which has no `.git`, which is why the hook below
+  posts from the deployer instead.
 
 ## Kamal integration
 
-`bin/rails generate lantern:install` writes `.kamal/hooks/post-deploy`
-(only if `config/deploy.yml` already exists), which no-ops when
-`LANTERN_TOKEN` isn't set and otherwise runs `lantern:deploy[$KAMAL_VERSION]`
-inside the deployed container right after a successful deploy:
+`bin/rails generate lantern:install` writes `.kamal/hooks/post-deploy` (only
+if `config/deploy.yml` already exists). It no-ops when `LANTERN_TOKEN` isn't
+set, and never fails a deploy — every network call ends in `|| true`.
 
-```sh
-#!/bin/sh
-set -e
-[ -z "$LANTERN_TOKEN" ] && exit 0
-bin/kamal app exec --primary --reuse "bin/rails lantern:deploy[$KAMAL_VERSION]" || true
-```
+The hook runs on the **deployer machine**, not in a container, which is the
+whole point: that's where the git history lives and where Kamal exports its
+[`KAMAL_*` variables](https://kamal-deploy.org/docs/hooks/overview/)
+(`KAMAL_VERSION`, `KAMAL_HOSTS`, `KAMAL_PERFORMER`, `KAMAL_DESTINATION`,
+`KAMAL_SERVICE`, `KAMAL_RECORDED_AT`, `KAMAL_COMMAND`, `KAMAL_SUBCOMMAND`,
+`KAMAL_ROLE`). With `curl`, `ruby`, and `LANTERN_INGEST_URL` all present it
+POSTs directly, twice:
+
+1. `POST $LANTERN_INGEST_URL/ingest/deploys` — `{deploy, ref, name, url,
+   server, timestamp, performer, destination, service, commits}`, where
+   `commits` is up to 50 `{sha, author, message, at}` objects built from
+   `git log -n 50 --format='%H%x1f%an%x1f%s%x1f%cI'` piped through a one-line
+   `ruby -rjson -e`. This is what lets the platform show a diff of what
+   actually shipped. `name` is `KAMAL_SERVICE_VERSION`; set the optional
+   `LANTERN_DEPLOY_URL` to link the marker at a CI run or release page.
+2. `POST $LANTERN_INGEST_URL/ingest/kamal` — `{version, hosts, roles,
+   performer, destination, service, recorded_at, command, subcommand}`, with
+   `hosts` split out of the comma-separated `KAMAL_HOSTS`. The platform uses
+   this to know which servers should be reporting.
+
+Without `curl`/`ruby`, or without `LANTERN_INGEST_URL`, it falls back to the
+original behaviour — `bin/kamal app exec --primary --reuse "bin/rails
+lantern:deploy[$KAMAL_VERSION]"` — which records the same deploy minus the
+commit list.
 
 `config.deploy` itself auto-detects `KAMAL_VERSION` with no configuration
-needed even without this hook — the hook's only job is to make the
-deploy show up as a marker on the platform's charts.
+needed even without this hook — the hook's job is the deploy marker, the
+commit diff, and the server inventory.
 
 ## Overhead gate
 
@@ -382,11 +502,15 @@ regression through unnoticed.
 
 ```ruby
 # spec/rails_helper.rb
-require "lantern/spec_helper"
-RSpec.configure { |config| config.include Lantern::SpecHelper }
+require "lantern/rspec"
 ```
 
 `lantern_records(type = nil)` flushes and returns buffered records (as
 built hashes, filtered to `type` if given) without a real network call —
 backed by `Lantern::SpecHelper::MemoryTransport`, swapped in for
-`Lantern.reporter` on first use.
+`Lantern.reporter` on first use. `require "lantern/rspec"` also includes
+`Lantern::SpecHelper` everywhere and adds the block matchers
+(`have_lantern_queries`, `have_lantern_n_plus_one`, ...) documented in
+[`testing.md`](testing.md); `require "lantern/minitest"` is the Minitest
+equivalent. `require "lantern/spec_helper"` on its own, plus your own
+`config.include Lantern::SpecHelper`, still works.

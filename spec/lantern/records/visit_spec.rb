@@ -28,6 +28,49 @@ RSpec.describe "visit record", type: :request do
     expect(visit[:user_agent]).to be_a(String)
   end
 
+  describe "Core Web Vitals" do
+    def post_vitals(vitals)
+      post_beacon([ { component: "Widgets/Index", url: "/widgets", method: "GET",
+                      started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success" }.merge(vitals) ])
+      lantern_records(:visit).sole
+    end
+
+    it "captures lcp, cls, inp, and ttfb from the initial-load visit" do
+      visit = post_vitals(lcp: 1234.6, cls: 0.05123, inp: 88.2, ttfb: 210.4)
+
+      expect(visit[:lcp]).to eq(1235)
+      expect(visit[:cls]).to eq(0.0512)
+      expect(visit[:inp]).to eq(88)
+      expect(visit[:ttfb]).to eq(210)
+    end
+
+    it "leaves each vital nil when the browser did not report it" do
+      visit = post_vitals({})
+
+      expect(visit.values_at(:lcp, :cls, :inp, :ttfb)).to eq([ nil, nil, nil, nil ])
+    end
+
+    it "clamps a negative millisecond metric to zero" do
+      expect(post_vitals(lcp: -5)[:lcp]).to eq(0)
+    end
+
+    it "clamps a millisecond metric to two minutes" do
+      expect(post_vitals(ttfb: 999_999_999)[:ttfb]).to eq(120_000)
+    end
+
+    it "clamps an absurd cls down to 100" do
+      expect(post_vitals(cls: 500.5)[:cls]).to eq(100.0)
+    end
+
+    it "clamps a negative cls up to zero" do
+      expect(post_vitals(cls: -1)[:cls]).to eq(0.0)
+    end
+
+    it "rounds a long cls float rather than storing full precision" do
+      expect(post_vitals(cls: 0.123456789)[:cls]).to eq(0.1235)
+    end
+  end
+
   it "caps at 50 visits from a single beacon POST even when more are sent" do
     visits = 60.times.map { |i| { component: "C#{i}", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "200" } }
     post_beacon(visits)

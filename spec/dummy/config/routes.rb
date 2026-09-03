@@ -6,6 +6,7 @@ Rails.application.routes.draw do
   get "widgets/:id", to: "widgets#show", as: :widget
   get "boom", to: "widgets#boom"
   get "handled", to: "widgets#handled"
+  get "rescued", to: "rescued#show"
   get "cached", to: "widgets#cached"
   get "outbound", to: "widgets#outbound"
   get "mail", to: "widgets#mail"

@@ -11,6 +11,21 @@ module Lantern
       # the Rack key -> "Header-Name" conversion is cached instead of
       # split/map/capitalize/join-ing on every request.
       HEADER_NAME_CACHE_LIMIT = 512
+      # W3C trace context: version-trace_id-parent_id-flags, all lower-case hex.
+      TRACEPARENT = /\A([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})\z/
+      # Reverse proxies stamp the moment the request was accepted; the gap to
+      # our own start is how long it waited for a worker. Anything beyond this
+      # is clock skew between the proxy and this box, not a real wait.
+      MAX_QUEUE_TIME = 60_000_000 # microseconds
+
+      # Returns [trace_id, parent_id, sampled] from an inbound traceparent,
+      # or nil when the header is absent or malformed.
+      def self.traceparent(value)
+        match = value && TRACEPARENT.match(value)
+        return nil unless match
+
+        [ match[2], match[3], match[4].to_i(16).odd? ]
+      end
 
       def initialize(app)
         @app = app
@@ -21,8 +36,12 @@ module Lantern
       def call(env)
         return @app.call(env) unless Lantern.enabled? || IGNORED_PATHS.include?(env["PATH_INFO"])
 
+        trace_id, parent_id, upstream_sampled = self.class.traceparent(env["HTTP_TRACEPARENT"])
         exe = Lantern.start_execution(source: :request, sample_kind: :requests,
-                                      trace_id: env["HTTP_TRACEPARENT"]&.split("-")&.at(1))
+                                      trace_id: trace_id, parent_id: parent_id)
+        # The upstream service sampled this trace in, so keep our end of it
+        # too -- otherwise the trace has a hole where this request should be.
+        exe.keep! if upstream_sampled
         exe.enter_stage(:middleware_before)
         env["lantern.execution"] = exe
         status = headers = body = nil
@@ -85,9 +104,41 @@ module Lantern
           inertia: inertia,
           headers: request_headers(env),
           payload: payload,
+          queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
           files: env["lantern.files"] || uploaded_files(req.params)
         }
+      end
+
+      # Microseconds this request waited in the proxy/web-server queue before
+      # the execution started, from X-Request-Start (nginx, Heroku, HAProxy)
+      # or X-Queue-Start. nil when absent, unparseable, or implausible.
+      def queue_time(env, exe)
+        raw = env["HTTP_X_REQUEST_START"] || env["HTTP_X_QUEUE_START"]
+        started = raw && request_start_seconds(raw)
+        return nil unless started
+
+        micros = ((exe.started_at - started) * 1_000_000).round
+        return nil if micros > MAX_QUEUE_TIME
+
+        # A proxy clock running slightly ahead reads as a negative wait.
+        micros.negative? ? 0 : micros
+      end
+
+      # "t=1700000000.123" (seconds), "t=1700000000123" (ms),
+      # "t=1700000000123456" (microseconds), or the same values bare. A proxy
+      # chain can collapse several into one comma-separated header; the first
+      # is the outermost. Unit is decided by magnitude, like Sentry's
+      # extract_queue_time.
+      def request_start_seconds(value)
+        raw = value.to_s.split(",").first.to_s.strip.delete_prefix("t=").strip
+        return nil unless /\A\d+(?:\.\d+)?\z/.match?(raw)
+
+        seconds = raw.to_f
+        if seconds > 10_000_000_000_000 then seconds / 1_000_000
+        elsif seconds > 10_000_000_000 then seconds / 1_000
+        else seconds
+        end
       end
 
       def inertia_fields(env, headers)

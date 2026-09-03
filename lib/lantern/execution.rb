@@ -12,10 +12,10 @@ module Lantern
     MAX_RECORDS = 10_000
     COUNTERS = %i[queries cached_queries exceptions logs cache_events jobs_enqueued mail
                   broadcasts notifications outgoing_requests storage_ops view_renders
-                  transactions hydrated_models lazy_loads deprecations].freeze
+                  transactions hydrated_models lazy_loads deprecations spans].freeze
 
     attr_reader :source, :id, :trace_id, :parent_id, :started_at, :started_mono, :counters,
-                :stages, :stage_durations, :query_groups, :records, :dropped_records
+                :stages, :stage_durations, :query_groups, :records, :dropped_records, :keep
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
                   :queue_latency, :drift, :exception_sampled, :parent_execution
@@ -59,6 +59,11 @@ module Lantern
       @tenant = nil
       @records = []
       @dropped_records = 0
+      @keep = false
+      # Tail sampling keeps buffering child records for a head-sampled-out
+      # execution so the ship/discard decision can be made at the end. Read
+      # once here rather than per record: recording? is on the hot path.
+      @tail_buffering = !Lantern.config.tail_sample_slow_ms.nil?
       @transaction_statement_counts = Hash.new(0)
       @allocations_start = GC.stat(:total_allocated_objects)
       @gc_time_start = GC.stat(:time) if GC.stat.key?(:time)
@@ -73,7 +78,20 @@ module Lantern
     end
 
     def recording?
-      sampled? && !paused?
+      (sampled? || @tail_buffering) && !paused?
+    end
+
+    # Ship this execution's whole tree regardless of the head sampling
+    # decision (Lantern.keep!), buffering child records from here on.
+    def keep!
+      @keep = true
+      @tail_buffering = true
+    end
+
+    # Whether child records are buffered even when the head decision sampled
+    # this execution out, so finish_execution can still decide to ship them.
+    def tail_buffering?
+      @tail_buffering
     end
 
     def stage

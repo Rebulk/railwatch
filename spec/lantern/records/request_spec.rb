@@ -93,4 +93,56 @@ RSpec.describe "request record", type: :request do
     req = lantern_records(:request).sole
     expect(req[:payload]).to be_nil
   end
+
+  describe "queue_time" do
+    # 50ms of proxy queueing (50_000 microseconds once recorded), expressed
+    # in each format a proxy might stamp it. The upper bound catches a
+    # misread unit: seconds or microseconds read as milliseconds land
+    # decades away, not a millisecond either side.
+    let(:queued_at) { Time.now.to_f - 0.05 }
+
+    def queue_time_for(header, name: "X-Request-Start")
+      get "/widgets", headers: { name => header }
+      lantern_records(:request).sole[:queue_time]
+    end
+
+    it "is nil when no proxy stamped the request" do
+      get "/widgets"
+
+      expect(lantern_records(:request).sole[:queue_time]).to be_nil
+    end
+
+    it "reads t= milliseconds (nginx, Heroku)" do
+      expect(queue_time_for("t=#{(queued_at * 1_000).round}")).to be_between(49_000, 1_000_000)
+    end
+
+    it "reads t= microseconds (HAProxy 1.9+)" do
+      expect(queue_time_for("t=#{(queued_at * 1_000_000).round}")).to be_between(49_000, 1_000_000)
+    end
+
+    it "reads t= seconds with a fractional part" do
+      expect(queue_time_for("t=#{format('%.3f', queued_at)}")).to be_between(49_000, 1_000_000)
+    end
+
+    it "reads a bare millisecond integer, with no t= prefix" do
+      expect(queue_time_for((queued_at * 1_000).round.to_s)).to be_between(49_000, 1_000_000)
+    end
+
+    it "reads X-Queue-Start when X-Request-Start is absent" do
+      expect(queue_time_for("t=#{(queued_at * 1_000).round}", name: "X-Queue-Start")).to be_between(49_000, 1_000_000)
+    end
+
+
+    it "drops a stamp more than 60 seconds old as clock skew, not a real wait" do
+      expect(queue_time_for("t=#{((Time.now.to_f - 300) * 1_000).round}")).to be_nil
+    end
+
+    it "clamps a stamp from a proxy clock running ahead to zero" do
+      expect(queue_time_for("t=#{((Time.now.to_f + 10) * 1_000).round}")).to eq(0)
+    end
+
+    it "is nil for an unparseable stamp" do
+      expect(queue_time_for("t=nonsense")).to be_nil
+    end
+  end
 end

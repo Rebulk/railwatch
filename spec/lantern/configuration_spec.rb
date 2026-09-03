@@ -30,6 +30,10 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_SHUTDOWN_TIMEOUT" => [ :shutdown_timeout, "4.0", 4.0, 2.0 ],
       "LANTERN_SLOW_QUERY_MS" => [ :slow_query_threshold_ms, "12.0", 12.0, 5.0 ],
       "LANTERN_N_PLUS_ONE_THRESHOLD" => [ :n_plus_one_threshold, "9", 9, 5 ],
+      "LANTERN_HEALTH_INTERVAL" => [ :health_interval, "60.0", 60.0, 15.0 ],
+      "LANTERN_CAPTURE_QUERY_EXPLAIN" => [ :capture_query_explain, "1", true, false ],
+      "LANTERN_EXPLAIN_THRESHOLD_MS" => [ :explain_threshold_ms, "250.0", 250.0, 100.0 ],
+      "LANTERN_CAPTURE_RESCUED_EXCEPTIONS" => [ :capture_rescued_exceptions, "0", false, true ],
       "LANTERN_BEACON" => [ :beacon_enabled, "0", false, true ],
       "LANTERN_DEBUG" => [ :debug, "1", true, false ]
     }.each do |env_key, (attr, raw, expected, default)|
@@ -93,6 +97,30 @@ RSpec.describe Lantern::Configuration do
       end
       %w[0 false no off garbage].each do |value|
         with_env("LANTERN_IGNORE_QUERIES" => value) { |c| expect(c.ignored?(:queries)).to be(false) }
+      end
+    end
+  end
+
+  describe "ignored_exceptions" do
+    it "defaults to the Rails-relevant subset of Sentry's own excluded_exceptions" do
+      with_env("LANTERN_IGNORED_EXCEPTIONS" => nil) do |config|
+        expect(config.ignored_exceptions).to eq(described_class::DEFAULT_IGNORED_EXCEPTIONS)
+        expect(config.ignored_exceptions).to include(
+          "ActionController::RoutingError", "ActionController::InvalidAuthenticityToken",
+          "ActiveRecord::RecordNotFound", "Rack::QueryParser::ParameterTypeError",
+          "Puma::HttpParserError")
+      end
+    end
+
+    it "hands out a mutable copy, so appending in one app can't leak into the frozen default" do
+      config = described_class.new
+      config.ignored_exceptions << "MyApp::Ignorable"
+      expect(described_class::DEFAULT_IGNORED_EXCEPTIONS).not_to include("MyApp::Ignorable")
+    end
+
+    it "splits LANTERN_IGNORED_EXCEPTIONS on commas, replacing the default list" do
+      with_env("LANTERN_IGNORED_EXCEPTIONS" => "Foo::Bar, Baz") do |config|
+        expect(config.ignored_exceptions).to eq(%w[Foo::Bar Baz])
       end
     end
   end

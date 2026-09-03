@@ -6,15 +6,20 @@ outgoing HTTP, storage, views, and logs, links them into one trace per
 execution, and ships them to Lantern Cloud with under a millisecond of
 overhead per request and zero writes to your database.
 
-```ruby
-# Gemfile
-gem "lantern"
-```
+## Install
 
 ```sh
-bin/rails generate lantern:install
-LANTERN_TOKEN=lt_... bin/rails lantern:status
+bundle add lantern                          # 1. add the gem
+bin/rails generate lantern:install          # 2. initializer, routes, Kamal hook, browser client, test matchers
+LANTERN_TOKEN=lt_... bin/rails lantern:doctor   # 3. check every piece is wired up
 ```
+
+The generator writes `config/initializers/lantern.rb`, mounts the beacon
+engine, and — where the app already has them — adds a Kamal `post-deploy`
+hook, the Inertia browser client with its `startLantern()` call, and
+`require "lantern/rspec"` in `spec/rails_helper.rb`. `lantern:doctor` prints
+a ✓/✗ checklist of all of it and exits non-zero if the token is missing or
+the ingest host is unreachable.
 
 Configuration lives in `config/initializers/lantern.rb`; every option has
 a `LANTERN_*` environment variable. Sampling is decided once per execution:
@@ -35,6 +40,19 @@ Lantern.ignore { ExpensiveSync.run }
 Lantern.context(tenant: org.slug, plan: org.plan)
 ```
 
+Time any block of your own code as a `span` on the surrounding request,
+job, or command — the block's value is returned untouched:
+
+```ruby
+Lantern.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
+```
+
+Sampling can also be decided at the *end* of an execution instead of the
+start: set `c.tail_sample_slow_ms = 500` (or call `Lantern.keep!`) and a
+head-sampled-out request that turns out to be slow, or to have raised,
+ships its whole tree anyway. Outgoing HTTP carries a W3C `traceparent`,
+and an inbound one is adopted, so a trace spans services.
+
 Inertia apps get real page-visit timing by calling `startLantern()` from the
 generated `app/frontend/lib/lantern.ts`. Server-side rendering is timed
 automatically wherever `inertia_rails` SSR is already enabled — no extra
@@ -49,6 +67,21 @@ with `Lantern.instrument_outgoing`:
 Faraday.new(url) { |f| f.use Lantern::Faraday }
 Lantern.instrument_outgoing(:get, url) { http_client.get(url) }
 ```
+
+## Testing
+
+The same instrumentation runs in your test suite, so a spec can hold a hot
+path to a query budget and CI can fail the pull request that regresses it:
+
+```ruby
+expect { get "/widgets" }.to have_lantern_queries(at_most: 6)
+expect { get "/widgets" }.not_to have_lantern_n_plus_one
+```
+
+Failures list the offending SQL. Set-up, every matcher (RSpec and Minitest),
+and a CI performance-gate recipe are in [`docs/testing.md`](docs/testing.md).
+
+---
 
 Every attribute, the full public facade, sampling, redaction/rejection,
 transport/buffering behavior, the overhead gate, and the Kamal deploy hook
@@ -73,6 +106,32 @@ outgoing request, and log line from that same execution. There's no
 separate error-tracking SDK/config to maintain — `severity`, `handled`,
 and `context` all come from the same `Lantern.configure` block and
 `Lantern.context` calls used for everything else the gem instruments.
+
+### Coming from Sentry
+
+| Sentry | Lantern |
+|---|---|
+| `dsn:` | `LANTERN_TOKEN` (+ `LANTERN_INGEST_URL` for a self-hosted platform). |
+| `environment:` | `config.environment` — defaults to `Rails.env`, set it only to report under a different name. |
+| `release:` | `config.deploy` — `LANTERN_DEPLOY`, else `KAMAL_VERSION`, else `GIT_REV`. Stamped on every record. |
+| `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `lantern_sample 0.01, only: :index`. |
+| `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
+| `before_send:` / `before_send_transaction:` | `Lantern.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Lantern.redact_queries`/`redact_logs`/... to scrub one record type in place; `Lantern.reject_queries`/`reject_logs`/... to drop records by predicate. |
+| `include_local_variables:` | `config.capture_exception_locals`. |
+| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Lantern.user { ... }` block for who. There is no single "send everything" switch. |
+| Breadcrumbs | Not a separate concept — every query, cache read, outgoing request, log line, and view render is already a first-class record linked to its execution by `execution_id`/`trace_id`. The execution *is* the breadcrumb trail, and it's queryable. |
+| `Sentry.capture_message` | `Lantern.report(error, ...)` for an exception; plain `Rails.logger` for a message — log lines at or above `config.log_level` become `log` records automatically. |
+| `Sentry.set_user` | `Lantern.user { ... }` (a resolver block, evaluated per execution). |
+| `Sentry.set_tags` / `set_context` / `set_extras` | `Lantern.context(key: value)` — serialized onto the parent record and every exception. |
+| `Sentry.with_child_span` | `Lantern.span("name") { ... }`. |
+| `Sentry.capture_check_in` (cron monitoring) | Automatic: Solid Queue recurring tasks become `scheduled_task` records with `task_key`, `schedule`, and `drift`. Nothing to instrument. |
+| `config.rails.report_rescued_exceptions` | `config.capture_rescued_exceptions` (on by default). |
+| Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
+
+Still missing versus Sentry, deliberately or not yet: profiling
+(Vernier/StackProf flamegraphs), event attachments, and
+sessions/release-health (crash-free rate). Everything else above is
+either covered or replaced by the execution model.
 
 To report an exception manually (the `Rails.error.report`-equivalent):
 

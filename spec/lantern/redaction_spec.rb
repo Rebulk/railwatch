@@ -82,6 +82,31 @@ RSpec.describe "redaction and rejection", type: :request do
     end
   end
 
+  describe "Lantern.redact_requests / redact_exceptions / redact_commands" do
+    it "runs the request redactor on the shipped request record" do
+      Lantern.redact_requests { |rec| rec[:url] = "REDACTED URL" }
+      get "/widgets"
+
+      expect(lantern_records(:request).sole[:url]).to eq("REDACTED URL")
+    end
+
+    it "runs the exception redactor on the shipped exception record" do
+      Lantern.redact_exceptions { |rec| rec[:message] = "REDACTED MESSAGE" }
+      get "/boom"
+
+      expect(lantern_records(:exception).sole[:message]).to eq("REDACTED MESSAGE")
+    end
+
+    it "runs the command redactor on the shipped command record" do
+      require "rake"
+      Lantern.redact_commands { |rec| rec[:command] = "REDACTED COMMAND" }
+      Rake::Task.define_task(:lantern_redact_demo) { Widget.count }
+      Rake::Task[:lantern_redact_demo].execute
+
+      expect(lantern_records(:command).sole[:command]).to eq("REDACTED COMMAND")
+    end
+  end
+
   describe "reject_* hooks" do
     it "drops a query when reject_queries returns true for it" do
       Lantern.reject_queries { |rec| rec[:sql].to_s.include?("gadgets") }

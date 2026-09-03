@@ -20,6 +20,7 @@ module Lantern
       # @app.call so it defers to this middleware's own (more accurate) record.
       previous = Thread.current[Patches::NetHttp::REENTRY]
       Thread.current[Patches::NetHttp::REENTRY] = true
+      propagate_trace(env)
       begin
         @app.call(env).on_complete do |response_env|
           record(response_env, start, started_at)
@@ -33,6 +34,17 @@ module Lantern
     end
 
     private
+
+    # The Net::HTTP patch is suppressed for the duration of this call, so the
+    # traceparent has to be set here. Never overwrites the app's own header.
+    def propagate_trace(env)
+      return if env.request_headers.key?("traceparent")
+
+      traceparent = Lantern.traceparent(env.url.host)
+      env.request_headers["traceparent"] = traceparent if traceparent
+    rescue StandardError => e
+      Lantern.debug { "traceparent propagation failed: #{e.message}" }
+    end
 
     def record(env, start, started_at, error: nil)
       url = env.url

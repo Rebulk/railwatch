@@ -47,6 +47,71 @@ RSpec.describe "query record", type: :request do
     expect(names).not_to include("SCHEMA", "TRANSACTION")
   end
 
+  describe "explain capture" do
+    # The throttle table is process-global (one EXPLAIN per query shape per
+    # 10 minutes), so it has to be cleared or the second example in this file
+    # to touch a shape gets nothing back.
+    before do
+      Lantern::Subscribers::Queries.instance_variable_get(:@explained).clear
+      Lantern.config.capture_query_explain = true
+      Lantern.config.explain_threshold_ms = 0.0
+    end
+
+    after do
+      Lantern.config.capture_query_explain = false
+      Lantern.config.explain_threshold_ms = 100.0
+    end
+
+    # Running EXPLAIN on the same connection from inside the connection's own
+    # sql.active_record notification is the risky part of this feature: it must
+    # neither deadlock nor recurse.
+    it "attaches the adapter's plan to a slow SELECT" do
+      get "/widgets"
+
+      q = lantern_records(:query).find { |r| r[:sql].include?("FROM \"widgets\"") }
+      expect(q[:explain]).to be_a(String)
+      expect(q[:explain]).to match(/SCAN|SEARCH/) # sqlite3's EXPLAIN QUERY PLAN output
+    end
+
+    it "never records the EXPLAIN statement itself as a query" do
+      get "/widgets"
+
+      expect(lantern_records(:query).map { |r| r[:sql] }).to all(satisfy { |sql| !sql.include?("EXPLAIN") })
+    end
+
+    it "explains a shape at most once per process within the throttle window" do
+      get "/widgets"
+      get "/widgets"
+
+      widget_loads = lantern_records(:query).select { |r| r[:sql].include?("FROM \"widgets\"") }
+      expect(widget_loads.size).to be >= 2
+      expect(widget_loads.count { |r| r[:explain] }).to eq(1)
+    end
+
+    it "leaves explain nil for a query faster than explain_threshold_ms" do
+      Lantern.config.explain_threshold_ms = 10_000.0
+      get "/widgets"
+
+      expect(lantern_records(:query).map { |r| r[:explain] }.compact).to be_empty
+    end
+
+    it "leaves explain nil for a write, which has no plan worth capturing" do
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+      Widget.create!(name: "explained")
+      Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+      expect(exe).to be_sampled
+
+      insert = lantern_records(:query).find { |r| r[:sql].start_with?("INSERT") }
+      expect(insert[:explain]).to be_nil
+    end
+  end
+
+  it "leaves explain nil when capture_query_explain is off" do
+    get "/widgets"
+
+    expect(lantern_records(:query).map { |r| r[:explain] }.compact).to be_empty
+  end
+
   it "computes a caller source location for a query shape" do
     get "/many"
     sources = lantern_records(:query).select { |r| r[:sql].include?("FROM \"gadgets\"") }.map { |r| r[:source] }

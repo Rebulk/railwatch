@@ -20,6 +20,26 @@ module Lantern
       /\Aactive_storage/, /\Amigration_/, /\Aschema_cache/
     ].freeze
 
+    # Exceptions that are routine 4xx plumbing rather than application bugs.
+    # The Rails-relevant subset of Sentry's own defaults
+    # (Sentry::Configuration::IGNORE_DEFAULT + PUMA_IGNORE_DEFAULT and
+    # Sentry::Rails::Configuration::IGNORE_DEFAULT), so a Sentry app migrating
+    # to Lantern sees the same signal-to-noise out of the box.
+    DEFAULT_IGNORED_EXCEPTIONS = %w[
+      ActionController::BadRequest
+      ActionController::InvalidAuthenticityToken
+      ActionController::RoutingError
+      ActionController::UnknownFormat
+      ActionController::UnknownHttpMethod
+      ActionDispatch::Http::MimeNegotiation::InvalidType
+      ActionDispatch::Http::Parameters::ParseError
+      ActiveRecord::RecordNotFound
+      Puma::HttpParserError
+      Puma::HttpParserError501
+      Rack::QueryParser::InvalidParameterError
+      Rack::QueryParser::ParameterTypeError
+    ].freeze
+
     attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
@@ -31,7 +51,8 @@ module Lantern
                   :capture_default_vendor_cache_keys, :on_unrecoverable,
                   :capture_framework_events,
                   :tail_sample_slow_ms, :propagate_traces, :trace_propagation_hosts,
-                  :health_interval, :capture_query_explain, :explain_threshold_ms
+                  :health_interval, :capture_query_explain, :explain_threshold_ms,
+                  :ignored_exceptions, :capture_rescued_exceptions
 
     attr_reader :user_resolver, :redactors, :rejectors, :before_ingest
 
@@ -80,6 +101,8 @@ module Lantern
       @health_interval = env_float("LANTERN_HEALTH_INTERVAL", 15.0)
       @capture_query_explain = env_bool("LANTERN_CAPTURE_QUERY_EXPLAIN", false)
       @explain_threshold_ms = env_float("LANTERN_EXPLAIN_THRESHOLD_MS", 100.0)
+      @ignored_exceptions = ENV["LANTERN_IGNORED_EXCEPTIONS"]&.split(",")&.map(&:strip) || DEFAULT_IGNORED_EXCEPTIONS.dup
+      @capture_rescued_exceptions = env_bool("LANTERN_CAPTURE_RESCUED_EXCEPTIONS", true)
       @user_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }

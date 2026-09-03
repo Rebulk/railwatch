@@ -13,8 +13,14 @@ module Lantern
       # Computed once so the hot query record doesn't look these up per call.
       QUERY_VERSION = Record::VERSIONS.fetch(:query)
 
+      MAX_EXPLAIN = 4_000
+      EXPLAIN_TTL = 600
+      MAX_EXPLAINED_GROUPS = 1_000
+      SELECT = /\A\s*select\b/i
+
       @connection_info = {}.compare_by_identity
       @sources = {}
+      @explained = {}
 
       module_function
 
@@ -41,6 +47,38 @@ module Lantern
         @sources.clear if @sources.size > 5_000
         @sources[group] = loc
         loc
+      end
+
+      # The query plan for a slow SELECT, off by default. Runs on the very
+      # connection that just ran the query -- the adapter's own #explain, so
+      # each database gets its native plan format -- with Lantern paused, and
+      # with the EXPLAIN's own sql.active_record notification named "EXPLAIN"
+      # and therefore already dropped by SKIP_NAMES above. Re-entering the
+      # connection here is safe: the notification fires after the outer
+      # statement's result has been materialized, and the adapter lock is
+      # reentrant.
+      def explain_for(payload, duration_ms, group)
+        return nil unless duration_ms >= Lantern.config.explain_threshold_ms
+        conn = payload[:connection] or return nil
+        return nil unless SELECT.match?(payload[:sql])
+        return nil unless explain_due?(group)
+
+        plan = Lantern.ignore { conn.explain(payload[:sql], payload[:binds] || []) }
+        plan&.to_s&.slice(0, MAX_EXPLAIN)
+      rescue StandardError
+        nil
+      end
+
+      # One EXPLAIN per query shape per process per EXPLAIN_TTL. Racy across
+      # threads by design (worst case two threads explain the same shape
+      # once), like @sources above.
+      def explain_due?(group)
+        now = Clock.monotonic
+        last = @explained[group]
+        return false if last && now - last < EXPLAIN_TTL
+        @explained.clear if @explained.size >= MAX_EXPLAINED_GROUPS
+        @explained[group] = now
+        true
       end
 
       def install!(_app)
@@ -88,7 +126,8 @@ module Lantern
             affected_rows: p[:affected_rows],
             in_transaction: p[:transaction] ? true : false,
             source: source_for(group, slow),
-            allocations: event.allocations
+            allocations: event.allocations,
+            explain: cfg.capture_query_explain ? explain_for(p, event.duration, group) : nil
           })
 
           if exe && n == cfg.n_plus_one_threshold

@@ -1,7 +1,7 @@
 # Record types
 
 Every record Lantern ships is a flat hash (`lib/lantern/record.rb`). This
-lists all 21, field by field, sourced from the subscriber or patch that
+lists all 23, field by field, sourced from the subscriber or patch that
 builds each one. Field names below are the hash keys as sent over the
 wire (symbols in Ruby, strings in the gzip NDJSON payload).
 
@@ -44,7 +44,7 @@ addition to its own fields below, always carries (`Lantern.build_parent`,
 |---|---|
 | `duration` | Wall time in microseconds, execution start to finish. |
 | `stages` | Hash of stage name → microseconds spent in it (e.g. `{"middleware_before" => 120, "action" => 4300, "render" => 900}`). |
-| `counters` | Hash of child-record counts for this execution — `queries`, `cached_queries`, `exceptions`, `logs`, `cache_events`, `jobs_enqueued`, `mail`, `broadcasts`, `notifications`, `outgoing_requests`, `storage_ops`, `view_renders`, `transactions`, `hydrated_models`, `lazy_loads`, `deprecations` (`Execution::COUNTERS`). Counted even when the execution is sampled out, so aggregate rates don't depend on the sample rate. |
+| `counters` | Hash of child-record counts for this execution — `queries`, `cached_queries`, `exceptions`, `logs`, `cache_events`, `jobs_enqueued`, `mail`, `broadcasts`, `notifications`, `outgoing_requests`, `storage_ops`, `view_renders`, `transactions`, `hydrated_models`, `lazy_loads`, `deprecations`, `spans` (`Execution::COUNTERS`). Counted even when the execution is sampled out, so aggregate rates don't depend on the sample rate. |
 | `peak_memory` | RSS in bytes, sampled at most once per second process-wide (`Execution.sampled_memory`) — cheap enough to read but not per-execution-accurate to the microsecond. |
 | `allocations` | Objects allocated during the execution (`GC.stat(:total_allocated_objects)` delta). |
 | `gc_time` | GC time in the execution's window, when the Ruby build exposes `GC.stat(:time)`. |
@@ -78,6 +78,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `ip` | `request.remote_ip`. |
 | `status_code` | Response status. |
 | `request_size` / `response_size` | Bytes, from `Content-Length`. |
+| `queue_time` | Microseconds the request waited in the proxy/web-server queue before the execution started, parsed from `X-Request-Start` (or `X-Queue-Start`): `t=1700000000.123` (seconds), `t=1700000000123` (ms), `t=1700000000123456` (µs), or the same values bare — the unit is decided by magnitude. A proxy clock running ahead clamps to `0`; anything over 60 seconds is treated as clock skew and dropped. nil when the header is absent or unparseable. |
 | `view_runtime` / `db_runtime` | Milliseconds, from Action Controller's own `process_action.action_controller` payload. |
 | `redirect_to` | Redirect target, truncated to 512 chars, if `redirect_to` was called. |
 | `halted_callback` | Filter that halted the callback chain (`throw :abort`), if any. |
@@ -175,6 +176,7 @@ going through `Lantern.record`.
 | `in_transaction` | Whether an open transaction wrapped this statement. |
 | `source` | App-code call site that issued the query (`Backtrace.caller_location`) — resolved once per query shape per process, not per query, except when the query is slow (`config.slow_query_threshold_ms`), where it's always resolved fresh. |
 | `allocations` | Ruby object allocations for this query (`event.allocations`). |
+| `explain` | The adapter's own query plan (Postgres `EXPLAIN`, SQLite `EXPLAIN QUERY PLAN`, ...), truncated to 4000 chars, or nil. Only when `config.capture_query_explain` is on, the statement is a `SELECT`, and it took at least `config.explain_threshold_ms`; then at most once per query shape per process per 10 minutes. The EXPLAIN runs on the same connection the query used, with Lantern paused, so it never becomes a `query` record of its own. |
 
 A cached query (`payload[:cached]`) only increments the execution's
 `cached_queries` counter — it never becomes a `query` record.
@@ -207,7 +209,8 @@ One per `transaction.active_record` (`lib/lantern/subscribers/queries.rb`).
 ### `exception`
 
 Every error that reaches `Rails.error` (handled or not), plus anything
-the request middleware or command patches catch directly
+the request middleware or command patches catch directly, plus anything a
+controller swallows with `rescue_from`
 (`lib/lantern/subscribers/exceptions.rb`). Standalone-capable — reports
 even with no execution open (console, boot). Deduplicated per error
 object (`error.instance_variable_get(:@__lantern_seen)`), so a re-raised
@@ -222,7 +225,7 @@ it never reaches the point where buffered records would flush.
 | `message` | Truncated to 4096 chars. |
 | `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
 | `severity` | `:error`/`:warning`/etc., as a string. |
-| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"lantern.middleware"`. |
+| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"lantern.middleware"`, `"action_controller.rescue_from"`. |
 | `file` / `line` | Top in-app backtrace frame. |
 | `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. |
 | `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
@@ -235,6 +238,18 @@ A handled exception on a sampled-out execution is dropped entirely
 (matching everything else); an *unhandled* one still ships, governed by
 its own `exceptions` sample rate rolled once per execution
 (`exception_sampled?`).
+
+An error whose class — or any named ancestor of it — appears in
+`config.ignored_exceptions` is never captured at all, handled or not.
+An error a controller rescues with `rescue_from` is captured as
+`handled: true`, `severity: "warning"`, `source:
+"action_controller.rescue_from"`, from Rails'
+`rescue_from_callback.action_controller` notification; set
+`config.capture_rescued_exceptions = false` to turn that off. Active Job's
+equivalents (`retry_on` exhausted, `discard_on`) are already covered by
+the `retry_stopped`/`discard` subscriptions in
+`lib/lantern/subscribers/jobs.rb`. See
+[`docs/configuration.md`](configuration.md) for both settings.
 
 ### `cache_event`
 
@@ -367,6 +382,26 @@ parent's `view_renders` counter regardless of the cap.
 | `cache_hits` | Fragment cache hits, for a `render_collection` event. |
 | `duration` | Microseconds. |
 
+### `span`
+
+Custom timing around any block of app code
+(`Lantern.span(name, **attributes) { ... }`, `lib/lantern.rb`). Returns
+the block's value untouched and is a no-op wrapper — it still yields —
+when Lantern is disabled, nothing is executing, or the execution isn't
+recording. Every span also increments the parent's `spans` counter.
+
+```ruby
+Lantern.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
+```
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the span name. |
+| `name` | Span name, truncated to 255 chars. |
+| `duration` | Microseconds. |
+| `attributes` | Up to 25 keys; values stringified (`inspect` for anything that isn't already a String), truncated to 200 chars, and run through the same parameter filter as request params and exception locals — so a `password:` attribute ships as `[FILTERED]`. nil when the call passed no attributes. |
+| `status` | `"ok"`, or `"failed"` if the block raised — the exception is recorded and then re-raised untouched. |
+
 ### `log`
 
 Two independent sources feed this type (`lib/lantern/subscribers/logs.rb`):
@@ -454,9 +489,22 @@ queue up) and capped at 50 visits per beacon request. No-ops entirely if
 | `partial` | Whether this was a partial Inertia reload (`only`/`except` present). |
 | `only` | Up to 50 prop keys, for a partial reload. |
 | `props_bytes` | Serialized prop payload size, client-measured. |
+| `lcp` | Largest Contentful Paint, integer ms, clamped to 0–120000. Initial load only. |
+| `cls` | Cumulative Layout Shift — the largest session window, float rounded to 4 decimals, clamped to 0–100. Initial load only. |
+| `inp` | Interaction to Next Paint, integer ms, clamped to 0–120000. The slowest interaction, not the spec's high percentile. Initial load only. |
+| `ttfb` | Time to First Byte from navigation timing's `responseStart`, integer ms, clamped to 0–120000. Initial load only. |
 | `user` | Resolved server-side from the beacon request's session/cookies, same resolver as every other record. |
 | `tenant` | Current tenant context. |
 | `user_agent` | Truncated to 256 chars. |
+
+The **initial page load** is reported as a visit too, even though Inertia
+never routed it: `method` `"GET"`, `status` `"success"`, `component` read
+from the Inertia root's `#app[data-page]` JSON, and `duration` taken from
+navigation timing (`loadEventEnd` or `responseEnd`, minus `startTime`).
+It is the only visit that carries the four Core Web Vitals, and it is held
+back until the page is first hidden (`visibilitychange`/`pagehide`) so
+those numbers are final when it ships. Every vital is nil on a browser
+that doesn't support the `PerformanceObserver` entry type behind it.
 
 ### `process`
 
@@ -475,3 +523,48 @@ sampling. Gives the platform a server/deploy inventory for free.
 | `database_adapter` | Primary DB adapter name. |
 | `queue_adapter` | Active Job queue adapter name. |
 | `cache_store` | `Rails.cache` class name. |
+
+### `health`
+
+Standalone — one every `config.health_interval` seconds (default 15) from
+a single background thread per process (`lib/lantern/health.rb`), started
+by the engine's `lantern.health` initializer only when Lantern is enabled,
+the process `role` is `"web"` or `"worker"`, and the Rails env isn't
+`test`. This is the gem's only *sampled gauge*: everything else is an
+event, this is a periodic snapshot of how loaded the process is.
+
+The whole sample runs inside `Lantern.ignore` and rescues everything, so a
+missing constant, an unmigrated queue database, or a checkout timeout
+degrades each field to nil instead of raising on a thread nobody watches —
+the record still ships with whatever it did manage to read.
+
+| Field | Meaning |
+|---|---|
+| `pid` | Process id. |
+| `role` | Same detection as `process` above: `"web"` or `"worker"`. |
+| `memory` | RSS in bytes (`Execution.sampled_memory`). |
+| `threads_max` | Puma's configured max threads, or nil when Puma isn't running. |
+| `threads_busy` | Puma threads currently serving a request (`busy_threads`). |
+| `backlog` | Requests queued inside Puma waiting for a thread. |
+| `pool_size` | Active Record connection pool size (`connection_pool.stat[:size]`). |
+| `pool_busy` | Connections checked out. |
+| `pool_waiting` | Threads blocked waiting for a connection — sustained non-zero means the pool is undersized for the thread count. |
+| `queue_depth` | `SolidQueue::ReadyExecution.count` — jobs ready to run right now. |
+| `queue_latency` | Microseconds since the oldest ready job was created, i.e. the backlog's head-of-line wait. nil when the queue is empty. |
+| `detail` | JSON string: `queues` (ready count per queue name), `workers` (`SolidQueue::Process` rows of kind `Worker`), `requests_count` (Puma's lifetime request count for this process), `running` (threads Puma has spawned), `max_threads_reached` (true when Puma's `pool_capacity` was 0 at sample time, i.e. no spare thread). |
+
+Every Puma field is nil when no `Puma::Server` exists in the process, and
+every Solid Queue field is nil when `SolidQueue` isn't loaded.
+
+In a **clustered, preloaded** Puma the initializer runs in the master and
+threads don't survive `fork`, so each worker needs its own:
+
+```ruby
+# config/puma.rb
+on_worker_boot { Lantern::Health.start! }
+```
+
+`Lantern::Health.start!` is idempotent, and `stop!` (registered by the
+engine's `at_exit`, ahead of the reporter's final flush) wakes the thread
+off its `ConditionVariable` immediately rather than waiting out the
+interval.
