@@ -117,7 +117,7 @@ module Lantern
 
     # Records that make sense without a parent execution (console, boot).
     # Every other type is dropped when nothing is executing, matching Nightwatch.
-    STANDALONE_TYPES = %i[process user visit exception].freeze
+    STANDALONE_TYPES = %i[process user visit exception health].freeze
 
     # Low-level write for a record hash the caller already built (hot-path
     # subscribers assemble one hash literal instead of packing kwargs, then

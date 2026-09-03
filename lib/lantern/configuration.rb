@@ -29,7 +29,9 @@ module Lantern
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
                   :beacon_enabled, :debug, :capture_default_vendor_commands,
                   :capture_default_vendor_cache_keys, :on_unrecoverable,
-                  :capture_framework_events
+                  :capture_framework_events,
+                  :tail_sample_slow_ms, :propagate_traces, :trace_propagation_hosts,
+                  :health_interval, :capture_query_explain, :explain_threshold_ms
 
     attr_reader :user_resolver, :redactors, :rejectors, :before_ingest
 
@@ -70,6 +72,14 @@ module Lantern
       @on_unrecoverable = nil
       @beacon_enabled = env_bool("LANTERN_BEACON", true)
       @debug = env_bool("LANTERN_DEBUG", false)
+      # Tail-based sampling: a head-sampled-out execution is still kept when
+      # it ran at least this long, raised, or Lantern.keep! was called. nil = off.
+      @tail_sample_slow_ms = ENV["LANTERN_TAIL_SAMPLE_SLOW_MS"]&.then { |v| Float(v) }
+      @propagate_traces = env_bool("LANTERN_PROPAGATE_TRACES", true)
+      @trace_propagation_hosts = ENV["LANTERN_TRACE_PROPAGATION_HOSTS"]&.split(",")&.map(&:strip)
+      @health_interval = env_float("LANTERN_HEALTH_INTERVAL", 15.0)
+      @capture_query_explain = env_bool("LANTERN_CAPTURE_QUERY_EXPLAIN", false)
+      @explain_threshold_ms = env_float("LANTERN_EXPLAIN_THRESHOLD_MS", 100.0)
       @user_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }
