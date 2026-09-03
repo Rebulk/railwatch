@@ -1,0 +1,6 @@
+#!/bin/sh
+# Kamal post-deploy hook: records the deploy in Lantern so charts and issues
+# get a deploy marker and regressions are attributed to a version.
+set -e
+[ -z "$LANTERN_TOKEN" ] && exit 0
+bin/kamal app exec --primary --reuse "bin/rails lantern:deploy[$KAMAL_VERSION]" || true

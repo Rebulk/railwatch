@@ -1,0 +1,38 @@
+# frozen_string_literal: true
+
+module Lantern
+  # Header and parameter redaction. Parameter redaction reuses the app's own
+  # Rails.application.config.filter_parameters plus Lantern's list, so
+  # anything the app already hides from logs is hidden here too.
+  class Redactor
+    FILTERED = "[FILTERED]"
+
+    def initialize(config)
+      @config = config
+      @header_keys = config.redact_headers.map { |h| h.downcase }.to_set
+      @param_filter = nil
+    end
+
+    def headers(hash)
+      hash.each_with_object({}) do |(k, v), out|
+        out[k] = @header_keys.include?(k.to_s.downcase) ? FILTERED : v.to_s[0, 512]
+      end
+    end
+
+    def params(hash)
+      param_filter.filter(hash)
+    rescue StandardError
+      {}
+    end
+
+    private
+
+    def param_filter
+      @param_filter ||= begin
+        filters = @config.redact_params.dup
+        filters.concat(Rails.application.config.filter_parameters) if defined?(Rails) && Rails.application
+        ActiveSupport::ParameterFilter.new(filters.uniq, mask: FILTERED)
+      end
+    end
+  end
+end

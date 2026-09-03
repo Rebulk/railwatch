@@ -1,0 +1,21 @@
+source "https://rubygems.org"
+
+gemspec
+
+gem "puma"
+gem "sqlite3", ">= 2.1"
+gem "solid_queue"
+gem "solid_cache"
+gem "solid_cable"
+
+group :development, :test do
+  gem "rspec-rails", "~> 8.0"
+  gem "webmock"
+  gem "rubocop-rails-omakase", require: false
+  gem "debug", require: "debug/prelude"
+end
+
+group :bench do
+  gem "benchmark-ips"
+  gem "memory_profiler"
+end
