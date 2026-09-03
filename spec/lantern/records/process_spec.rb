@@ -31,9 +31,16 @@ RSpec.describe "process record" do
       expect(Lantern::Subscribers::ProcessInfo.role).to eq("web")
     end
 
-    it "is worker when SolidQueue::Supervisor is defined and $PROGRAM_NAME includes jobs" do
-      stub_const("SolidQueue::Supervisor", Class.new)
+    it "is worker when SolidQueue is defined and $PROGRAM_NAME includes jobs" do
+      stub_const("SolidQueue", Module.new)
       with_program_name("bin/jobs") { expect(Lantern::Subscribers::ProcessInfo.role).to eq("worker") }
+    end
+
+    it "is worker for `rails solid_queue:start` even though Puma is loaded" do
+      stub_const("Puma", Module.new)
+      stub_const("SolidQueue", Module.new)
+      stub_const("ARGV", [ "solid_queue:start" ])
+      with_program_name("bin/rails") { expect(Lantern::Subscribers::ProcessInfo.role).to eq("worker") }
     end
 
     it "is console when Rails::Console is defined" do

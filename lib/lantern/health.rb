@@ -101,9 +101,12 @@ module Lantern
     def puma_stats
       server = puma_server or return EMPTY
       s = server.stats
+      # Puma's busy_threads counts queued requests too (spawned - waiting +
+      # todo), so it can exceed max_threads under load; the pool cannot,
+      # and that is what a utilisation percentage should describe.
       {
         threads_max: s[:max_threads],
-        threads_busy: s[:busy_threads],
+        threads_busy: s[:busy_threads] && s[:max_threads] ? [ s[:busy_threads], s[:max_threads] ].min : s[:busy_threads],
         backlog: s[:backlog],
         running: s[:running],
         requests_count: s[:requests_count],
