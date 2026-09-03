@@ -81,7 +81,8 @@ module Lantern
             status: status,
             queue_latency: exe.queue_latency,
             db_runtime: p[:db_runtime]&.round(2),
-            arguments_preview: arguments_preview(job)
+            arguments_preview: arguments_preview(job),
+            **captured_arguments(job)
           }
           if key
             Lantern.finish_execution(:scheduled_task, group: Record.group_hash(key), task_key: key,
@@ -165,6 +166,47 @@ module Lantern
         job.arguments.map { |a| a.respond_to?(:to_global_id) ? a.to_global_id.to_s : a.class.name }.first(10)
       rescue StandardError
         []
+      end
+
+      ARGUMENTS_MAX_BYTES = 8 * 1024
+
+      # The job's real arguments, off by default (capture_job_arguments)
+      # because they routinely carry PII -- arguments_preview above ships
+      # only their shape and is always on.
+      #
+      # job.serialize["arguments"] is Active Job's own JSON-safe form, so an
+      # Active Record argument is already a GlobalID string rather than a
+      # hydrated model.
+      def captured_arguments(job)
+        return {} unless Lantern.config.capture_job_arguments
+
+        kept, truncated = fit_arguments(redact_arguments(job.serialize["arguments"]))
+        truncated ? { arguments: kept, arguments_truncated: true } : { arguments: kept }
+      rescue StandardError
+        {}
+      end
+
+      # Hash arguments (including hashes nested in an array argument) go
+      # through the same parameter filter as request params, so a
+      # `password:` keyword ships as [FILTERED].
+      def redact_arguments(arguments)
+        Array(arguments).map do |argument|
+          case argument
+          when Hash then Lantern.redactor.params(argument)
+          when Array then redact_arguments(argument)
+          else argument
+          end
+        end
+      end
+
+      # Drops trailing arguments until the JSON fits, rather than truncating
+      # the JSON itself into something the platform can't parse.
+      def fit_arguments(arguments)
+        return [ arguments, false ] if JSON.generate(arguments).bytesize <= ARGUMENTS_MAX_BYTES
+
+        kept = arguments.dup
+        kept.pop while kept.any? && JSON.generate(kept).bytesize > ARGUMENTS_MAX_BYTES
+        [ kept, true ]
       end
 
       # A job is a scheduled task when Solid Queue recorded a RecurringExecution

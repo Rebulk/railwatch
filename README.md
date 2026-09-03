@@ -47,6 +47,15 @@ job, or command — the block's value is returned untouched:
 Lantern.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
 ```
 
+When a span isn't enough to say where the time went, Lantern can attach a
+real stack profile to an execution. Add `gem "vernier"` (Ruby ≥ 3.2) or
+`gem "stackprof"` to the Gemfile and set `c.profile_sample = 0.01` to
+profile 1% of executions, or `c.profile_slow_ms = 500` alongside
+`c.tail_sample_slow_ms` to profile the slow ones. The collapsed stacks
+ship as their own `profile` record, gzipped, and the request or job it
+belongs to is marked `profiled`. Off by default, and one Float comparison
+per execution while it stays off.
+
 Sampling can also be decided at the *end* of an execution instead of the
 start: set `c.tail_sample_slow_ms = 500` (or call `Lantern.keep!`) and a
 head-sampled-out request that turns out to be slow, or to have raised,
@@ -118,19 +127,19 @@ and `context` all come from the same `Lantern.configure` block and
 | `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
 | `before_send:` / `before_send_transaction:` | `Lantern.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Lantern.redact_queries`/`redact_logs`/... to scrub one record type in place; `Lantern.reject_queries`/`reject_logs`/... to drop records by predicate. |
 | `include_local_variables:` | `config.capture_exception_locals`. |
-| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Lantern.user { ... }` block for who. There is no single "send everything" switch. |
+| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.capture_job_arguments` for job arguments, `config.capture_response_body_on_error` for what a failing upstream sent back, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Lantern.user { ... }` block for who. There is no single "send everything" switch. |
 | Breadcrumbs | Not a separate concept — every query, cache read, outgoing request, log line, and view render is already a first-class record linked to its execution by `execution_id`/`trace_id`. The execution *is* the breadcrumb trail, and it's queryable. |
 | `Sentry.capture_message` | `Lantern.report(error, ...)` for an exception; plain `Rails.logger` for a message — log lines at or above `config.log_level` become `log` records automatically. |
 | `Sentry.set_user` | `Lantern.user { ... }` (a resolver block, evaluated per execution). |
 | `Sentry.set_tags` / `set_context` / `set_extras` | `Lantern.context(key: value)` — serialized onto the parent record and every exception. |
 | `Sentry.with_child_span` | `Lantern.span("name") { ... }`. |
+| `Sentry.add_attachment` | `Lantern.attach("payload.json", data)` — a String, `Pathname`, or IO, gzipped on the wire and capped at `config.max_attachment_bytes`. `exception:` files it against that error's issue, and `Lantern.report(error, attachments: { "payload.json" => data })` captures and attaches in one call. |
 | `Sentry.capture_check_in` (cron monitoring) | Automatic: Solid Queue recurring tasks become `scheduled_task` records with `task_key`, `schedule`, and `drift`. Nothing to instrument. |
 | `config.rails.report_rescued_exceptions` | `config.capture_rescued_exceptions` (on by default). |
 | Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
 
-Still missing versus Sentry, deliberately or not yet: profiling
-(Vernier/StackProf flamegraphs), event attachments, and
-sessions/release-health (crash-free rate). Everything else above is
+Still missing versus Sentry, deliberately: sessions/release-health
+(crash-free rate) and custom fingerprinting. Everything else above is
 either covered or replaced by the execution model.
 
 To report an exception manually (the `Rails.error.report`-equivalent):

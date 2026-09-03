@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require "base64"
 require "digest"
 require "set"
 require "uri"
+require "zlib"
 require "active_support"
 require "active_support/core_ext/object/blank"
 require "active_support/isolated_execution_state"
@@ -22,6 +24,8 @@ require "lantern/redactor"
 require "lantern/sql_normalizer"
 require "lantern/backtrace"
 require "lantern/context"
+require "lantern/profiler"
+require "lantern/attachments"
 # Lantern::Faraday subclasses ::Faraday::Middleware at load time, so it can't
 # be required here: `gemspec` puts this gem in the Gemfile's :default group,
 # and Bundler.require(*Rails.groups) requires gems in Gemfile declaration
@@ -85,6 +89,10 @@ module Lantern
       # clearing the thread-local outright and losing the outer parent.
       exe.parent_execution = Current.execution
       Current.execution = exe
+      # Profiling is off by default, and then this costs one Float
+      # comparison per execution: the rest sits behind the short circuit,
+      # and tail_buffering? is a bare ivar read the Execution already made.
+      start_profile(exe) if config.profile_sample > 0.0 || (exe.tail_buffering? && config.profile_slow_ms)
       exe
     end
 
@@ -101,6 +109,9 @@ module Lantern
       exe.capture_memory
       tail = !exe.sampled? && tail_keep?(exe)
       fields[:tail_sampled] = true if tail
+      # The profile is a child record of this execution, so it has to be
+      # buffered before the parent is built and the tree is shipped.
+      fields[:profiled] = true if exe.profiler_handle && ship_profile(exe, exe.sampled? || tail)
       parent = parent_type && build_parent(parent_type, exe, group: group, **fields)
       if exe.sampled? || tail
         exe.records.each { |r| reporter.write(r) }
@@ -207,10 +218,14 @@ module Lantern
 
     # --- errors ----------------------------------------------------------------
 
-    def report(error, handled: true, severity: nil, context: {})
-      Subscribers::Exceptions.capture(error, handled: handled, severity: severity || (handled ? :warning : :error),
-                                      context: context, source: "lantern.manual")
+    def report(error, handled: true, severity: nil, context: {}, attachments: nil)
+      rec = Subscribers::Exceptions.capture(error, handled: handled, severity: severity || (handled ? :warning : :error),
+                                            context: context, source: "lantern.manual")
+      attachments&.each { |name, data| Attachments.attach(name, data, exception: error) }
+      rec
     end
+
+    def attach(...) = Attachments.attach(...)
 
     # --- context / user --------------------------------------------------------
 
@@ -355,6 +370,53 @@ module Lantern
 
       slow = config.tail_sample_slow_ms
       !slow.nil? && exe.duration >= slow * 1_000
+    end
+
+    # Starts the process-global sampling profiler for this execution. Only
+    # reached when profiling is configured at all (see start_execution), so
+    # loading a backend and rolling the dice stay off the default path.
+    def start_profile(exe)
+      # An app's test suite inherits its LANTERN_* environment, and starting
+      # a real profile on every example would make that suite crawl, so in
+      # the test env profiling is opt-in through an explicitly non-zero
+      # profile_sample -- profile_slow_ms alone is not enough.
+      return if config.profile_sample <= 0.0 && defined?(Rails) && Rails.env.test?
+      return unless Profiler.available?
+
+      rolled = exe.sampled? && config.profile_sample > 0.0 && Random.rand < config.profile_sample
+      # profile_slow_ms can't know an execution is slow until it is over, so
+      # it profiles every tail-buffering execution from its first line and
+      # throws away the ones that turn out to be fast.
+      return unless rolled || (exe.tail_buffering? && config.profile_slow_ms)
+
+      exe.profile_sampled = rolled
+      exe.profiler_handle = Profiler.start
+    rescue StandardError => e
+      debug { "starting profile failed: #{e.class}: #{e.message}" }
+      nil
+    end
+
+    # Stops this execution's profile -- always, since the backend is
+    # process-global and must not be left running -- and buffers it as a
+    # `profile` child when the tree ships and the profile is one we asked
+    # for: any profile when profile_slow_ms is off, otherwise only a slow
+    # execution or one the head profile_sample roll picked. Returns whether
+    # a record was buffered, which is what puts `profiled` on the parent.
+    def ship_profile(exe, ships)
+      profile = Profiler.stop
+      return false unless profile && ships
+
+      slow = config.profile_slow_ms
+      return false unless slow.nil? || exe.profile_sampled || profile.duration >= slow * 1_000
+
+      collapsed = profile.collapsed
+      !record(:profile, timestamp: exe.started_at, profiler: profile.profiler.to_s,
+              mode: profile.mode.to_s, interval: profile.interval, duration: profile.duration,
+              samples: profile.samples, stacks_bytes: collapsed.bytesize,
+              stacks: Base64.strict_encode64(Zlib.gzip(collapsed))).nil?
+    rescue StandardError => e
+      debug { "shipping profile failed: #{e.class}: #{e.message}" }
+      false
     end
 
     # Same treatment exception locals get: stringified, truncated, capped,

@@ -92,6 +92,60 @@ exactly the behaviour Lantern had before. `Lantern.keep!` can only keep
 records made *after* the call unless tail sampling was already on: what
 was never buffered can't be resurrected.
 
+### Profiling
+
+Sampling and tail sampling say *which* executions ship; profiling says
+which of them also ship a stack profile — where the time inside a slow
+request or job actually went (`docs/records.md`'s `profile` record).
+
+The backend is an optional dependency the app installs itself, because
+neither belongs in every Gemfile:
+
+```ruby
+gem "vernier"    # Ruby >= 3.2, preferred
+gem "stackprof"  # anywhere else
+```
+
+With neither installed, `Lantern::Profiler.available?` is false and every
+option below is inert.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `profile_sample` | `LANTERN_PROFILE_SAMPLE_RATE` | `0.0` (off) | Fraction of sampled-in executions to profile, rolled once per execution. |
+| `profile_slow_ms` | `LANTERN_PROFILE_SLOW_MS` | nil (off) | Also ship a profile for any tail-buffering execution that ran at least this many milliseconds. |
+| `profile_interval_us` | `LANTERN_PROFILE_INTERVAL_US` | `1000` | Sampling interval in microseconds. |
+| `profiler` | `LANTERN_PROFILER` | nil (auto) | Pin a backend: `vernier` or `stackprof`. Auto prefers vernier when both are installed. |
+
+The two triggers are different bargains:
+
+- **`profile_sample`** decides at the *start*, like head sampling. A
+  profiler runs for that fraction of executions and every profile it takes
+  is shipped. Cheap and predictable — 1% of requests pay for a profiler,
+  99% pay for one `Random.rand`.
+- **`profile_slow_ms`** can't know an execution is slow until it is over,
+  so it profiles *every* tail-buffering execution from its first line and
+  throws away the ones that turn out to be fast. That means it only works
+  together with `tail_sample_slow_ms` (nothing tail-buffers without it),
+  and **the CPU cost is paid on every execution, not just the slow ones**
+  — the profiler's sampling thread runs throughout, and the stack table it
+  builds is held for the execution's lifetime. Raise
+  `profile_interval_us` if that shows up in your latency; a 5000µs
+  interval still resolves a 500ms request perfectly well.
+
+```ruby
+c.sample = { requests: 1.0 }
+c.tail_sample_slow_ms = 500     # keep every request slower than 500ms...
+c.profile_slow_ms = 500         # ...and profile it
+c.profile_sample = 0.01         # plus a profile of 1% of everything else
+```
+
+Both backends are process-global, so there is one profiler per process:
+an execution that starts while another is being profiled simply isn't
+profiled. In the Rails `test` env profiling is skipped entirely unless
+`profile_sample` is explicitly non-zero, so a suite that inherits the
+app's `LANTERN_*` environment doesn't start a real profiler on every
+example.
+
 ## Distributed tracing
 
 Lantern propagates W3C trace context, so a request that fans out to
@@ -295,6 +349,8 @@ defaults and always applies.
 | `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Include source snippet lines with each exception's backtrace frames. |
 | `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
+| `capture_job_arguments` | `LANTERN_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
+| `capture_response_body_on_error` | `LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR` | `false` | Add the first 4 KiB of the response body to an `outgoing_request` record when the response was an error (status ≥ 400, or the call raised). A JSON object body is filtered like request params and re-serialized; anything else is stored as it arrived. Off by default — a third party's error body is arbitrary data you didn't write. |
 | `ignored_exceptions` | `LANTERN_IGNORED_EXCEPTIONS` (comma-separated) | `Configuration::DEFAULT_IGNORED_EXCEPTIONS` | Class names never captured, handled or not. Matched against the error's class *and every named ancestor*, so your own subclass of a listed error is ignored too. Setting the env var replaces the default list; append instead with `c.ignored_exceptions += ["MyApp::Expected"]`. |
 | `capture_rescued_exceptions` | `LANTERN_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |
 
@@ -384,6 +440,32 @@ block's return value responds to `#status` — for Faraday-alike client
 objects that aren't Net::HTTP and don't already go through
 `Lantern::Faraday` middleware.
 
+### Attachments
+
+Ship an arbitrary blob — the payload that failed to parse, a rendered PDF,
+the webhook body a customer swears they sent — as its own `attachment`
+record (Sentry's `Sentry.add_attachment`):
+
+```ruby
+Lantern.attach("payload.json", request.raw_post)                  # a String
+Lantern.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf")) # a Pathname, or any IO
+Lantern.attach("payload.json", body, content_type: "text/plain")  # override the guessed type
+Lantern.attach("payload.json", body, exception: error)            # file it against an issue
+Lantern.report(error, attachments: { "payload.json" => body })    # capture + attach in one call
+```
+
+`content_type` defaults to whatever Marcel makes of the name's extension
+(`application/octet-stream` if it can't tell). Passing `exception:` sets
+the record's `exception_group_hash` to the same group hash the `exception`
+record is filed under, so the platform shows the attachment on that issue.
+An attachment made inside a recording execution belongs to it; made with
+nothing executing, it ships standalone. Returns nil and records nothing
+when Lantern is disabled or the payload is empty.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `max_attachment_bytes` | `LANTERN_MAX_ATTACHMENT_BYTES` | `1048576` (1 MiB) | Payloads longer than this are cut to the cap and the record is flagged `truncated: true`. `bytes` on the record is always the stored size. Data is gzipped and base64-encoded on the wire, so the cap is on the *original* bytes, not what ships. |
+
 ## on_unrecoverable
 
 ```ruby
@@ -423,7 +505,7 @@ Mirrors Laravel Nightwatch's facade shape. All on the `Lantern` module
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
 `keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
 are the ignore block's building blocks — nestable), `record(type, **fields)`,
-`report(error, ...)`, `context(**attrs)`, `user(&block)`, `redact_*`,
+`report(error, ..., attachments: {})`, `attach(name, data, ...)`, `context(**attrs)`, `user(&block)`, `redact_*`,
 `reject_*`, `reject_cache_keys`, `before_ingest`, `on_unrecoverable`,
 `instrument_outgoing`, `flush`, `debug { }`.
 

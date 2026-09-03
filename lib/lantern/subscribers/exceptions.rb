@@ -101,7 +101,7 @@ module Lantern
 
         cause = error.cause
         frames = Backtrace.frames(error, with_source: Lantern.config.capture_exception_source)
-        top = frames.find { |f| f[:in_app] } || frames.first || {}
+        top = top_frame(frames)
         rec = {
           class: error.class.name,
           message: error.message.to_s[0, 4096],
@@ -119,12 +119,31 @@ module Lantern
           ruby_version: RUBY_VERSION,
           rails_version: (Rails.version rescue nil)
         }
-        group = Record.group_hash(error.class.name, top[:file], top[:line], normalize_message(error.message))
+        group = group_from(error, top)
         if handled
           Lantern.record(:exception, group: group, **rec)
         else
           Lantern.record_now(:exception, group: group, **rec)
         end
+      end
+
+      # The group hash `capture` would assign this error. Public so
+      # Lantern.attach can file an attachment against the same issue without
+      # having to re-derive the bucketing rule (source snippets are skipped:
+      # they cost I/O and don't take part in the hash).
+      def group_for(error)
+        group_from(error, top_frame(Backtrace.frames(error, with_source: false)))
+      end
+
+      # The frame an occurrence is filed under: the first application frame,
+      # falling back to the top of the backtrace for an error raised entirely
+      # inside a gem.
+      def top_frame(frames)
+        frames.find { |f| f[:in_app] } || frames.first || {}
+      end
+
+      def group_from(error, top)
+        Record.group_hash(error.class.name, top[:file], top[:line], normalize_message(error.message))
       end
 
       # config.ignored_exceptions, matched against the error's own class name

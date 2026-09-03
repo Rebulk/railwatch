@@ -1,7 +1,7 @@
 # Record types
 
 Every record Lantern ships is a flat hash (`lib/lantern/record.rb`). This
-lists all 23, field by field, sourced from the subscriber or patch that
+lists all 25, field by field, sourced from the subscriber or patch that
 builds each one. Field names below are the hash keys as sent over the
 wire (symbols in Ruby, strings in the gzip NDJSON payload).
 
@@ -89,6 +89,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
 | `files` | Array of `{name, size, content_type, error}` for each uploaded file (metadata only, never contents). |
+| `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |
 
 ### `job_attempt`
 
@@ -111,7 +112,10 @@ scheduler didn't originate (see `scheduled_task` below for the ones it did).
 | `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = a `retry_on` caught the error internally — see `enqueue_retry.active_job` below). |
 | `queue_latency` | Microseconds between `scheduled_at`/`enqueued_at` and this attempt starting. |
 | `db_runtime` | Milliseconds of DB time during the attempt, from Active Job's own payload. |
-| `arguments_preview` | Up to 10 arguments — GlobalID string for AR objects/GlobalID-capable arguments, class name otherwise (never raw argument values). |
+| `arguments_preview` | Up to 10 arguments — GlobalID string for AR objects/GlobalID-capable arguments, class name otherwise (never raw argument values). Always on. |
+| `arguments` | The job's real arguments (`job.serialize["arguments"]`, Active Job's own JSON-safe form, so an Active Record argument is already a GlobalID). Only present when `config.capture_job_arguments` is on — off by default, because arguments routinely carry PII. Hash arguments (including hashes nested in an array argument) go through the same parameter filter as request params, so a `password:` keyword ships as `[FILTERED]`. |
+| `arguments_truncated` | `true` when trailing arguments had to be dropped to fit `arguments` into 8 KiB of JSON. Absent otherwise, and absent entirely when `capture_job_arguments` is off. |
+| `profiled` | `true` when a `profile` record shipped for this attempt; absent otherwise. |
 
 Also has a special case with no `Execution`: **Solid Queue pruned jobs**
 (`fail_many_claimed.solid_queue`) never reach `perform.active_job` because
@@ -345,6 +349,7 @@ thread-local reentry flag, so it's never double-recorded.
 | `request_size` | Bytes (Net::HTTP path only). |
 | `response_size` | Bytes, from `Content-Length` or body size. |
 | `error` | `"Class: message"`, truncated to 255 chars, if the request raised. |
+| `response_body` | First 4 KiB of the response body, but only when `config.capture_response_body_on_error` is on (off by default) *and* the response was an error. A body that parses as a JSON object is run through the same parameter filter as request params and re-serialized; anything else is stored as it arrived. nil in every other case — including a connection failure, where there is no response (on the Net::HTTP path a body is read only if Net::HTTP already buffered it, so a response being streamed through `read_body` is never consumed; on the Faraday path the body is taken only once a status came back, so an outgoing request payload can never be filed as a response). |
 | `source` | App-code call site (Net::HTTP path only). |
 
 ### `storage_op`
@@ -401,6 +406,38 @@ Lantern.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
 | `duration` | Microseconds. |
 | `attributes` | Up to 25 keys; values stringified (`inspect` for anything that isn't already a String), truncated to 200 chars, and run through the same parameter filter as request params and exception locals — so a `password:` attribute ships as `[FILTERED]`. nil when the call passed no attributes. |
 | `status` | `"ok"`, or `"failed"` if the block raised — the exception is recorded and then re-raised untouched. |
+
+### `attachment`
+
+An arbitrary blob filed against an execution and, optionally, an exception
+(`Lantern.attach(name, data, content_type:, exception:)`,
+`lib/lantern/attachments.rb`) — the payload that failed to parse, a
+rendered PDF, the webhook body a customer swears they sent. Sentry's
+`Sentry.add_attachment` equivalent.
+
+```ruby
+Lantern.attach("payload.json", request.raw_post)
+Lantern.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf"))
+Lantern.attach("payload.json", body, exception: error)
+Lantern.report(error, attachments: { "payload.json" => body })
+```
+
+`data` may be a String (the bytes themselves), a `Pathname` (the file is
+read), or any IO. This is one of the standalone types
+(`Lantern::STANDALONE_TYPES`): inside a recording execution it ships as a
+child of it, and with nothing executing — a boot hook, a console, a rescue
+outside any request — it ships on its own. Returns nil and records nothing
+when Lantern is disabled or the payload is empty.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the attachment name, so the same name across occurrences buckets together. |
+| `name` | Attachment name, truncated to 255 chars. |
+| `content_type` | Passed explicitly, else guessed from the name's extension via Marcel (which Rails already ships for Active Storage), else `application/octet-stream`. Truncated to 128 chars. |
+| `bytes` | Size of the payload **as stored**, i.e. after any truncation — not the size of the original. |
+| `data` | `Base64.strict_encode64(Zlib.gzip(bytes))`, so a text payload costs a fraction of its size in the batch. |
+| `truncated` | `true` when the payload was longer than `config.max_attachment_bytes` (default 1 MiB) and was cut to the cap. Absent otherwise. |
+| `exception_group_hash` | The `_group` of the `exception` record this attachment belongs to, when one was passed as `exception:` — the same hash `Subscribers::Exceptions` files that error under, so the platform can show the attachment on the issue. nil otherwise. |
 
 ### `log`
 
@@ -564,3 +601,53 @@ any `on_worker_boot` configuration.
 engine's `at_exit`, ahead of the reporter's final flush) wakes the thread
 off its `ConditionVariable` immediately rather than waiting out the
 interval.
+
+### `profile`
+
+A sampling profile of one execution (`lib/lantern/profiler.rb`,
+`Lantern.start_profile`/`ship_profile` in `lib/lantern.rb`). Off by
+default; see `docs/configuration.md`'s **Profiling** section for how an
+execution is picked and which backend gem the app has to install. Exactly
+one `profile` per execution, buffered as a child of that execution and
+shipped with it, and the execution's parent record then carries
+`profiled: true`.
+
+| Field | Meaning |
+|---|---|
+| `profiler` | `"vernier"` or `"stackprof"` — the backend that collected it. |
+| `mode` | `"wall"`. |
+| `interval` | Sampling interval in microseconds (`config.profile_interval_us`). |
+| `duration` | Microseconds actually profiled, start to stop. |
+| `samples` | Total samples collected. When `stacks` was truncated (below), the counts inside it sum to less than this. |
+| `stacks` | Base64 of gzip of the collapsed-stack text, described below. |
+| `stacks_bytes` | Uncompressed size of that text, in bytes. |
+
+`stacks` decodes to *folded stacks*, the same shape Brendan Gregg's
+`stackcollapse` produces: one line per unique stack, outermost frame
+first, semicolon-separated, then a space and the number of samples that
+landed on it.
+
+```
+<main> (config.ru:3);WidgetsController#index (app/controllers/widgets_controller.rb:4);ActiveRecord::Relation#each (activerecord-8.1.0/lib/active_record/relation/delegation.rb:89) 37
+```
+
+Each frame is `Class#method (path:line)`. The Rails root is stripped from
+app paths, an installed gem's path becomes `<gem>/relative/path` (the
+version is dropped; the deploy already records it), Ruby's own library
+becomes `ruby/...`, and a C function — which has no Ruby file of its own —
+reads `<cfunc>:0`.
+Lines are ordered by sample count descending, ties broken by the stack
+text, so the same profile always serialises to the same bytes.
+
+The text is capped at **4 MiB uncompressed**
+(`Lantern::Profiler::MAX_COLLAPSED_BYTES`); past that the least frequent
+stacks are dropped, since the shape of a profile lives in its frequent
+ones. Rails stacks are deep enough that a busy request can reach the cap,
+which is why `samples` is reported separately from the counts in `stacks`.
+
+Both backends are process-global — there is one profiler per process, not
+one per thread — so an execution that starts while another is being
+profiled simply isn't profiled (counted in `Lantern::Profiler.skipped`).
+Vernier samples every thread in the process, so only the thread that
+started the profile is folded in; StackProf samples wherever its `SIGPROF`
+lands.

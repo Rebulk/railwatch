@@ -101,6 +101,55 @@ RSpec.describe "tail sampling", type: :request do
     end
   end
 
+  # profile_slow_ms rides on tail sampling: a slow execution has to be
+  # profiled from its first line, long before anyone knows it is slow.
+  describe "profile_slow_ms" do
+    before do
+      # The head profile_sample roll must never fire here, so profile_slow_ms
+      # is the only thing that can pick an execution. A non-zero rate is
+      # still needed: the test env profiles only when one is set.
+      allow(Random).to receive(:rand).and_return(0.99)
+      Lantern.config.profile_sample = 0.5
+      Lantern.config.profile_interval_us = 500
+    end
+
+    after do
+      Lantern.config.profile_sample = 0.0
+      Lantern.config.profile_slow_ms = nil
+      Lantern.config.profile_interval_us = 1_000
+      Lantern::Profiler.reset!
+    end
+
+    it "ships the profile of a tail-buffering request that ran at least profile_slow_ms" do
+      Lantern.config.tail_sample_slow_ms = 500.0
+      Lantern.config.profile_slow_ms = 0.0 # every request is "slow"
+      get "/widgets"
+
+      expect(lantern_records(:profile).sole[:profiler]).to eq("vernier")
+      expect(lantern_records(:request).sole[:profiled]).to be(true)
+    end
+
+    it "throws the profile away when the request finished faster than profile_slow_ms" do
+      Lantern.config.tail_sample_slow_ms = 500.0
+      Lantern.config.profile_slow_ms = 60_000.0
+      get "/widgets"
+
+      expect(lantern_records(:profile)).to be_empty
+      expect(lantern_records(:request).sole).not_to have_key(:profiled)
+    end
+
+    it "never starts a profile when tail sampling is off" do
+      Lantern.config.profile_slow_ms = 0.0
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+
+      expect(exe.tail_buffering?).to be(false)
+      expect(exe.profiler_handle).to be_nil
+
+      finish_command
+      expect(lantern_records(:profile)).to be_empty
+    end
+  end
+
   describe "Execution#recording?" do
     it "is unchanged for a sampled-out execution when tail sampling is off" do
       exe = Lantern::Execution.new(source: :request, sampled: false)

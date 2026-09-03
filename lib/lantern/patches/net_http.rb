@@ -67,9 +67,35 @@ module Lantern
           request_size: (req.body || "").bytesize,
           response_size: response ? (response["Content-Length"]&.to_i || response.body&.bytesize rescue nil) : nil,
           error: error && "#{error.class}: #{error.message}"[0, 255],
+          response_body: response_body(response, error),
           source: Backtrace.caller_location(skip: 4))
       rescue StandardError => e
         Lantern.debug { "outgoing request record failed: #{e.message}" }
+      end
+
+      RESPONSE_BODY_MAX = 4096
+
+      def self.response_body(response, error)
+        return nil unless Lantern.config.capture_response_body_on_error
+        return nil unless error || response&.code.to_i >= 400
+
+        # Net::HTTPResponse#body reads from the socket the first time it is
+        # called, which would consume a response the caller is streaming out
+        # of #read_body. @body holds a String only once Net::HTTP has already
+        # buffered the whole body (which #request does for every response it
+        # isn't streaming), so reading it here can never touch the socket.
+        captured_response_body(response&.instance_variable_get(:@body))
+      end
+
+      # Shared with Lantern::Faraday. A JSON object body goes through the
+      # same parameter filter as request params and is re-serialized; any
+      # other body has no keys to match, so it is stored as it arrived.
+      def self.captured_response_body(body)
+        return nil unless body.is_a?(String) && !body.empty?
+
+        parsed = (JSON.parse(body) rescue nil)
+        body = JSON.generate(Lantern.redactor.params(parsed)) if parsed.is_a?(Hash)
+        body[0, RESPONSE_BODY_MAX]
       end
     end
   end

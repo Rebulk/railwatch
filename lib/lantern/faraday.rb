@@ -52,7 +52,22 @@ module Lantern
                      timestamp: started_at, host: url.host, method: env.method.to_s.upcase,
                      url: "#{url.scheme}://#{url.host}#{url.path}"[0, 2048],
                      duration: Clock.micros_since(start), status_code: env.status.to_i,
-                     error: error && "#{error.class}: #{error.message}"[0, 255])
+                     error: error && "#{error.class}: #{error.message}"[0, 255],
+                     response_body: response_body(env))
+    end
+
+    # Faraday threads one Env through the whole stack, and the adapter
+    # overwrites its body with the response, so env.body is the response only
+    # once a status came back -- on a connection failure it is still the
+    # outgoing request payload, which must never be filed as a response body.
+    # (A 4xx/5xx raised by the raise_error middleware below this one lands in
+    # #call's rescue with the response already saved onto the env, so it is
+    # captured there too.)
+    def response_body(env)
+      return nil unless Lantern.config.capture_response_body_on_error
+      return nil unless env.status.to_i >= 400
+
+      Patches::NetHttp.captured_response_body(env.body)
     end
   end
 end

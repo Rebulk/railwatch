@@ -60,4 +60,71 @@ RSpec.describe "job_attempt record" do
     attempt = lantern_records(:job_attempt).sole
     expect(attempt[:concurrency_key]).to eq("ConcurrentJob/widget")
   end
+
+  describe "arguments (capture_job_arguments)" do
+    around do |example|
+      Lantern.config.capture_job_arguments = true
+      example.run
+    ensure
+      Lantern.config.capture_job_arguments = false
+    end
+
+    it "is absent entirely when the option is off, leaving only arguments_preview" do
+      Lantern.config.capture_job_arguments = false
+
+      WidgetJob.perform_now("bob")
+
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt).not_to have_key(:arguments)
+      expect(attempt).not_to have_key(:arguments_truncated)
+      expect(attempt[:arguments_preview]).to eq([ "String" ])
+    end
+
+    it "captures the job's serialized arguments when the option is on" do
+      WidgetJob.perform_now("bob")
+
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:arguments]).to eq([ "bob" ])
+      expect(attempt).not_to have_key(:arguments_truncated)
+    end
+
+    it "ships an Active Record argument as a GlobalID, never a hydrated model" do
+      widget = Widget.create!(name: "bob")
+
+      AbortedJob.perform_now(widget)
+
+      expect(lantern_records(:job_attempt).sole[:arguments])
+        .to eq([ { "_aj_globalid" => widget.to_global_id.to_s } ])
+    end
+
+    it "redacts a password key inside a hash argument" do
+      AbortedJob.perform_now({ "email" => "bob@example.test", "password" => "hunter2" })
+
+      expect(lantern_records(:job_attempt).sole[:arguments].sole)
+        .to include("email" => "bob@example.test", "password" => "[FILTERED]")
+    end
+
+    it "redacts hashes nested inside an array argument" do
+      AbortedJob.perform_now([ { "password" => "hunter2" } ])
+
+      expect(lantern_records(:job_attempt).sole[:arguments].sole.first)
+        .to include("password" => "[FILTERED]")
+    end
+
+    it "drops trailing arguments until the JSON fits 8 KiB and flags the truncation" do
+      AbortedJob.perform_now("x" * 5_000, "y" * 5_000)
+
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:arguments]).to eq([ "x" * 5_000 ])
+      expect(attempt[:arguments_truncated]).to be(true)
+    end
+
+    it "keeps arguments that fit exactly under the limit unflagged" do
+      AbortedJob.perform_now("x" * 5_000)
+
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:arguments]).to eq([ "x" * 5_000 ])
+      expect(attempt).not_to have_key(:arguments_truncated)
+    end
+  end
 end

@@ -19,6 +19,13 @@ module Lantern
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
                   :queue_latency, :drift, :exception_sampled, :parent_execution
+    # Set only when this execution started the process-global sampling
+    # profiler (Lantern.start_profile): the backend handle, plus whether the
+    # head profile_sample roll -- rather than profile_slow_ms -- is what
+    # chose it. Deliberately not initialized in #initialize: with profiling
+    # off, which is the default, an execution must not pay two ivar writes
+    # for a feature it isn't using.
+    attr_accessor :profiler_handle, :profile_sampled
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)
