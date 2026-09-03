@@ -14,6 +14,7 @@ module Lantern
 
       visits = Array(params[:visits]).first(50)
       user_id = Subscribers::Users.resolve_id(request.env)
+      record_session(params[:session], visits, user_id)
       visits.each do |v|
         v = v.to_unsafe_h if v.respond_to?(:to_unsafe_h)
         Lantern.record(:visit,
@@ -39,6 +40,32 @@ module Lantern
     end
 
     private
+
+    # The browser half of release health: one `session` record per beacon
+    # flush, never more, whatever the flush carried. The first one the client
+    # sends has no duration yet and opens the session; every later flush
+    # beats it along; the pagehide flush closes it with `ended`.
+    def record_session(session, visits, user_id)
+      return if session.blank?
+
+      session = session.to_unsafe_h if session.respond_to?(:to_unsafe_h)
+      id = session["id"].to_s[0, 64]
+      return if id.empty?
+
+      duration_ms = session["duration_ms"]
+      Lantern.record(:session,
+        group: Record.group_hash(id),
+        id: id,
+        source: "browser",
+        status: duration_ms.nil? ? "started" : "ok",
+        started_at: session["started_at"].to_f / 1000.0,
+        duration: duration_ms.nil? ? nil : (duration_ms.to_f * 1000).round,
+        visits: visits.size,
+        errors: visits.count { |v| v["status"] == "error" },
+        ended: session["ended"] ? true : false,
+        user: user_id,
+        tenant: Context.current_tenant)
+    end
 
     # Web vitals only ride along on the initial-load visit, and only from
     # browsers that support the entry type behind them, so every one of these

@@ -19,7 +19,10 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.4"
 
   spec.files = Dir.chdir(File.expand_path(__dir__)) do
-    Dir["{app,config,lib}/**/*", "MIT-LICENSE", "Rakefile", "README.md", "CHANGELOG.md"]
+    # docs/, llms.txt and AGENTS.md ship with the gem: `bundle open lantern`
+    # and any coding agent looking at the installed gem get the same
+    # documentation as the repository.
+    Dir["{app,config,lib,docs}/**/*", "MIT-LICENSE", "Rakefile", "README.md", "CHANGELOG.md", "llms.txt", "AGENTS.md"]
   end
 
   spec.add_dependency "rails", ">= 8.1"

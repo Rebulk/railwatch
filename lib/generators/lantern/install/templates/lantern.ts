@@ -23,9 +23,22 @@ interface Visit {
   ttfb?: number
 }
 
+// The tab's session, for release health. sessionStorage scopes it to the
+// tab and it dies with the tab, which is what a browser session is.
+interface Session {
+  id: string
+  started_at: number
+  duration_ms?: number
+  ended?: boolean
+}
+
+const SESSION_ID_KEY = "lantern.session"
+const SESSION_STARTED_KEY = "lantern.session.at"
+
 const queue: Visit[] = []
 let current: Visit | null = null
 let initial: Visit | null = null
+let session: Session | null = null
 let finalized = false
 let timer: number | undefined
 
@@ -37,9 +50,8 @@ function csrf() {
   return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ""
 }
 
-function flush() {
-  if (queue.length === 0) return
-  const body = JSON.stringify({ visits: queue.splice(0, queue.length) })
+function post(payload: { visits: Visit[]; session?: Session }) {
+  const body = JSON.stringify(payload)
   const blob = new Blob([body], { type: "application/json" })
   if (navigator.sendBeacon?.(endpoint(), blob)) return
   fetch(endpoint(), {
@@ -48,6 +60,47 @@ function flush() {
     headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
     keepalive: true,
   }).catch(() => undefined)
+}
+
+function flush(ended = false) {
+  if (queue.length === 0 && !ended) return
+  post({ visits: queue.splice(0, queue.length), session: beat(ended) })
+}
+
+// --- Session -----------------------------------------------------------
+
+function randomId() {
+  const bytes = new Uint8Array(8)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+// Mints the tab's session on its first load, or picks up the one an earlier
+// page in this tab minted, and mirrors the id into a cookie so every request
+// the tab makes carries it -- that is what lets the server side of the
+// session (Lantern::Sessions) join the browser side under one id.
+function startSession() {
+  try {
+    const existing = sessionStorage.getItem(SESSION_ID_KEY)
+    const id = existing ?? randomId()
+    const startedAt = Number(sessionStorage.getItem(SESSION_STARTED_KEY)) || Date.now()
+    if (!existing) {
+      sessionStorage.setItem(SESSION_ID_KEY, id)
+      sessionStorage.setItem(SESSION_STARTED_KEY, String(startedAt))
+    }
+    document.cookie = `lantern_session=${id}; path=/; SameSite=Lax`
+    session = { id, started_at: startedAt }
+    // No duration on the first beat: that is what opens the session.
+    if (!existing) post({ visits: [], session: { ...session } })
+  } catch {
+    // sessionStorage is unavailable (private mode, storage disabled).
+    // Everything else still reports; this tab just has no session.
+  }
+}
+
+function beat(ended: boolean): Session | undefined {
+  if (!session) return undefined
+  return { ...session, duration_ms: Date.now() - session.started_at, ended }
 }
 
 // --- Core Web Vitals ---------------------------------------------------
@@ -169,12 +222,14 @@ function finalize() {
     }
   }
   // Still flushes on every later hide: a tab can be backgrounded, brought
-  // back, navigated some more, and then closed.
-  flush()
+  // back, navigated some more, and then closed. Each of those carries a
+  // final session beat, which the platform dedupes by session id.
+  flush(true)
 }
 
 export function startLantern() {
   startVitals()
+  startSession()
   initial = initialVisit()
 
   router.on("start", (event) => {

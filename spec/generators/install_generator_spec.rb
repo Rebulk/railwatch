@@ -14,6 +14,10 @@ RSpec.describe Lantern::Generators::InstallGenerator do
 
   tests Lantern::Generators::InstallGenerator
   destination File.expand_path("../../tmp/install_generator", __dir__)
+  # The install ends by invoking lantern:doctor, which loads the dummy app's
+  # rake tasks and pings the ingest host. Only the example that asserts on it
+  # wants that; every other example opts out here rather than repeating the flag.
+  arguments %w[--no-doctor]
 
   before do
     prepare_destination
@@ -199,6 +203,195 @@ RSpec.describe Lantern::Generators::InstallGenerator do
     end
   end
 
+  describe "--token / --url" do
+    def env_file = File.join(destination_root, ".env")
+
+    def install(*extra)
+      Dir.chdir(destination_root) { run_generator(%w[--no-doctor --token=lt_abc123 --url=https://lantern.example.com] + extra) }
+    end
+
+    it "appends both variables to an existing .env, leaving what was there alone" do
+      File.write(env_file, "FOO=bar\n")
+
+      install
+
+      expect(File.read(env_file)).to eq("FOO=bar\nLANTERN_TOKEN=lt_abc123\nLANTERN_INGEST_URL=https://lantern.example.com\n")
+    end
+
+    it "separates the appended block when the existing .env has no trailing newline" do
+      File.write(env_file, "FOO=bar")
+
+      install
+
+      expect(File.read(env_file)).to eq("FOO=bar\nLANTERN_TOKEN=lt_abc123\nLANTERN_INGEST_URL=https://lantern.example.com\n")
+    end
+
+    it "creates .env when there is none but dotenv is in the Gemfile" do
+      File.write(File.join(destination_root, "Gemfile"), %(source "https://rubygems.org"\ngem "dotenv-rails"\n))
+
+      install
+
+      expect(File.read(env_file)).to eq("LANTERN_TOKEN=lt_abc123\nLANTERN_INGEST_URL=https://lantern.example.com\n")
+    end
+
+    it "writes each variable once when run again" do
+      File.write(env_file, "")
+
+      install
+      install
+
+      expect(File.read(env_file).scan("LANTERN_TOKEN=").size).to eq(1)
+    end
+
+    it "leaves a variable the app already set alone" do
+      File.write(env_file, "LANTERN_TOKEN=lt_existing\n")
+
+      install
+
+      expect(File.read(env_file)).to eq("LANTERN_TOKEN=lt_existing\nLANTERN_INGEST_URL=https://lantern.example.com\n")
+    end
+
+    it "prints the exact lines to paste, and writes no file, when the app has no dotenv" do
+      output = install
+
+      expect(File).not_to exist(env_file)
+      expect(output).to include("LANTERN_TOKEN=lt_abc123")
+      expect(output).to include("LANTERN_INGEST_URL=https://lantern.example.com")
+      expect(output).to include(".kamal/secrets")
+    end
+
+    it "touches .env only when a value was passed" do
+      File.write(env_file, "FOO=bar\n")
+
+      Dir.chdir(destination_root) { run_generator }
+
+      expect(File.read(env_file)).to eq("FOO=bar\n")
+    end
+  end
+
+  describe "--kamal-secrets" do
+    def deploy_yml = File.join(destination_root, "config/deploy.yml")
+    def secrets_file = File.join(destination_root, ".kamal/secrets")
+
+    def install(deploy_contents)
+      File.write(deploy_yml, deploy_contents)
+      FileUtils.mkdir_p(File.join(destination_root, ".kamal"))
+      File.write(secrets_file, "# Secrets used by config/deploy.yml\nRAILS_MASTER_KEY=$(cat config/master.key)\n") unless File.exist?(secrets_file)
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor --kamal-secrets] }
+    end
+
+    it "appends the shell-expanded token to .kamal/secrets" do
+      install("service: widgets\n")
+
+      expect(File.read(secrets_file)).to end_with("RAILS_MASTER_KEY=$(cat config/master.key)\nLANTERN_TOKEN=$LANTERN_TOKEN\n")
+    end
+
+    it "adds a whole env: secret: block when deploy.yml has none" do
+      install("service: widgets\nimage: acme/widgets\n")
+
+      expect(File.read(deploy_yml)).to eq(<<~YAML)
+        service: widgets
+        image: acme/widgets
+
+        env:
+          secret:
+            - LANTERN_TOKEN
+      YAML
+    end
+
+    it "adds a secret: list under an env: block that only has clear:" do
+      install(<<~YAML)
+        service: widgets
+        env:
+          clear:
+            RAILS_MAX_THREADS: 5
+      YAML
+
+      expect(File.read(deploy_yml)).to eq(<<~YAML)
+        service: widgets
+        env:
+          secret:
+            - LANTERN_TOKEN
+          clear:
+            RAILS_MAX_THREADS: 5
+      YAML
+    end
+
+    it "appends to an existing secret list, above the clear block, keeping comments" do
+      install(<<~YAML)
+        service: widgets
+        env:
+          secret:
+            # Read from .kamal/secrets.
+            - RAILS_MASTER_KEY
+          clear:
+            RAILS_MAX_THREADS: 5
+        # trailing note
+      YAML
+
+      expect(File.read(deploy_yml)).to eq(<<~YAML)
+        service: widgets
+        env:
+          secret:
+            # Read from .kamal/secrets.
+            - RAILS_MASTER_KEY
+            - LANTERN_TOKEN
+          clear:
+            RAILS_MAX_THREADS: 5
+        # trailing note
+      YAML
+    end
+
+    it "changes nothing on a second run" do
+      original = "service: widgets\nenv:\n  secret:\n    - RAILS_MASTER_KEY\n"
+      install(original)
+      after_first = File.read(deploy_yml)
+
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor --kamal-secrets] }
+
+      expect(File.read(deploy_yml)).to eq(after_first)
+      expect(File.read(secrets_file).scan("LANTERN_TOKEN=").size).to eq(1)
+    end
+
+    it "says what to do by hand when there is no .kamal/secrets" do
+      File.write(deploy_yml, "service: widgets\n")
+
+      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor --kamal-secrets] }
+
+      expect(output).to include("no .kamal/secrets found")
+      expect(File.read(deploy_yml)).to eq("service: widgets\n")
+    end
+
+    it "leaves deploy.yml alone without the flag" do
+      File.write(deploy_yml, "service: widgets\n")
+
+      Dir.chdir(destination_root) { run_generator }
+
+      expect(File.read(deploy_yml)).to eq("service: widgets\n")
+    end
+  end
+
+  describe "running the doctor" do
+    it "finishes by running lantern:doctor in process and printing its checklist" do
+      stub_request(:get, "http://lantern.test/ingest/ping").to_return(status: 200, body: "ok")
+
+      output = Dir.chdir(destination_root) { run_generator [] }
+
+      expect(output).to include("bin/rails lantern:doctor")
+      expect(output).to include("✓ token: test-t... (10 chars)")
+      expect(output).to include("✓ ingest reachable:")
+    end
+
+    it "reports the failing checks without raising when the doctor aborts" do
+      stub_request(:get, "http://lantern.test/ingest/ping").to_return(status: 500, body: "err")
+
+      output = Dir.chdir(destination_root) { run_generator [] }
+
+      expect(output).to include("✗ ingest reachable:")
+      expect(output).to include("only picked up after a restart")
+    end
+  end
+
   describe "next steps" do
     it "tells you how to set the token with Kamal or credentials and how to verify the install" do
       output = Dir.chdir(destination_root) { run_generator }
@@ -208,6 +401,8 @@ RSpec.describe Lantern::Generators::InstallGenerator do
       expect(output).to include("Rails.application.credentials.dig(:lantern, :token)")
       expect(output).to include("LANTERN_INGEST_URL")
       expect(output).to include("bin/rails lantern:doctor")
+      expect(output).to include("bin/rails lantern:token")
+      expect(output).to include("bin/rails lantern:mcp")
       expect(output).to include("docs/testing.md")
     end
   end

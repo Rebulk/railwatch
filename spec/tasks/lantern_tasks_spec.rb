@@ -13,6 +13,18 @@ RSpec.describe "lantern rake tasks" do
     Rake::Task["lantern:status"].reenable
     Rake::Task["lantern:deploy"].reenable
     Rake::Task["lantern:doctor"].reenable
+    Rake::Task["lantern:token"].reenable
+    Rake::Task["lantern:mcp"].reenable
+  end
+
+  def capture_task(name, *args)
+    out = StringIO.new
+    original = $stdout
+    $stdout = out
+    Rake::Task[name].invoke(*args)
+    out.string
+  ensure
+    $stdout = original
   end
 
   describe "lantern:status" do
@@ -227,6 +239,42 @@ RSpec.describe "lantern rake tasks" do
       Lantern.config.ignore = []
     end
 
+    it "names the profiler backend the app has installed" do
+      output, = run_doctor
+
+      expect(output).to match(/✓ profiler backend: (vernier|stackprof)/)
+    end
+
+    it "reports a missing profiler backend as a hint, not a failure" do
+      allow(Lantern::Profiler).to receive(:backend).and_return(nil)
+
+      output, aborted = run_doctor
+
+      expect(output).to include(%(✗ profiler backend: none -- add `gem "vernier"`))
+      expect(aborted).to be(false)
+    end
+
+    it "names the entrypoint that calls startLantern()" do
+      write_app_file("app/frontend/entrypoints/inertia.tsx", %(import "x"\nstartLantern()\n))
+
+      output, = run_doctor
+
+      expect(output).to include("✓ browser client imported: app/frontend/entrypoints/inertia.tsx")
+    ensure
+      cleanup_app_files
+    end
+
+    it "reports an entrypoint that never calls startLantern()" do
+      write_app_file("app/frontend/entrypoints/inertia.tsx", %(import "x"\ncreateInertiaApp({})\n))
+
+      output, aborted = run_doctor
+
+      expect(output).to include("✗ browser client imported: no entrypoint in app/frontend/entrypoints calls startLantern()")
+      expect(aborted).to be(false)
+    ensure
+      cleanup_app_files
+    end
+
     it "reports optional integrations as missing without failing the check" do
       output, aborted = run_doctor
 
@@ -291,6 +339,54 @@ RSpec.describe "lantern rake tasks" do
       expect(aborted).to be(false)
     ensure
       Lantern.config.deploy = old_deploy
+    end
+  end
+
+  describe "lantern:token" do
+    it "points at the platform this gem already ships to, not the hosted default" do
+      output = capture_task("lantern:token")
+
+      expect(output).to include("Lantern platform: http://lantern.test")
+      expect(output).to include("http://lantern.test/dashboard")
+      expect(output).to include("LANTERN_TOKEN=lt_...")
+    end
+
+    it "tells a self-hosted app to set LANTERN_INGEST_URL as well" do
+      output = capture_task("lantern:token")
+
+      expect(output).to include("LANTERN_INGEST_URL=http://lantern.test")
+    end
+
+    it "omits LANTERN_INGEST_URL when the app ships to the hosted platform" do
+      old = Lantern.config.ingest_url
+      Lantern.config.ingest_url = "https://lantern.rebulk.com"
+
+      output = capture_task("lantern:token")
+
+      expect(output).to include("Lantern platform: https://lantern.rebulk.com")
+      expect(output).not_to include("LANTERN_INGEST_URL")
+    ensure
+      Lantern.config.ingest_url = old
+    end
+  end
+
+  describe "lantern:mcp" do
+    it "prints the MCP endpoint on this app's own platform host" do
+      output = capture_task("lantern:mcp")
+
+      expect(output).to include("Lantern MCP server: http://lantern.test/mcp")
+      expect(output).to include("http://lantern.test/settings/profile")
+    end
+
+    it "prints a paste-ready block for every supported client" do
+      output = capture_task("lantern:mcp")
+
+      expect(output).to include(%(claude mcp add lantern --transport http http://lantern.test/mcp --header "Authorization: Bearer lnt_your_token_here"))
+      expect(output).to include(%("args": ["-y", "mcp-remote", "http://lantern.test/mcp", "--header", "Authorization: Bearer lnt_your_token_here"]))
+      expect(output).to include(%("mcpServers")) # Claude Desktop + Cursor
+      expect(output).to include(%("servers"))    # VS Code
+      expect(output).to include(%("context_servers")) # Zed
+      expect(output).to include(%("method":"tools/list"))
     end
   end
 

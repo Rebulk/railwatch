@@ -26,6 +26,11 @@ module Lantern
     # off, which is the default, an execution must not pay two ivar writes
     # for a feature it isn't using.
     attr_accessor :profiler_handle, :profile_sampled
+    # Release health, and only written when config.track_sessions is on:
+    # the key of the session this request belongs to (Lantern::Sessions),
+    # and whether an unhandled exception escaped it. Left uninitialized for
+    # the same reason as the profiler pair above.
+    attr_accessor :session_key, :session_crashed
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)

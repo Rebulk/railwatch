@@ -131,7 +131,7 @@ module Lantern
 
     # Records that make sense without a parent execution (console, boot).
     # Every other type is dropped when nothing is executing, matching Nightwatch.
-    STANDALONE_TYPES = %i[process user visit exception health attachment].freeze
+    STANDALONE_TYPES = %i[process user visit exception health attachment session].freeze
 
     # Low-level write for a record hash the caller already built (hot-path
     # subscribers assemble one hash literal instead of packing kwargs, then
@@ -218,9 +218,9 @@ module Lantern
 
     # --- errors ----------------------------------------------------------------
 
-    def report(error, handled: true, severity: nil, context: {}, attachments: nil)
+    def report(error, handled: true, severity: nil, context: {}, attachments: nil, fingerprint: nil)
       rec = Subscribers::Exceptions.capture(error, handled: handled, severity: severity || (handled ? :warning : :error),
-                                            context: context, source: "lantern.manual")
+                                            context: context, source: "lantern.manual", fingerprint: fingerprint)
       attachments&.each { |name, data| Attachments.attach(name, data, exception: error) }
       rec
     end
@@ -235,6 +235,10 @@ module Lantern
 
     def user(&block)
       config.user(&block)
+    end
+
+    def fingerprint(&block)
+      config.fingerprint(&block)
     end
 
     # --- redaction / rejection -------------------------------------------------
@@ -443,7 +447,8 @@ module Lantern
       request: :requests, exception: :exceptions, command: :commands,
       query: :queries, n_plus_one: :queries, transaction: :transactions, cache_event: :cache_events,
       mail: :mail, broadcast: :broadcasts, notification: :notifications, outgoing_request: :outgoing_requests,
-      storage_op: :storage_ops, view_render: :view_renders, log: :logs, deprecation: :deprecations
+      storage_op: :storage_ops, view_render: :view_renders, log: :logs, deprecation: :deprecations,
+      session: :sessions
     }.freeze
 
     def type_plural(type)

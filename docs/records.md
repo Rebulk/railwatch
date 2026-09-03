@@ -1,7 +1,7 @@
 # Record types
 
 Every record Lantern ships is a flat hash (`lib/lantern/record.rb`). This
-lists all 25, field by field, sourced from the subscriber or patch that
+lists all 26, field by field, sourced from the subscriber or patch that
 builds each one. Field names below are the hash keys as sent over the
 wire (symbols in Ruby, strings in the gzip NDJSON payload).
 
@@ -224,7 +224,9 @@ it never reaches the point where buffered records would flush.
 
 | Field | Meaning |
 |---|---|
-| `group` | Hash of class + top in-app frame's file/line + normalized message (digits and hex replaced with `?`). |
+| `group` | Hash of this record's `fingerprint` parts. |
+| `fingerprint` | The parts that were hashed, up to 10 strings of 200 chars each — by default class + top in-app frame's file/line + normalized message. Always present, so the platform can show *why* an occurrence grouped where it did. |
+| `fingerprint_source` | Where the fingerprint came from: `"default"`, `"report"` (`Lantern.report(error, fingerprint: [...])`), `"error"` (the exception's own `#lantern_fingerprint`), or `"resolver"` (a `Lantern.fingerprint { }` block). |
 | `class` | Exception class name. |
 | `message` | Truncated to 4096 chars. |
 | `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
@@ -242,6 +244,20 @@ A handled exception on a sampled-out execution is dropped entirely
 (matching everything else); an *unhandled* one still ships, governed by
 its own `exceptions` sample rate rolled once per execution
 (`exception_sampled?`).
+
+The default fingerprint normalizes the message before hashing it, so one
+issue doesn't shatter into thousands: URLs, email addresses, UUIDs, ISO
+timestamps, IPv4 addresses, quoted strings, hex runs of six characters or
+more, and plain integers all become `?`, whitespace collapses, and the
+result is cut at 200 chars. For classes whose message is mostly the data
+that varied, only the message *prefix* is kept — up to the first `:` for
+`ActiveRecord::RecordNotFound`, `ActiveRecord::RecordInvalid`, `KeyError`,
+`ArgumentError`, and `TypeError`, up to the first `for ` for
+`NoMethodError` and `NameError` — so `key not found: :order_id` and `key
+not found: :user_id` are one issue rather than two. Override any of it
+with `Lantern.fingerprint`, `#lantern_fingerprint`, or
+`Lantern.report(error, fingerprint: [...])`; see
+[`docs/configuration.md`](configuration.md).
 
 An error whose class — or any named ancestor of it — appears in
 `config.ignored_exceptions` is never captured at all, handled or not.
@@ -542,6 +558,46 @@ It is the only visit that carries the four Core Web Vitals, and it is held
 back until the page is first hidden (`visibilitychange`/`pagehide`) so
 those numbers are final when it ships. Every vital is nil on a browser
 that doesn't support the `PerformanceObserver` entry type behind it.
+
+### `session`
+
+Standalone — one session of the monitored app, for release health. The
+`deploy` on the envelope *is* the release; the platform counts sessions per
+deploy and reports crash-free rates from them. Two sources produce the same
+record:
+
+- **Browser** (`source: "browser"`). The client (`app/frontend/lib/lantern.ts`)
+  mints a 16-hex id per tab in `sessionStorage` (key `lantern.session`, so it
+  dies with the tab), mirrors it into a `lantern_session` cookie, and sends it
+  with every beacon flush. `Lantern::BeaconController` writes at most one
+  `session` record per flush: the first (no `duration_ms` yet) opens the
+  session, later ones beat it along, and the `pagehide`/`visibilitychange`
+  flush closes it with `ended`.
+- **Server** (`source: "server"`). `lib/lantern/sessions.rb` aggregates, per
+  process, every request that resolves a user or carries that cookie (or an
+  `X-Lantern-Session` header), and a background thread ships one record per
+  session every `config.session_flush_interval` (default 60s). A session idle
+  for `config.session_timeout` (default 30 minutes) ships with `ended` and is
+  dropped. At most 10,000 keys are tracked per process; past that the oldest
+  is dropped and counted in `Lantern::Sessions.dropped`.
+
+Both are off when `config.track_sessions` is false, and both key on the same
+id when the browser cookie is present, so the platform dedupes the two halves
+of one session rather than counting it twice.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of the session key. |
+| `id` | Session key, truncated to 64 chars: the browser client's id, else `"user:<user_id>"`. |
+| `source` | `"browser"` or `"server"`. |
+| `status` | `"started"` (opened, no duration yet), `"ok"`, `"errored"` (a 5xx or a handled exception), or `"crashed"` (an unhandled exception). Server sessions only escalate. |
+| `started_at` | Unix seconds (float) the session began — `timestamp` is when the record was flushed, not when the session started. |
+| `duration` | Microseconds from `started_at` to the last request/visit, nil on the record that opens the session. |
+| `requests` | Requests in this session so far (server only). |
+| `visits` | Inertia visits in this beacon flush (browser only). |
+| `errors` | Requests that 5xx'd or raised (server), or visits with status `"error"` in this flush (browser). |
+| `ended` | Whether this is the session's last record. |
+| `user` | Resolved user id, when there is one. |
 
 ### `process`
 

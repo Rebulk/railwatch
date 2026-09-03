@@ -62,6 +62,10 @@ module Lantern
       def finish(env, exe, status, headers)
         exe.finish_stages
         Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
+        # After the parent, which is where exe.user_id is resolved: a request
+        # with no user and no session cookie has no session, and Sessions.touch
+        # returns without writing anything.
+        Sessions.touch(exe, env, status) if Lantern.config.track_sessions
       rescue StandardError => e
         Lantern.debug { "request finish failed: #{e.class}: #{e.message}" }
         Lantern.finish_execution

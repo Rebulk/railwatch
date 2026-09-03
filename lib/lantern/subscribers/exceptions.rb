@@ -84,7 +84,7 @@ module Lantern
         end
       end
 
-      def capture(error, handled:, severity:, context: {}, source: nil)
+      def capture(error, handled:, severity:, context: {}, source: nil, fingerprint: nil)
         return unless Lantern.enabled?
         return if ignored?(error)
         return if seen?(error)
@@ -92,6 +92,11 @@ module Lantern
         exe = execution
         exe&.count(:exceptions)
         exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255] if exe
+        # Release health: an unhandled exception ends this request's session
+        # crashed. Flagged rather than written straight into the session map
+        # because the key is only resolved once the request finishes (a
+        # user-keyed session has no cookie to read up front).
+        exe.session_crashed = true if exe && !handled && Lantern.config.track_sessions
 
         # Sampled-out executions still report an unhandled error, governed by
         # the exceptions sample rate. Decided once per execution and memoized,
@@ -102,6 +107,10 @@ module Lantern
         cause = error.cause
         frames = Backtrace.frames(error, with_source: Lantern.config.capture_exception_source)
         top = top_frame(frames)
+        parts, fingerprint_source = fingerprint_for(error, top, override: fingerprint)
+        # So an attachment filed against this same error object later
+        # (Lantern.attach(exception:)) lands on the issue this call chose.
+        remember_fingerprint(error, parts) if fingerprint
         rec = {
           class: error.class.name,
           message: error.message.to_s[0, 4096],
@@ -116,10 +125,12 @@ module Lantern
           code: error_code(error),
           sql_state: sql_state_for(error),
           locals: Lantern.config.capture_exception_locals ? Locals.for(error) : nil,
+          fingerprint: parts,
+          fingerprint_source: fingerprint_source,
           ruby_version: RUBY_VERSION,
           rails_version: (Rails.version rescue nil)
         }
-        group = group_from(error, top)
+        group = Record.group_hash(*parts)
         if handled
           Lantern.record(:exception, group: group, **rec)
         else
@@ -132,7 +143,9 @@ module Lantern
       # having to re-derive the bucketing rule (source snippets are skipped:
       # they cost I/O and don't take part in the hash).
       def group_for(error)
-        group_from(error, top_frame(Backtrace.frames(error, with_source: false)))
+        parts = error.instance_variable_get(:@__lantern_fingerprint) ||
+                fingerprint_for(error, top_frame(Backtrace.frames(error, with_source: false))).first
+        Record.group_hash(*parts)
       end
 
       # The frame an occurrence is filed under: the first application frame,
@@ -142,8 +155,51 @@ module Lantern
         frames.find { |f| f[:in_app] } || frames.first || {}
       end
 
-      def group_from(error, top)
-        Record.group_hash(error.class.name, top[:file], top[:line], normalize_message(error.message))
+      MAX_FINGERPRINT_PARTS = 10
+      MAX_FINGERPRINT_PART = 200
+
+      # The parts this occurrence is hashed on, and where they came from:
+      # an explicit `Lantern.report(error, fingerprint: [...])` ("report"),
+      # the error object's own #lantern_fingerprint ("error"), the
+      # `Lantern.fingerprint { }` resolver ("resolver"), or Lantern's own
+      # class/frame/message parts ("default"). Anything that comes back
+      # empty -- or raises -- falls back to the default, so a bad resolver
+      # can never lose an exception.
+      def fingerprint_for(error, top, override: nil)
+        default = default_fingerprint(error, top)
+        custom, source =
+          if override then [ override, "report" ]
+          elsif error.respond_to?(:lantern_fingerprint) then [ error.lantern_fingerprint, "error" ]
+          elsif (resolver = Lantern.config.fingerprint_resolver) then [ resolver.call(error, default), "resolver" ]
+          end
+        parts = custom && expand_fingerprint(custom, default)
+        parts ? [ parts, source ] : [ cap_fingerprint(default), "default" ]
+      rescue StandardError => e
+        Lantern.debug { "fingerprint for #{error.class} raised #{e.class}: #{e.message}; using the default" }
+        [ cap_fingerprint(default || [ error.class.name ]), "default" ]
+      end
+
+      def default_fingerprint(error, top)
+        [ error.class.name, top[:file], top[:line], normalize_message(message_key(error)) ]
+      end
+
+      # A custom fingerprint: `:default` splices in the parts Lantern would
+      # have used (Sentry's "{{ default }}"), everything else is stringified.
+      # nil when nothing usable is left, so the caller can fall back.
+      def expand_fingerprint(custom, default)
+        parts = Array(custom).flat_map { |part| part == :default ? default : part }
+        parts = cap_fingerprint(parts.reject { |part| part.nil? || part.to_s.empty? })
+        parts.empty? ? nil : parts
+      end
+
+      def cap_fingerprint(parts)
+        parts.first(MAX_FINGERPRINT_PARTS).map { |part| part.to_s[0, MAX_FINGERPRINT_PART] }
+      end
+
+      def remember_fingerprint(error, parts)
+        error.instance_variable_set(:@__lantern_fingerprint, parts)
+      rescue StandardError
+        nil
       end
 
       # config.ignored_exceptions, matched against the error's own class name
@@ -164,8 +220,41 @@ module Lantern
         false
       end
 
+      # Variable data that would otherwise split one issue into thousands of
+      # them. Applied in this order: a URL before the numbers inside it, a
+      # quoted string before the id it quotes, hex before plain digits.
+      MESSAGE_NOISE = [
+        %r{\bhttps?://\S+},                                  # URLs
+        /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/,                      # email addresses
+        /\h{8}-\h{4}-\h{4}-\h{4}-\h{12}/,                    # UUIDs
+        /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*/,         # ISO timestamps
+        /\b\d{1,3}(?:\.\d{1,3}){3}\b/,                       # IPv4 addresses
+        /(?<!\w)'[^']*'|"[^"]*"/,                             # quoted strings ("won't" is not one)
+        /\b(?:0x)?\h{6,}\b/,                                 # hex: digests, object addresses
+        /\b\d+\b/                                            # plain integers
+      ].freeze
+
+      # Classes whose message is mostly the data that varied -- the record
+      # that wasn't found, the key that was missing, the receiver that had no
+      # method. For those the default key keeps only the message prefix, up
+      # to the first ":" (or " for ", for the NameError family), and lets the
+      # class and the frame do the rest of the bucketing. Matched on the
+      # exact class name, so an app's own subclass keeps its whole message.
+      MESSAGE_PREFIXES = {
+        "ActiveRecord::RecordNotFound" => ":", "ActiveRecord::RecordInvalid" => ":",
+        "KeyError" => ":", "ArgumentError" => ":", "TypeError" => ":",
+        "NoMethodError" => " for ", "NameError" => " for "
+      }.freeze
+
       def normalize_message(message)
-        message.to_s.gsub(/\b\d+\b/, "?").gsub(/0x[0-9a-f]+/i, "0x?")[0, 200]
+        text = MESSAGE_NOISE.inject(message.to_s) { |m, pattern| m.gsub(pattern, "?") }
+        text.gsub(/\s+/, " ").strip[0, 200]
+      end
+
+      def message_key(error)
+        message = error.message.to_s
+        separator = MESSAGE_PREFIXES[error.class.name] or return message
+        message.split(separator, 2).first.to_s
       end
 
       # Decided once per execution and memoized on exception_sampled, so the

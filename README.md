@@ -21,6 +21,39 @@ hook, the Inertia browser client with its `startLantern()` call, and
 a ✓/✗ checklist of all of it and exits non-zero if the token is missing or
 the ingest host is unreachable.
 
+Pass `--token=lt_...` (and `--url=` when self-hosting) to have the generator
+write them into `.env`, or print exactly where to put them; add
+`--kamal-secrets` and it wires `LANTERN_TOKEN` through `.kamal/secrets` and
+`config/deploy.yml`. It finishes by running `lantern:doctor` for you.
+`bin/rails lantern:token` says where to get a token; `bin/rails lantern:mcp`
+prints ready-to-paste MCP client configuration.
+
+## Documentation
+
+- [Getting started](docs/getting-started.md) — five-minute install for a
+  Rails 8 app, the three optional lines, and deploying with Kamal, Docker,
+  Heroku, Render, or none of them.
+- [Configuration](docs/configuration.md) — every option and `LANTERN_*`
+  variable, field by field.
+- [Record types](docs/records.md) — every record Lantern ships and every
+  attribute on it, sourced from the code that builds it.
+- [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
+  performance gate.
+- [AI assistants and MCP](docs/ai-and-mcp.md) — connecting Claude Code,
+  Cursor, VS Code, or Zed to your production data.
+- [Replacing Sentry](docs/replacing-sentry.md) — a step-by-step migration,
+  option by option and call site by call site.
+- [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md) — the
+  record-type mapping and the sampling model, for Laravel people.
+- [Self-hosting](docs/self-hosting.md) — pointing the gem at your own
+  Lantern Cloud.
+- [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired
+  with the `lantern:doctor` line it shows up as.
+- [FAQ](docs/faq.md) — overhead numbers, retention, PII posture, SQLite.
+
+AI coding agents working on an app that uses Lantern: [`llms.txt`](llms.txt)
+and [`AGENTS.md`](AGENTS.md).
+
 Configuration lives in `config/initializers/lantern.rb`; every option has
 a `LANTERN_*` environment variable. Sampling is decided once per execution:
 a sampled-in request ships its whole tree, a sampled-out one ships nothing
@@ -126,6 +159,7 @@ and `context` all come from the same `Lantern.configure` block and
 | `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `lantern_sample 0.01, only: :index`. |
 | `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
 | `before_send:` / `before_send_transaction:` | `Lantern.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Lantern.redact_queries`/`redact_logs`/... to scrub one record type in place; `Lantern.reject_queries`/`reject_logs`/... to drop records by predicate. |
+| `fingerprint` / grouping rules | `Lantern.fingerprint { \|error, default\| ... }` globally, `def lantern_fingerprint` on your own error class, or `Lantern.report(error, fingerprint: [...])` per call. The literal `:default` splices in the parts Lantern would have hashed, like Sentry's `{{ default }}`. |
 | `include_local_variables:` | `config.capture_exception_locals`. |
 | `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.capture_job_arguments` for job arguments, `config.capture_response_body_on_error` for what a failing upstream sent back, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Lantern.user { ... }` block for who. There is no single "send everything" switch. |
 | Breadcrumbs | Not a separate concept — every query, cache read, outgoing request, log line, and view render is already a first-class record linked to its execution by `execution_id`/`trace_id`. The execution *is* the breadcrumb trail, and it's queryable. |
@@ -137,10 +171,9 @@ and `context` all come from the same `Lantern.configure` block and
 | `Sentry.capture_check_in` (cron monitoring) | Automatic: Solid Queue recurring tasks become `scheduled_task` records with `task_key`, `schedule`, and `drift`. Nothing to instrument. |
 | `config.rails.report_rescued_exceptions` | `config.capture_rescued_exceptions` (on by default). |
 | Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
+| `auto_session_tracking:` (release health) | Automatic: `session` records from the browser client and the request middleware, keyed on `config.deploy` as the release. `config.track_sessions` turns both off. |
 
-Still missing versus Sentry, deliberately: sessions/release-health
-(crash-free rate) and custom fingerprinting. Everything else above is
-either covered or replaced by the execution model.
+Everything above is either covered or replaced by the execution model.
 
 To report an exception manually (the `Rails.error.report`-equivalent):
 

@@ -24,6 +24,15 @@ RSpec.describe "exception record", type: :request do
     expect(ex[:rails_version]).to eq(Rails.version)
   end
 
+  it "groups on the default fingerprint -- class, top in-app frame, normalized message -- and says so" do
+    get "/boom"
+
+    ex = lantern_records(:exception).sole
+    expect(ex[:fingerprint]).to eq([ "ArgumentError", ex[:file], ex[:line].to_s, "kaboom" ])
+    expect(ex[:fingerprint_source]).to eq("default")
+    expect(ex[:_group]).to eq(Lantern::Record.group_hash(*ex[:fingerprint]))
+  end
+
   it "captures a handled error reported via Rails.error.handle as severity warning" do
     get "/handled"
 

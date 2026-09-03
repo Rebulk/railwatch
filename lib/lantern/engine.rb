@@ -52,6 +52,16 @@ module Lantern
       ::Process.singleton_class.prepend(Lantern::Health::ForkHook)
     end
 
+    # Same shape as "lantern.health": one flusher thread per web process,
+    # stopped before the reporter's final flush, re-armed after a fork.
+    initializer "lantern.sessions", after: "lantern.subscribe" do
+      next unless Lantern.enabled? && Lantern.config.track_sessions
+
+      Lantern::Sessions.start!
+      at_exit { Lantern::Sessions.stop! }
+      ::Process.singleton_class.prepend(Lantern::Sessions::ForkHook)
+    end
+
     # lib/tasks/lantern_tasks.rake is already picked up by Rails::Engine's
     # default lib/tasks convention (Rails::Engine#run_tasks_blocks), so no
     # explicit rake_tasks registration is needed here.
@@ -59,6 +69,7 @@ module Lantern
 end
 
 require "lantern/health"
+require "lantern/sessions"
 require "lantern/middleware/request"
 require "lantern/job_tracing"
 require "lantern/controller_helpers"

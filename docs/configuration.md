@@ -187,6 +187,7 @@ types (`query`, `cache_event`, `log`) at the source.
 | `:logs` | `LANTERN_IGNORE_LOGS` |
 | `:transactions` | `LANTERN_IGNORE_TRANSACTIONS` |
 | `:deprecations` | `LANTERN_IGNORE_DEPRECATIONS` |
+| `:sessions` | `LANTERN_IGNORE_SESSIONS` |
 
 ```ruby
 c.ignore = [:cache_events, :transactions]
@@ -327,6 +328,34 @@ The sampler re-arms itself after `fork` (a `Process._fork` hook), so
 clustered Puma workers and forked Solid Queue workers each report without
 any `on_worker_boot` configuration.
 
+### Release health
+
+`session` records count sessions per deploy, which is what the platform's
+crash-free session and crash-free user rates are computed from — the
+`deploy` on every record *is* the release.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `track_sessions` | `LANTERN_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
+| `session_flush_interval` | `LANTERN_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
+| `session_timeout` | `LANTERN_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
+
+There are two sources, and they meet on the same id:
+
+- **The browser client** (`app/frontend/lib/lantern.ts`, installed by
+  `lantern:install`) mints one id per tab in `sessionStorage` and mirrors it
+  into a `lantern_session` cookie. It rides along on the beacon flushes the
+  client already sends for visits, so this costs no extra requests. This is
+  the primary source for a web app, and it is what makes session duration
+  mean "how long the tab was open".
+- **The request middleware** aggregates, in memory, every request that either
+  resolves a user or carries that cookie (or an `X-Lantern-Session` header) —
+  the only source for an API-only app, and the only one that can see an
+  unhandled exception, which is what makes a session `crashed`.
+
+When a browser session's requests carry the cookie both sources produce
+records under the same id and the platform dedupes them.
+
 ## Vendor noise defaults
 
 Framework/vendor activity excluded by default so a fresh install isn't
@@ -440,6 +469,40 @@ block's return value responds to `#status` — for Faraday-alike client
 objects that aren't Net::HTTP and don't already go through
 `Lantern::Faraday` middleware.
 
+### Fingerprinting
+
+How an exception is bucketed into an issue. The default is class + top
+in-app frame + normalized message (see
+[`docs/records.md`](records.md)'s `exception` section for what
+normalization removes). Three ways to override it, in precedence order:
+
+```ruby
+# 1. Per call, when you already know the bucket.
+Lantern.report(error, fingerprint: [ "payments", gateway.name ])
+
+# 2. On your own error class, so every raise site agrees.
+class PaymentError < StandardError
+  def lantern_fingerprint = [ "payments", gateway ]
+end
+
+# 3. Globally, in an initializer (one block; Sentry's before_send fingerprint).
+Lantern.fingerprint do |error, default|
+  error.is_a?(Faraday::Error) ? [ "upstream", error.response_status, :default ] : nil
+end
+```
+
+The block is called with the error and `default` — the Array of parts
+Lantern would have hashed (`[class, file, line, normalized message]`). It
+returns an Array of strings/symbols/numbers; the literal `:default`
+splices those default parts in wherever you put it (Sentry's
+`{{ default }}`). Parts are stringified, empty ones dropped, and the
+result capped at 10 parts of 200 chars. Returning nil or an empty Array —
+or raising — falls back to the default, so a bad resolver can never lose
+an exception. Every `exception` record carries the parts it was hashed on
+(`fingerprint`) and where they came from (`fingerprint_source`), and an
+attachment filed against the error (`Lantern.attach(..., exception:)`)
+follows the same rule, so it lands on the same issue.
+
 ### Attachments
 
 Ship an arbitrary blob — the payload that failed to parse, a rendered PDF,
@@ -505,7 +568,8 @@ Mirrors Laravel Nightwatch's facade shape. All on the `Lantern` module
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
 `keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
 are the ignore block's building blocks — nestable), `record(type, **fields)`,
-`report(error, ..., attachments: {})`, `attach(name, data, ...)`, `context(**attrs)`, `user(&block)`, `redact_*`,
+`report(error, ..., attachments: {}, fingerprint: [])`, `attach(name, data, ...)`, `context(**attrs)`, `user(&block)`,
+`fingerprint(&block)`, `redact_*`,
 `reject_*`, `reject_cache_keys`, `before_ingest`, `on_unrecoverable`,
 `instrument_outgoing`, `flush`, `debug { }`.
 

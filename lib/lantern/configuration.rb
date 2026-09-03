@@ -5,7 +5,7 @@ module Lantern
   # Laravel Nightwatch's config so the two products document the same knobs.
   class Configuration
     RECORD_TYPES = %i[queries cache_events mail broadcasts notifications outgoing_requests
-                      storage_ops view_renders logs transactions deprecations].freeze
+                      storage_ops view_renders logs transactions deprecations sessions].freeze
 
     # Framework/vendor noise excluded by default so a fresh install isn't
     # dominated by Rails' own housekeeping. Both lists are opt-in to disable
@@ -54,9 +54,10 @@ module Lantern
                   :health_interval, :capture_query_explain, :explain_threshold_ms,
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
-                  :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes
+                  :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
+                  :track_sessions, :session_flush_interval, :session_timeout
 
-    attr_reader :user_resolver, :redactors, :rejectors, :before_ingest
+    attr_reader :user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
     def initialize
       @enabled = env_bool("LANTERN_ENABLED", true)
@@ -115,7 +116,13 @@ module Lantern
       @capture_job_arguments = env_bool("LANTERN_CAPTURE_JOB_ARGUMENTS", false)
       @capture_response_body_on_error = env_bool("LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR", false)
       @max_attachment_bytes = env_int("LANTERN_MAX_ATTACHMENT_BYTES", 1_048_576)
+      # Release health: one `session` record per browser tab (the beacon
+      # client) and per authenticated/cookied server session (Lantern::Sessions).
+      @track_sessions = env_bool("LANTERN_TRACK_SESSIONS", true)
+      @session_flush_interval = env_float("LANTERN_SESSION_FLUSH_INTERVAL", 60.0)
+      @session_timeout = env_float("LANTERN_SESSION_TIMEOUT", 1800.0)
       @user_resolver = nil
+      @fingerprint_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }
       @before_ingest = []
@@ -123,6 +130,13 @@ module Lantern
 
     def user(&block)
       @user_resolver = block
+    end
+
+    # Lantern.fingerprint { |error, default| ... }: one block, called with
+    # the error and the parts Lantern would have hashed. Passing no block
+    # clears it.
+    def fingerprint(&block)
+      @fingerprint_resolver = block
     end
 
     def enabled?

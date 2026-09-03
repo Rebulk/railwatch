@@ -2,6 +2,12 @@
 
 ## 0.1.0 (unreleased)
 
+- Release health: a new `session` record type, from the browser client (one
+  session per tab, riding along on the visit beacon) and from the request
+  middleware (`Lantern::Sessions`, one flusher thread per web process).
+  `config.track_sessions`, `config.session_flush_interval`,
+  `config.session_timeout`; `c.ignore = [:sessions]` turns off shipping.
+
 - Added `docs/records.md` (every wire record type, field by field) and
   `docs/configuration.md` (every `Configuration` attribute, the public
   facade, sampling, transport, Inertia beacon/SSR, the overhead gate, the
