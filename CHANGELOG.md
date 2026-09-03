@@ -36,3 +36,31 @@
 - `Lantern::Faraday` middleware instruments outgoing HTTP made through
   Faraday (`f.use Lantern::Faraday`); `Lantern.instrument_outgoing(method,
   url) { }` covers any other HTTP client.
+- Fixed `Backtrace.caller_location` excluding legitimate app/spec frames that
+  happened to live under a path containing "/lantern/" (this gem's own
+  `spec/dummy`, for one); it now only skips Lantern's own `lib/` and frames
+  inside an installed gem, so query and outgoing-request source locations
+  resolve correctly again.
+- Fixed `lantern:status` and `lantern:deploy` rake tasks running twice per
+  invocation: the engine no longer manually `load`s `lib/tasks/lantern_tasks.rake`
+  on top of Rails' automatic `lib/tasks/*.rake` loading.
+- `Transport::Http` is now HTTP-status-aware: a 5xx response is retried once,
+  a 4xx is not retried, a 401 marks the reporter unauthorized and stops
+  flushing (logged once via `Lantern.debug` and `Lantern.on_unrecoverable`),
+  and a 402 (quota) backs off for 60 seconds, dropping and counting records
+  as dropped during the backoff window. Delivery still never raises.
+- Fixed `Patches::RakeTask` shipping a separate command record per
+  prerequisite instead of nesting the whole dependency chain under one
+  command execution; nested calls made from inside an already-excluded
+  vendor task (e.g. `db:_dump`, invoked internally by `db:migrate`) are also
+  left untracked instead of starting their own execution.
+- `job_attempt` records now include `parent_id` (the enqueuing execution's
+  id), previously captured but never emitted in the shipped hash.
+- Fixed `Patches.install_runner_command!` requiring the wrong path for
+  `Rails::Command::RunnerCommand` (`rails/command/runner_command` instead of
+  `rails/commands/runner/runner_command`), which silently no-oped and left
+  `bin/rails runner` uninstrumented.
+- `Configuration#ignore=` now raises `ArgumentError` for a record type
+  outside `RECORD_TYPES` instead of silently accepting it.
+- `scheduled_task` records report `drift` (microseconds between the
+  `RecurringExecution#run_at` and the actual perform start).

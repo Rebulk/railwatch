@@ -19,14 +19,31 @@ module Lantern
       # is not nil and just run plain, nesting inside the one command record instead
       # of each starting (and finishing) their own.
       def invoke(*args)
-        super
+        run_as_command(args.any? ? "[#{args.join(',')}]" : "") { super }
       end
 
       private
 
+      # A vendor-excluded task (db:migrate, say) can internally call
+      # `Rake::Task["db:_dump"].invoke` from its own action body -- an
+      # implementation detail, not a prerequisite -- to run a task that isn't
+      # itself vendor-excluded. With no execution open (the outer task never
+      # started one), that inner call looks exactly like a fresh top-level
+      # invocation and would ship its own unwanted command record. This flag
+      # marks "we're inside a task we deliberately chose not to track," so
+      # anything invoked underneath it is left untracked too.
       def run_as_command(command_suffix)
         return yield unless Lantern.enabled? && !SKIP.include?(name) && Lantern.execution.nil?
-        return yield if vendor_excluded?
+        return yield if Thread.current[:lantern_vendor_excluded_rake]
+
+        if vendor_excluded?
+          Thread.current[:lantern_vendor_excluded_rake] = true
+          begin
+            return yield
+          ensure
+            Thread.current[:lantern_vendor_excluded_rake] = false
+          end
+        end
 
         exe = Lantern.start_execution(source: :command, sample_kind: :commands, preview: "rake #{name}")
         exe.enter_stage(:action)
