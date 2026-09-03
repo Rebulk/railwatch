@@ -269,9 +269,9 @@ never reaches a normal flush.
 |---|---|---|---|
 | `health_interval` | `LANTERN_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
 
-In a clustered, preloaded Puma, add `on_worker_boot { Lantern::Health.start! }`
-to `config/puma.rb` — the thread started at boot lives in the master and
-does not survive `fork`.
+The sampler re-arms itself after `fork` (a `Process._fork` hook), so
+clustered Puma workers and forked Solid Queue workers each report without
+any `on_worker_boot` configuration.
 
 ## Vendor noise defaults
 

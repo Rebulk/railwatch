@@ -47,6 +47,9 @@ module Lantern
 
       Lantern::Health.start!
       at_exit { Lantern::Health.stop! }
+      # Threads do not survive fork: re-arm the sampler in every child (Puma
+      # cluster workers, Solid Queue forked workers).
+      ::Process.singleton_class.prepend(Lantern::Health::ForkHook)
     end
 
     # lib/tasks/lantern_tasks.rake is already picked up by Rails::Engine's

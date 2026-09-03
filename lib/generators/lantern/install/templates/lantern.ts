@@ -7,7 +7,7 @@
 // Batches and sends with sendBeacon on pagehide, or every 5s.
 import { router } from "@inertiajs/react"
 
-type Visit = {
+interface Visit {
   started_at: number
   url: string
   method: string
@@ -47,7 +47,7 @@ function flush() {
     body,
     headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
     keepalive: true,
-  }).catch(() => {})
+  }).catch(() => undefined)
 }
 
 // --- Core Web Vitals ---------------------------------------------------
@@ -57,21 +57,35 @@ let cls = 0
 let inp = 0
 let ttfb = 0
 
-// durationThreshold is missing from older lib.dom typings, hence the cast.
-type ObserveOptions = { durationThreshold?: number }
+// The entry types the observers read. lib.dom lacks the layout-shift and
+// event-timing shapes (and durationThreshold), so they are declared here.
+interface VitalEntry extends PerformanceEntry {
+  value?: number
+  hadRecentInput?: boolean
+  interactionId?: number
+}
+interface ObserveOptions {
+  durationThreshold?: number
+}
 
-function observe(type: string, callback: (entries: any[]) => void, options: ObserveOptions = {}) {
+function observe(type: string, callback: (entries: VitalEntry[]) => void, options: ObserveOptions = {}) {
   if (typeof PerformanceObserver === "undefined") return
   try {
-    const observer = new PerformanceObserver((list) => callback(list.getEntries() as any[]))
-    observer.observe({ type, buffered: true, ...options } as PerformanceObserverInit)
+    const observer = new PerformanceObserver((list) => callback(list.getEntries()))
+    observer.observe({ type, buffered: true, ...options })
   } catch {
     // This browser does not support this entry type. Skip that metric only.
   }
 }
 
+function navigationEntry(): PerformanceNavigationTiming | undefined {
+  const entries: PerformanceEntry[] = performance.getEntriesByType?.("navigation") ?? []
+  const nav = entries[0]
+  return nav instanceof PerformanceNavigationTiming ? nav : undefined
+}
+
 function startVitals() {
-  const nav = performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined
+  const nav = navigationEntry()
   if (nav) ttfb = nav.responseStart
 
   // LCP: the last candidate the browser reported wins.
@@ -88,11 +102,12 @@ function startVitals() {
   observe("layout-shift", (entries) => {
     for (const entry of entries) {
       if (entry.hadRecentInput) continue
+      const value = entry.value ?? 0
       if (sessionValue && entry.startTime - sessionLast < 1000 && entry.startTime - sessionFirst < 5000) {
-        sessionValue += entry.value
+        sessionValue += value
         sessionLast = entry.startTime
       } else {
-        sessionValue = entry.value
+        sessionValue = value
         sessionFirst = entry.startTime
         sessionLast = entry.startTime
       }
@@ -117,12 +132,13 @@ function startVitals() {
 // The first page load is a visit too -- it just wasn't routed by Inertia, so
 // the component name comes off the root element's serialized page object.
 function initialVisit(): Visit | null {
-  const nav = performance.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined
+  const nav = navigationEntry()
   if (!nav) return null
 
   let component: string | undefined
   try {
-    component = JSON.parse(document.getElementById("app")?.dataset.page ?? "{}").component
+    const page = JSON.parse(document.getElementById("app")?.dataset.page ?? "{}") as { component?: string }
+    component = page.component
   } catch {
     // Not an Inertia-rendered page, or the payload moved. Report it anyway.
   }

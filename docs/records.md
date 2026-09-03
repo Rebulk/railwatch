@@ -556,13 +556,9 @@ the record still ships with whatever it did manage to read.
 Every Puma field is nil when no `Puma::Server` exists in the process, and
 every Solid Queue field is nil when `SolidQueue` isn't loaded.
 
-In a **clustered, preloaded** Puma the initializer runs in the master and
-threads don't survive `fork`, so each worker needs its own:
-
-```ruby
-# config/puma.rb
-on_worker_boot { Lantern::Health.start! }
-```
+The sampler re-arms itself after `fork` (a `Process._fork` hook), so
+clustered Puma workers and forked Solid Queue workers each report without
+any `on_worker_boot` configuration.
 
 `Lantern::Health.start!` is idempotent, and `stop!` (registered by the
 engine's `at_exit`, ahead of the reporter's final flush) wakes the thread

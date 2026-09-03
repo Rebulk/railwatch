@@ -168,3 +168,19 @@ RSpec.describe Lantern::Health do
     end
   end
 end
+
+RSpec.describe Lantern::Health::ForkHook do
+  it "re-arms the sampler in the child after a fork" do
+    expect(Lantern::Health).to receive(:restart_after_fork!)
+    fake = Class.new { def _fork = 0 }.new
+    fake.singleton_class.prepend(described_class)
+    expect(fake._fork).to eq(0)
+  end
+
+  it "leaves the parent alone" do
+    expect(Lantern::Health).not_to receive(:restart_after_fork!)
+    fake = Class.new { def _fork = 4242 }.new
+    fake.singleton_class.prepend(described_class)
+    expect(fake._fork).to eq(4242)
+  end
+end

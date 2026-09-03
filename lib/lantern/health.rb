@@ -19,11 +19,20 @@ module Lantern
     @pid = nil
     @stopping = false
 
+    # Prepended onto Process's singleton class by the engine: Ruby routes
+    # fork, Process.fork and Kernel#fork through Process._fork, so this sees
+    # every child exactly once.
+    module ForkHook
+      def _fork
+        pid = super
+        Health.restart_after_fork! if pid.zero?
+        pid
+      end
+    end
+
     module_function
 
-    # Idempotent. Also safe to call from Puma's `on_worker_boot`, which is how
-    # a clustered, preloaded app gets a health thread in each forked worker --
-    # the thread started here lives in the master and does not survive fork.
+    # Idempotent; ForkHook calls it again in every forked child.
     def start!
       return unless Lantern.enabled?
       return if defined?(Rails) && Rails.env.test?
@@ -40,6 +49,14 @@ module Lantern
         @thread.abort_on_exception = false
         @thread.report_on_exception = false
       end
+    end
+
+    # A forked child (Puma cluster worker, Solid Queue forked worker) inherits
+    # a dead thread and the parent's pid; start! sees the pid mismatch and
+    # starts a fresh one. Called from ForkHook, so no puma.rb hook is needed.
+    def restart_after_fork!
+      @thread = nil
+      start!
     end
 
     def stop!
