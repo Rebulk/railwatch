@@ -5,7 +5,7 @@ Gem::Specification.new do |spec|
   spec.version     = Lantern::VERSION
   spec.authors     = [ "Cole Robertson" ]
   spec.email       = [ "cole@rebulk.com" ]
-  spec.homepage    = "https://github.com/cole-robertson/lantern"
+  spec.homepage    = "https://github.com/Rebulk/lantern"
   spec.summary     = "First-class monitoring for Rails applications."
   spec.description = "Lantern instruments a Rails app end to end (requests, jobs, queries, exceptions, cache, mail, broadcasts, outgoing HTTP, logs) and ships linked events to Lantern Cloud."
   spec.license     = "MIT"
