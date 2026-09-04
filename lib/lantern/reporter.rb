@@ -9,6 +9,7 @@ module Lantern
   class Reporter
     INITIAL_RETRY_DELAY = 1.0
     MAX_RETRY_DELAY = 60.0
+    DeliveryBatch = Data.define(:id, :records, :dropped, :prepared)
 
     class DeliveryError < StandardError
       attr_reader :status, :records, :dropped
@@ -113,7 +114,7 @@ module Lantern
 
     def shutdown
       ensure_process!
-      ensure_thread if @buffer.size.positive? && !@thread&.alive?
+      ensure_thread if pending_records? && !@thread&.alive?
       thread = @thread
       return unless thread
 
@@ -210,29 +211,34 @@ module Lantern
     end
 
     def deliver_buffer
-      batch, dropped = drain_into_flight
-      return if batch.empty?
-
-      deliverable = Lantern.run_before_ingest(batch)
-      if deliverable.empty?
+      batch = drain_into_flight
+      if batch.records.empty?
         delivery_succeeded
         return
       end
 
-      result = @transport.deliver(deliverable, dropped: dropped)
-      Lantern.debug { "flushed #{deliverable.size} records (dropped #{dropped}): #{result.to_h}" }
+      deliverable = batch.prepared ? batch.records : Lantern.run_before_ingest(batch.records)
+      if deliverable.empty?
+        delivery_succeeded
+        return
+      end
+      batch = DeliveryBatch.new(id: batch.id, records: deliverable, dropped: batch.dropped, prepared: true)
+
+      result = deliver(batch)
+      Lantern.debug { "flushed #{deliverable.size} records (dropped #{batch.dropped}): #{result.to_h}" }
       if result.ok
         delivery_succeeded
       elsif retryable?(result)
-        retain(deliverable, dropped, result)
+        retain(batch, result)
       else
-        delivery_rejected(deliverable, dropped, result)
+        delivery_rejected(batch, result)
       end
       result
     rescue StandardError => e
-      retain(batch || [], dropped || 0, Transport::Http::Result.new(ok: false, error: "#{e.class}: #{e.message}"))
+      result = Transport::Http::Result.new(ok: false, error: "#{e.class}: #{e.message}")
+      batch&.records&.any? ? retain(batch, result) : delivery_succeeded
       Lantern.notify_unrecoverable(e)
-      Transport::Http::Result.new(ok: false, error: "#{e.class}: #{e.message}")
+      result
     ensure
       in_flight(0, 0)
     end
@@ -243,9 +249,9 @@ module Lantern
       !result.ok && Transport::Http.retryable_status?(result.status)
     end
 
-    def retain(batch, dropped, result)
+    def retain(batch, result)
       @mutex.synchronize do
-        @buffer.restore(batch, dropped: dropped)
+        @retry_batch = batch
         @in_flight_records = 0
         @in_flight_dropped = 0
         @retry_attempt += 1
@@ -253,7 +259,7 @@ module Lantern
         @retry_at = Clock.monotonic + delay
         @wakeup.signal
         Lantern.debug do
-          "retained #{batch.size} records after retryable delivery failure " \
+          "retained #{batch.records.size} records after retryable delivery failure " \
             "(#{result.error || result.status}); retry #{@retry_attempt} in #{delay.round(3)}s"
         end
       end
@@ -268,12 +274,12 @@ module Lantern
       end
     end
 
-    def delivery_rejected(batch, dropped, result)
+    def delivery_rejected(batch, result)
       delivery_succeeded
       detail = result.error.to_s.empty? ? "HTTP #{result.status}" : result.error
       Lantern.notify_unrecoverable(
-        DeliveryError.new("Lantern ingest permanently rejected #{batch.size} records: #{detail}",
-                          status: result.status, records: batch.size, dropped: dropped)
+        DeliveryError.new("Lantern ingest permanently rejected #{batch.records.size} records: #{detail}",
+                          status: result.status, records: batch.records.size, dropped: batch.dropped)
       )
     end
 
@@ -287,11 +293,27 @@ module Lantern
 
     def drain_into_flight
       @mutex.synchronize do
-        records, dropped = @buffer.drain
-        @in_flight_records = records.size
-        @in_flight_dropped = dropped
-        [ records, dropped ]
+        batch = @retry_batch
+        @retry_batch = nil
+        unless batch
+          records, dropped = @buffer.drain
+          batch = DeliveryBatch.new(id: SecureRandom.uuid, records: records, dropped: dropped, prepared: false)
+        end
+        @in_flight_records = batch.records.size
+        @in_flight_dropped = batch.dropped
+        batch
       end
+    end
+
+    # Third-party/test transports written before batch idempotency only accept
+    # `dropped:`. Keep those working while the HTTP transport receives the
+    # stable identity required to replay a request safely.
+    def deliver(batch)
+      parameters = @transport.method(:deliver).parameters
+      accepts_batch_id = parameters.any? { |kind, name| kind == :keyrest || name == :batch_id }
+      keywords = { dropped: batch.dropped }
+      keywords[:batch_id] = batch.id if accepts_batch_id
+      @transport.deliver(batch.records, **keywords)
     end
 
     def in_flight(records, dropped)
@@ -304,8 +326,8 @@ module Lantern
     def flush_for_shutdown
       deadline = @mutex.synchronize { @shutdown_deadline }
       loop do
-        flush if @buffer.size.positive?
-        break if @buffer.size.zero?
+        flush if pending_records?
+        break unless pending_records?
 
         now = Clock.monotonic
         break if now >= deadline
@@ -313,7 +335,7 @@ module Lantern
         retry_at = @mutex.synchronize { @retry_at }
         wait_until([ retry_at || now, deadline ].min)
       end
-      notify_unsent("shutdown deadline expired") if @buffer.size.positive?
+      notify_unsent("shutdown deadline expired") if pending_records?
     end
 
     def wait_until(deadline)
@@ -343,8 +365,14 @@ module Lantern
     def pending_delivery
       @mutex.synchronize do
         buffered, dropped = @buffer.stats
-        [ buffered + @in_flight_records, dropped + @in_flight_dropped ]
+        retry_records = @retry_batch&.records&.size || 0
+        retry_dropped = @retry_batch&.dropped || 0
+        [ buffered + retry_records + @in_flight_records, dropped + retry_dropped + @in_flight_dropped ]
       end
+    end
+
+    def pending_records?
+      pending_delivery.first.positive?
     end
   end
 end

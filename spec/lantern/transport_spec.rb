@@ -23,11 +23,25 @@ RSpec.describe Lantern::Transport::Http do
       expect(captured.headers["Content-Encoding"]).to eq("gzip")
       expect(captured.headers["X-Lantern-Version"]).to eq(Lantern::VERSION)
       expect(captured.headers["X-Lantern-Dropped"]).to eq("3")
+      expect(captured.headers["X-Lantern-Batch-Id"]).to match(/\A[0-9a-f-]{36}\z/)
 
       decoded = Zlib::GzipReader.new(StringIO.new(captured.body)).read
       expect(decoded.each_line.map { |l| JSON.parse(l) }).to eq(
         [ { "t" => "log", "message" => "a" }, { "t" => "log", "message" => "b" } ]
       )
+    end
+
+    it "uses one caller-supplied batch id for the original request and its immediate retry" do
+      seen_ids = []
+      stub_request(:post, "http://lantern.test/ingest").to_return do |request|
+        seen_ids << request.headers["X-Lantern-Batch-Id"]
+        seen_ids.one? ? { status: 503, body: "unavailable" } : { status: 200, body: '{"accepted":1}' }
+      end
+
+      result = transport.deliver([ { t: "log" } ], batch_id: "804b36bd-5cf7-4ed5-b649-ab8a7064e13b")
+
+      expect(result.ok).to be(true)
+      expect(seen_ids).to eq([ "804b36bd-5cf7-4ed5-b649-ab8a7064e13b" ] * 2)
     end
 
     it "omits the X-Lantern-Dropped header when nothing was dropped" do
@@ -192,8 +206,8 @@ RSpec.describe Lantern::Reporter do
         delivery_result(ok: true, status: 200, accepted: 1)
       ]
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
-        attempts << [ records.dup, dropped ]
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+        attempts << [ records.dup, dropped, batch_id ]
         outcomes.shift
       end
       reporter = described_class.new(reporter_config, transport: transport)
@@ -201,12 +215,43 @@ RSpec.describe Lantern::Reporter do
       reporter.buffer.push(record)
 
       expect(reporter.flush).to be_retryable
-      expect(reporter.buffer.size).to eq(1)
+      expect(reporter.buffer.size).to eq(0)
       expect(reporter.flush.ok).to be(true)
       expect(reporter.flush).to be_nil
 
-      expect(attempts).to eq([ [ [ record ], 0 ], [ [ record ], 0 ] ])
+      expect(attempts.map { |records, dropped, _id| [ records, dropped ] }).to eq([ [ [ record ], 0 ], [ [ record ], 0 ] ])
+      expect(attempts.map(&:last).uniq.size).to eq(1)
       expect(reporter.buffer.size).to eq(0)
+    end
+
+    it "uses a new batch id for each distinct batch formed from the buffer" do
+      batch_ids = []
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+        batch_ids << batch_id
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+
+      reporter.buffer.push({ n: 1 })
+      reporter.flush
+      reporter.buffer.push({ n: 2 })
+      reporter.flush
+
+      expect(batch_ids.size).to eq(2)
+      expect(batch_ids.uniq.size).to eq(2)
+      expect(batch_ids).to all(match(/\A[0-9a-f-]{36}\z/))
+    end
+
+    it "keeps legacy custom transports that do not accept batch_id working" do
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ n: 1 })
+
+      expect(reporter.flush.ok).to be(true)
     end
 
     it "preserves the prior dropped count across a failed delivery" do
@@ -229,23 +274,32 @@ RSpec.describe Lantern::Reporter do
       expect(seen_dropped).to eq([ 2, 2 ])
     end
 
-    it "merges records written during delivery and counts oldest losses" do
+    it "keeps a failed request immutable while buffering records written during delivery" do
+      attempts = []
       reporter = nil
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
-        reporter.buffer.push({ n: 3 })
-        reporter.buffer.push({ n: 4 })
-        Lantern::Transport::Http::Result.new(ok: false, status: 408)
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+        attempts << [ records.dup, batch_id ]
+        if attempts.one?
+          reporter.buffer.push({ n: 3 })
+          reporter.buffer.push({ n: 4 })
+          Lantern::Transport::Http::Result.new(ok: false, status: 408)
+        else
+          Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+        end
       end
       reporter = described_class.new(reporter_config, transport: transport)
       reporter.buffer.push({ n: 1 })
       reporter.buffer.push({ n: 2 })
 
       reporter.flush
+      reporter.flush
 
       batch, dropped = reporter.buffer.drain
-      expect(batch).to eq([ { n: 2 }, { n: 3 }, { n: 4 } ])
-      expect(dropped).to eq(1)
+      expect(attempts.map(&:first)).to eq([ [ { n: 1 }, { n: 2 } ] ] * 2)
+      expect(attempts.map(&:last).uniq.size).to eq(1)
+      expect(batch).to eq([ { n: 3 }, { n: 4 } ])
+      expect(dropped).to eq(0)
     end
 
     it "drops permanent client rejections and reports them explicitly" do
@@ -395,7 +449,7 @@ RSpec.describe Lantern::Reporter do
 
       reporter.shutdown
 
-      expect(reporter.buffer.size).to eq(1)
+      expect(reporter.send(:pending_delivery).first).to eq(1)
       error = seen_errors.grep(described_class::DeliveryError).first
       expect(error&.records).to eq(1)
       expect(error&.message).to include("unsent records retained in memory")

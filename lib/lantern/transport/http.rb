@@ -41,15 +41,15 @@ module Lantern
         self
       end
 
-      def deliver(records, dropped: 0)
+      def deliver(records, dropped: 0, batch_id: SecureRandom.uuid)
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 
         body = encode(records)
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped))
-          result = parse(post(body, dropped)) if attempt < 2 && (500..599).cover?(result.status)
+          result = parse(post(body, dropped, batch_id))
+          result = parse(post(body, dropped, batch_id)) if attempt < 2 && (500..599).cover?(result.status)
           apply_status_policy(result)
           result
         rescue StandardError => e
@@ -75,12 +75,13 @@ module Lantern
         io.string
       end
 
-      def post(body, dropped)
+      def post(body, dropped, batch_id)
         req = Net::HTTP::Post.new(@uri)
         req["Content-Type"] = "application/x-ndjson"
         req["Content-Encoding"] = "gzip"
         req["X-Lantern-Dropped"] = dropped.to_s if dropped.positive?
         req["X-Lantern-Version"] = Lantern::VERSION
+        req["X-Lantern-Batch-Id"] = batch_id
         req.body = body
         request(req)
       end
