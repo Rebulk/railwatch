@@ -2,6 +2,19 @@
 
 ## 0.1.0 (unreleased)
 
+- Browser JavaScript errors. The Inertia browser client now captures
+  uncaught errors, unhandled promise rejections, and Inertia's `exception`
+  and `invalid` events, batches them onto the existing beacon, and the
+  beacon controller records each as an `exception` with `source: "browser"`
+  — stack parsed into the same `{file, line, function, in_app}` frames a
+  Ruby backtrace produces, and the same default fingerprint, so a browser
+  error groups, regresses and resolves like any other issue. Each error
+  carries the page URL, Inertia component, visit, tab session, user agent,
+  and the last 20 breadcrumbs (console errors, clicks, navigations).
+  `startLantern({ ignoreErrors, denyUrls, tenant })` and a new exported
+  `reportError(error, context)` for React error boundaries. Replaces
+  `@sentry/react`; see `docs/replacing-sentry.md`.
+
 - Release health: a new `session` record type, from the browser client (one
   session per tab, riding along on the visit beacon) and from the request
   middleware (`Lantern::Sessions`, one flusher thread per web process).

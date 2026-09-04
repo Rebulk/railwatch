@@ -231,7 +231,7 @@ it never reaches the point where buffered records would flush.
 | `message` | Truncated to 4096 chars. |
 | `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
 | `severity` | `:error`/`:warning`/etc., as a string. |
-| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"application.action_cable"` (a channel action that raised), `"lantern.middleware"`, `"action_controller.rescue_from"`. |
+| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"application.action_cable"` (a channel action that raised), `"lantern.middleware"`, `"action_controller.rescue_from"`, or `"browser"` for a JavaScript error (see below). |
 | `file` / `line` | Top in-app backtrace frame. |
 | `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. |
 | `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
@@ -270,6 +270,43 @@ equivalents (`retry_on` exhausted, `discard_on`) are already covered by
 the `retry_stopped`/`discard` subscriptions in
 `lib/lantern/subscribers/jobs.rb`. See
 [`docs/configuration.md`](configuration.md) for both settings.
+
+#### Browser errors (`source: "browser"`)
+
+Every JavaScript error the browser client catches — `window.onerror`,
+unhandled promise rejections, Inertia's `exception` and `invalid` events,
+and anything the app reports itself with `reportError` — arrives on the
+same beacon as visits (`POST /lantern/beacon`, 50 errors per beacon at
+most) and is recorded as an ordinary `exception`: `source: "browser"`,
+`handled: false`, `severity: "error"`, `class` set to the JavaScript
+error's `name`, `message` truncated to 1024 chars. It carries the same
+envelope every other record does, including `deploy`, so a browser issue
+regresses with a release exactly like a Ruby one.
+
+The browser's stack (8192 chars at most) is parsed into the same frame
+shape a Ruby backtrace produces — V8's `at fn (url:line:col)` and
+SpiderMonkey/JavaScriptCore's `fn@url:line:col` are both understood, and a
+line with no location on it is dropped:
+
+| Frame key | Meaning |
+|---|---|
+| `file` | Path relative to the app's own origin (`assets/index-Bq1x9K.js`, `app/frontend/pages/orders/index.tsx`), or the whole URL for a script served from anywhere else. Any query string is cut. |
+| `line` | Line number. Columns are parsed but not stored. |
+| `function` | The function name the engine gave, or `"(anonymous)"`. |
+| `in_app` | True when the script came from the app's own origin and is not under `node_modules/` or `vendor/`. |
+
+No source snippets: the file is on the client, not on the server. Frames
+are fingerprinted exactly like Ruby ones — class, top in-app frame, and
+the normalized message — so browser errors group, split, merge, resolve,
+and regress through the same Issue machinery.
+
+`context` carries a `browser` key with the page `url`, the Inertia
+`component`, the `visit` the error happened in (if any), the tab's
+`session` id, the `user_agent`, and up to 20 `breadcrumbs`
+(`{at, kind, text}`, `kind` being `console`, `click`, or `navigate`) — the
+trail the client recorded before the crash. Anything the app passed as
+`reportError(error, context)` is merged in alongside it, flattened to
+strings, 20 keys at most.
 
 ### `cache_event`
 

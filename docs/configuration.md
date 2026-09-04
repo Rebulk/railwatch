@@ -444,10 +444,41 @@ checks both.
 
 `beacon_enabled` (`LANTERN_BEACON`, default `true`) gates
 `POST /lantern/beacon`, mounted by the install generator
-(`mount Lantern::Engine, at: "/lantern"`) — see `visit` in
-`docs/records.md` for the full field list and client batching behavior.
-Client setup: call `startLantern()` (generated at
+(`mount Lantern::Engine, at: "/lantern"`) — see `visit` and `exception` in
+`docs/records.md` for the full field lists and client batching behavior.
+The same beacon carries visit timing, Core Web Vitals, browser sessions,
+and every JavaScript error the page throws; turning `beacon_enabled` off
+turns off all four. Client setup: call `startLantern()` (generated at
 `app/frontend/lib/lantern.ts`) from your Inertia entrypoint.
+
+`startLantern` takes three optional settings, none of which has a
+server-side equivalent — they are decisions about the browser the code is
+running in:
+
+```ts
+startLantern({
+  // Messages never worth an issue, added to the defaults (both
+  // "ResizeObserver loop ..." messages). Strings match anywhere in the
+  // message; regexes are tested against it.
+  ignoreErrors: [/Failed to fetch dynamically imported module/],
+  // Scripts whose failures are not this app's, matched against the top
+  // stack frame's URL and added to the defaults (/extensions\//i,
+  // /^chrome:\/\//i, /^moz-extension:\/\//i). A frame from any origin
+  // other than the app's own is dropped regardless.
+  denyUrls: [/analytics\./],
+  // Only for apps that scope tenants by path or subdomain: the beacon
+  // posts to /lantern/beacon, outside that scoping, so the server cannot
+  // resolve the tenant itself. Read on every flush. A tenant the server
+  // does resolve (`Context.current_tenant`) always wins.
+  tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
+})
+```
+
+`reportError(error, context?)`, exported from the same file, reports an
+error the app caught itself — the usual caller is a React error
+boundary's `componentDidCatch`, passing `{ componentStack }`. See
+[`docs/replacing-sentry.md`](replacing-sentry.md) for what is and is not
+captured versus `@sentry/react`.
 
 SSR timing needs no configuration: `Lantern::Patches::Inertia` prepends
 `InertiaRails::Renderer#ssr_render` whenever `inertia_rails` SSR is

@@ -113,14 +113,23 @@ and log lines already attached to it.
 Each of these is worth adding, and none of them is required for requests,
 jobs, queries, and exceptions to report.
 
-**The browser client**, for Inertia visit timing and Core Web Vitals.
-The generator adds both lines to your entrypoint when it finds one:
+**The browser client**, for Inertia visit timing, Core Web Vitals, and
+JavaScript errors. The generator adds both lines to your entrypoint when
+it finds one:
 
 ```ts
 import { startLantern } from "@/lib/lantern"
 
 startLantern()
 ```
+
+Errors ride the same beacon as visit timing — uncaught errors, unhandled
+promise rejections, and Inertia's own `exception` and `invalid` events —
+and land as ordinary issues next to your Ruby ones. `startLantern` takes
+optional `ignoreErrors`, `denyUrls`, and `tenant` settings, and the same
+file exports `reportError(error, context)` for errors your own code
+catches; see [`docs/configuration.md`](configuration.md) and
+[`docs/replacing-sentry.md`](replacing-sentry.md).
 
 **The Kamal post-deploy hook**, for deploy markers and the commit diff
 between deploys. Generated at `.kamal/hooks/post-deploy` when

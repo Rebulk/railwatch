@@ -65,6 +65,62 @@ module Lantern
       end
     end
 
+    # --- Browser stacks ---------------------------------------------------
+
+    # One frame of a JavaScript stack, in either of the two shapes engines
+    # write: V8's "at fn (https://host/assets/app-abc.js:1:2)" (and the same
+    # line without the function name), or SpiderMonkey and JavaScriptCore's
+    # "fn@https://host/assets/app-abc.js:1:2". A line with no file:line on it
+    # -- V8's leading "TypeError: ..." header, "at new Promise (<anonymous>)"
+    # -- matches neither and is dropped.
+    JS_FRAME = /
+      \A
+      (?:at\s+)?                       # V8 indents every frame with "at "
+      (?:(?<function>[^@]*?)\s*[@(])?  # "fn@" (Firefox, Safari) or "fn (" (V8)
+      (?<file>\S+?)
+      :(?<line>\d+)(?::\d+)?           # line, and the column both engines add
+      \)?
+      \z
+    /x
+
+    # Frames from the app's own origin that are still not the app's code.
+    VENDOR_PATH = %r{(?:\A|/)(?:node_modules|vendor)\b}
+
+    MAX_JS_FRAMES = 50
+
+    # A browser stack, exactly as the engine wrote it, in the same frame
+    # shape as a Ruby backtrace. `origin` is the app's own scheme and host: a
+    # script served from it is the app's own, so its file is stored relative
+    # to that origin the way a Ruby frame is stored relative to Rails.root,
+    # and anything from a CDN, an extension, or a third-party tag keeps its
+    # whole URL and is not in_app.
+    def js_frames(stack, origin: nil, limit: MAX_JS_FRAMES)
+      frames = []
+      stack.to_s.each_line do |raw|
+        break if frames.size >= limit
+        match = JS_FRAME.match(raw.strip) or next
+        url = match[:file].split("?", 2).first.to_s
+        own = js_own_origin?(url, origin)
+        file = own ? url.delete_prefix(origin.to_s).delete_prefix("/") : url
+        function = match[:function].to_s.strip
+        frames << {
+          file: file[0, 255],
+          line: match[:line].to_i,
+          function: function.empty? ? "(anonymous)" : function[0, 255],
+          in_app: own && !VENDOR_PATH.match?(file)
+        }
+      end
+      frames
+    end
+
+    # A bare path ("/assets/app.js") can only be the app's own; an absolute
+    # URL is only the app's own when it is on the app's origin.
+    def js_own_origin?(url, origin)
+      return true if url.start_with?("/")
+      return false if origin.nil? || origin.empty?
+      url.start_with?("#{origin}/")
+    end
+
     def source_snippet(path, line, context: 5)
       return nil unless path && File.readable?(path)
       lines = File.readlines(path, chomp: true)

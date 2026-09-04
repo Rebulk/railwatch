@@ -1,9 +1,11 @@
 // Lantern browser client for Inertia. Reports each visit's duration,
 // component, and prop payload size to /lantern/beacon so the platform can
 // show real page-load timing, plus Core Web Vitals (LCP, CLS, INP, TTFB)
-// for the initial page load. No dependencies -- every metric comes from
-// PerformanceObserver or the navigation timing entry, and every API is
-// feature-detected, so browsers missing one just report the rest.
+// for the initial page load, plus every JavaScript error the page throws
+// with the breadcrumb trail that led to it.
+// No dependencies -- every metric comes from PerformanceObserver or the
+// navigation timing entry, and every API is feature-detected, so browsers
+// missing one just report the rest.
 // Batches and sends with sendBeacon on pagehide, or every 5s.
 import { router } from "@inertiajs/react"
 
@@ -32,15 +34,68 @@ interface Session {
   ended?: boolean
 }
 
+// A JavaScript error the page threw, with the stack exactly as the browser
+// wrote it -- the server parses it into frames.
+interface JsError {
+  at: number
+  name: string
+  message: string
+  stack?: string
+  component?: string
+  url: string
+  visit?: string
+  breadcrumbs?: Crumb[]
+  context?: Record<string, unknown>
+}
+
+// What the user did in the run-up to a crash. The same idea as the server
+// side's breadcrumbs, which are what the execution did before it raised.
+interface Crumb {
+  at: number
+  kind: "console" | "click" | "navigate"
+  text: string
+}
+
+export interface LanternOptions {
+  // Messages that are never worth an issue, added to the defaults below. A
+  // string matches anywhere in the message; a regex is tested against it.
+  ignoreErrors?: (string | RegExp)[]
+  // Scripts whose failures are not this app's to fix, added to the defaults
+  // below and matched against the top stack frame's URL.
+  denyUrls?: RegExp[]
+  // The tenant the user is looking at. The beacon posts to /lantern/beacon,
+  // which is outside whatever path or subdomain the app scopes tenants by,
+  // so the server cannot work this out for itself. Read on every flush, so
+  // it follows the user across tenants without a page load.
+  tenant?: () => string | undefined
+}
+
+// Browser noise that is never actionable: ResizeObserver fires from benign
+// layout thrash and the spec says to ignore it, and the extension URLs are
+// third-party code running in someone's browser that this app cannot fix.
+const DEFAULT_IGNORE_ERRORS = [
+  "ResizeObserver loop limit exceeded",
+  "ResizeObserver loop completed with undelivered notifications",
+]
+const DEFAULT_DENY_URLS = [/extensions\//i, /^chrome:\/\//i, /^moz-extension:\/\//i]
+
 const SESSION_ID_KEY = "lantern.session"
 const SESSION_STARTED_KEY = "lantern.session.at"
 
 const queue: Visit[] = []
+const errors: JsError[] = []
+const crumbs: Crumb[] = []
 let current: Visit | null = null
 let initial: Visit | null = null
 let session: Session | null = null
+// The Inertia page component the user is on, so an error that fires between
+// visits still says which screen it broke.
+let component: string | undefined
 let finalized = false
 let timer: number | undefined
+let ignoreErrors: (string | RegExp)[] = DEFAULT_IGNORE_ERRORS
+let denyUrls: RegExp[] = DEFAULT_DENY_URLS
+let tenantOf: (() => string | undefined) | undefined
 
 function endpoint() {
   return "/lantern/beacon"
@@ -50,7 +105,7 @@ function csrf() {
   return document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content ?? ""
 }
 
-function post(payload: { visits: Visit[]; session?: Session }) {
+function post(payload: { visits: Visit[]; errors: JsError[]; session?: Session; tenant?: string }) {
   const body = JSON.stringify(payload)
   const blob = new Blob([body], { type: "application/json" })
   if (navigator.sendBeacon?.(endpoint(), blob)) return
@@ -63,8 +118,19 @@ function post(payload: { visits: Visit[]; session?: Session }) {
 }
 
 function flush(ended = false) {
-  if (queue.length === 0 && !ended) return
-  post({ visits: queue.splice(0, queue.length), session: beat(ended) })
+  if (queue.length === 0 && errors.length === 0 && !ended) return
+  post({ visits: queue.splice(0, queue.length), errors: errors.splice(0, errors.length), session: beat(ended), tenant: tenant() })
+}
+
+// The app's tenant resolver runs on the flush path, where a throw would cost
+// the whole batch, so it never gets to.
+function tenant() {
+  try {
+    return tenantOf?.()
+  } catch {
+    // The app's resolver raised. These records just carry no tenant.
+    return undefined
+  }
 }
 
 // --- Session -----------------------------------------------------------
@@ -91,7 +157,7 @@ function startSession() {
     document.cookie = `lantern_session=${id}; path=/; SameSite=Lax`
     session = { id, started_at: startedAt }
     // No duration on the first beat: that is what opens the session.
-    if (!existing) post({ visits: [], session: { ...session } })
+    if (!existing) post({ visits: [], errors: [], session: { ...session }, tenant: tenant() })
   } catch {
     // sessionStorage is unavailable (private mode, storage disabled).
     // Everything else still reports; this tab just has no session.
@@ -101,6 +167,159 @@ function startSession() {
 function beat(ended: boolean): Session | undefined {
   if (!session) return undefined
   return { ...session, duration_ms: Date.now() - session.started_at, ended }
+}
+
+// --- Breadcrumbs -------------------------------------------------------
+
+const MAX_CRUMBS = 20
+const MAX_CRUMB_TEXT = 500
+// A budget for one error's whole trail, so a page that logs War and Peace to
+// the console cannot crowd out the errors themselves.
+const MAX_CRUMB_BYTES = 8000
+
+function crumb(kind: Crumb["kind"], text: string) {
+  if (!text) return
+  crumbs.push({ at: Date.now(), kind, text: text.slice(0, MAX_CRUMB_TEXT) })
+  if (crumbs.length > MAX_CRUMBS) crumbs.shift()
+}
+
+// The trail as it stood when an error fired, oldest first, giving up its
+// oldest entries until it fits the byte budget.
+function trail(): Crumb[] {
+  const taken = crumbs.slice()
+  while (taken.length > 0 && JSON.stringify(taken).length > MAX_CRUMB_BYTES) taken.shift()
+  return taken
+}
+
+// "button#save.btn.primary "Save order"" -- enough to recognise what was
+// clicked, and never an input's value, which is the user's data and not
+// ours to ship.
+function describeTarget(target: EventTarget | null): string {
+  if (!(target instanceof Element)) return ""
+  const id = target.id ? `#${target.id}` : ""
+  const className = typeof target.className === "string" ? target.className.trim() : ""
+  const classes = className ? `.${className.split(/\s+/).join(".")}` : ""
+  const text = target instanceof HTMLInputElement ? "" : (target.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 80)
+  return `${target.tagName.toLowerCase()}${id}${classes}${text ? ` "${text}"` : ""}`
+}
+
+function startBreadcrumbs() {
+  document.addEventListener("click", (event) => crumb("click", describeTarget(event.target)), true)
+  for (const level of ["error", "warn"] as const) {
+    const original = console[level].bind(console) as (...args: unknown[]) => void
+    console[level] = (...args: unknown[]) => {
+      crumb("console", `${level}: ${args.map(stringify).join(" ")}`)
+      original(...args)
+    }
+  }
+}
+
+// --- JavaScript errors -------------------------------------------------
+
+const MAX_MESSAGE = 1000
+const MAX_STACK = 8000
+// The server caps a beacon at 50 errors too. This is what stops a component
+// that throws on every render from growing the queue without bound between
+// flushes.
+const MAX_ERRORS = 50
+
+// The script a stack line points at: a URL or a bare path, followed by the
+// line (and column) every engine appends. Anchored to the end of the line so
+// a path quoted in the error's own message is not mistaken for a frame.
+const FRAME_URL = /((?:[a-z][a-z0-9+.-]*:\/\/|\/)[^\s()'"]+):\d+(?::\d+)?\)?$/i
+
+function topFrameUrl(stack: string): string | undefined {
+  for (const line of stack.split("\n")) {
+    const match = FRAME_URL.exec(line.trim())
+    if (match) return match[1]
+  }
+  return undefined
+}
+
+// Everything that gets an error dropped before it costs a beacon: a message
+// the app said it never wants, a denied script, or a top frame that is not
+// the app's own code at all -- an extension, an injected widget, a tag
+// manager. None of those are anything this app can fix.
+function ignored(message: string, stack?: string): boolean {
+  if (ignoreErrors.some((pattern) => (typeof pattern === "string" ? message.includes(pattern) : pattern.test(message)))) return true
+  const url = stack ? topFrameUrl(stack) : undefined
+  if (!url) return false
+  if (denyUrls.some((pattern) => pattern.test(url))) return true
+  return !url.startsWith("/") && !url.startsWith(`${location.origin}/`)
+}
+
+function capture(name: string, message: string, stack?: string, context?: Record<string, unknown>) {
+  if (errors.length >= MAX_ERRORS) return
+  if (ignored(message, stack)) return
+  const breadcrumbs = trail()
+  const error: JsError = {
+    at: Date.now(),
+    name: name.slice(0, 200) || "Error",
+    message: message.slice(0, MAX_MESSAGE),
+    stack: stack?.slice(0, MAX_STACK),
+    component,
+    url: location.pathname + location.search,
+    visit: current?.url,
+    breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs : undefined,
+    context,
+  }
+  // Deduped within the flush, not across the page's life: a render loop
+  // throws the same error every retry, and Inertia re-rejects the error it
+  // just fired `exception` for, so the same crash arrives twice.
+  if (errors.some((e) => e.name === error.name && e.message === error.message && e.stack === error.stack)) return
+  errors.push(error)
+}
+
+// Anything at all can be thrown or rejected in JavaScript, not just an
+// Error. A non-Error value is reported under `fallback` with whatever it
+// stringifies to as the message.
+function captureValue(value: unknown, fallback: string, context?: Record<string, unknown>) {
+  if (value instanceof Error) capture(value.name, value.message, value.stack, context)
+  else capture(fallback, stringify(value), undefined, context)
+}
+
+// An error the app caught itself, for the one place the window listener
+// cannot reach: a React error boundary's componentDidCatch, which is handed
+// a component stack that exists nowhere in the error object.
+//
+//   componentDidCatch(error: Error, info: ErrorInfo) {
+//     reportError(error, { componentStack: info.componentStack })
+//   }
+export function reportError(error: unknown, context?: Record<string, unknown>) {
+  captureValue(error, "Error", context)
+}
+
+function stringify(value: unknown) {
+  try {
+    return String(value)
+  } catch {
+    // A Symbol, or an object whose toString throws.
+    return `<${typeof value}>`
+  }
+}
+
+// Every route a JavaScript error can take to get here. Inertia's `exception`
+// event carries anything the request itself threw -- a dropped connection
+// arrives as an axios "Network Error" here, since Inertia has no separate
+// networkError event -- and `invalid` fires when the server answered with
+// something that was not an Inertia response at all: a 403 page from an
+// authorization filter, a login redirect, an error page from a proxy.
+function startErrorCapture() {
+  window.addEventListener("error", (event) => {
+    // Neither an error object nor a message means there is nothing to
+    // report -- a failed <img> or <script> load, not a JavaScript error.
+    if (!event.error && !event.message) return
+    captureValue((event.error ?? event.message) as unknown, "Error")
+  })
+  window.addEventListener("unhandledrejection", (event) => {
+    captureValue(event.reason as unknown, "UnhandledRejection")
+  })
+  router.on("exception", (event) => {
+    captureValue(event.detail.exception, "InertiaException")
+  })
+  router.on("invalid", (event) => {
+    capture("InertiaInvalidResponse", `Inertia invalid response (${event.detail.response.status})`)
+  })
 }
 
 // --- Core Web Vitals ---------------------------------------------------
@@ -186,19 +405,23 @@ function startVitals() {
   )
 }
 
+// The component the server rendered this page with, off the root element's
+// serialized page object. Inertia's own events take over from here.
+function pageComponent(): string | undefined {
+  try {
+    const page = JSON.parse(document.getElementById("app")?.dataset.page ?? "{}") as { component?: string }
+    return page.component
+  } catch {
+    // Not an Inertia-rendered page, or the payload moved. Report it anyway.
+    return undefined
+  }
+}
+
 // The first page load is a visit too -- it just wasn't routed by Inertia, so
 // the component name comes off the root element's serialized page object.
 function initialVisit(): Visit | null {
   const nav = navigationEntry()
   if (!nav) return null
-
-  let component: string | undefined
-  try {
-    const page = JSON.parse(document.getElementById("app")?.dataset.page ?? "{}") as { component?: string }
-    component = page.component
-  } catch {
-    // Not an Inertia-rendered page, or the payload moved. Report it anyway.
-  }
 
   const duration = (nav.loadEventEnd || nav.responseEnd) - nav.startTime
   return {
@@ -231,10 +454,16 @@ function finalize() {
   flush(true)
 }
 
-export function startLantern() {
+export function startLantern(options: LanternOptions = {}) {
+  ignoreErrors = [ ...DEFAULT_IGNORE_ERRORS, ...(options.ignoreErrors ?? []) ]
+  denyUrls = [ ...DEFAULT_DENY_URLS, ...(options.denyUrls ?? []) ]
+  tenantOf = options.tenant
   startVitals()
   startSession()
+  component = pageComponent()
   initial = initialVisit()
+  startBreadcrumbs()
+  startErrorCapture()
 
   router.on("start", (event) => {
     const v = event.detail.visit
@@ -245,10 +474,12 @@ export function startLantern() {
       partial: Boolean(v.only?.length || v.except?.length),
       only: v.only,
     }
+    crumb("navigate", `${v.method.toUpperCase()} ${current.url}`)
   })
   router.on("success", (event) => {
+    component = event.detail.page.component
     if (!current) return
-    current.component = event.detail.page.component
+    current.component = component
     current.props_bytes = JSON.stringify(event.detail.page.props ?? {}).length
     current.status = "success"
   })

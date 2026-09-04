@@ -333,6 +333,92 @@ c.session_flush_interval = 60.0   # seconds between server-session flushes
 c.session_timeout = 1800.0        # idle seconds before a server session ends
 ```
 
+## 11. Browser errors (`@sentry/react`)
+
+Delete `@sentry/react` too. The browser client the generator installs
+(`app/frontend/lib/lantern.ts`) reports JavaScript errors on the same
+beacon it already uses for visit timing and Core Web Vitals — one
+transport, one batch, one flush on `pagehide` or every 5s. There is no
+second SDK to load and no second quota.
+
+```ts
+// app/frontend/entrypoints/application.ts
+import { startLantern } from "@/lib/lantern"
+
+startLantern({
+  // Added to the defaults, not instead of them.
+  ignoreErrors: [/Failed to fetch dynamically imported module/],
+  denyUrls: [/analytics\./],
+  // Only if the app scopes tenants by path or subdomain: the beacon posts
+  // to /lantern/beacon, which is outside that scoping, so the server
+  // cannot work the tenant out for itself.
+  tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
+})
+```
+
+| Sentry | Lantern |
+|---|---|
+| `Sentry.init({ dsn })` | `startLantern()`. There is no DSN: the beacon posts to the app's own origin and the *server* decides whether to record it (`c.beacon_enabled`, `LANTERN_TOKEN`). The gate you already have on whether `startLantern()` runs at all is the only gate. |
+| `release` | Automatic. The record is stamped with `c.deploy`, the same release the server records carry, so a browser issue and a server issue from one deploy line up without a matching pair of settings to get wrong. |
+| `environment` | Automatic — the ingest token identifies the environment. |
+| `ignoreErrors` | `startLantern({ ignoreErrors })`. Strings match anywhere in the message; regexes are tested against it. Both `ResizeObserver` messages are ignored by default. |
+| `denyUrls` | `startLantern({ denyUrls })`, matched against the top stack frame's URL. `/extensions\//i`, `/^chrome:\/\//i`, and `/^moz-extension:\/\//i` are denied by default, **and** any frame from an origin that isn't the app's own is dropped — extensions, injected widgets, tag managers. |
+| `Sentry.setUser` | Automatic. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Lantern.user`). |
+| `Sentry.setTag("org", …)` | `startLantern({ tenant })`, and `Lantern.context(...)` for everything else. |
+| `Sentry.captureException(e)` | `reportError(e)`. |
+| `Sentry.captureMessage(text)` | `reportError(new Error(text))` — Lantern has one shape for a browser problem, not two. |
+| Breadcrumbs (automatic) | Automatic: the last 20 of console errors/warnings, clicks, and Inertia navigations ride along on every error and are shown on the issue page. Click crumbs record the element, never an input's value. |
+| `Sentry.ErrorBoundary` | Not needed — see below. |
+| `tracesSampleRate`, `replaysSessionSampleRate` | No equivalent. Lantern reports visit timing and Core Web Vitals instead of browser traces, and does not record sessions. |
+
+### What is and is not captured
+
+Captured: uncaught errors (`window.onerror` / the `error` event),
+unhandled promise rejections, Inertia's `exception` event (which is where
+a dropped connection lands — Inertia has no separate `networkError`
+event, an axios `Network Error` is an `exception`), Inertia's `invalid`
+event (the server answered a visit with something that was not an Inertia
+response — a 403 page, a login redirect, a proxy error page), and
+anything the app hands to `reportError`.
+
+Not captured: browser traces and session replay; failed resource loads
+(a 404 on an `<img>` or `<script>`); errors from a cross-origin script,
+which the browser reports as a bare `"Script error."` with no stack and
+Lantern drops as not the app's to fix; and anything thrown before
+`startLantern()` runs.
+
+Minified frames are shown as the browser named them
+(`assets/index-Bq1x9K.js:41`) — Lantern does not yet upload source maps,
+so a production frame does not link to a line in your repository.
+
+### You do not need a JavaScript error boundary
+
+React re-throws an error a boundary caught, so the window handler sees it
+whether or not you have one, and a boundary is not the thing that gets the
+error reported. Keep boundaries for what they are for — rendering a
+fallback UI instead of a blank screen — and add `reportError` where you
+want the *component stack*, which lives only in the `ErrorInfo` React
+hands `componentDidCatch` and appears in no error object:
+
+```tsx
+import { reportError } from "@/lib/lantern"
+
+class MapErrorBoundary extends Component<Props, State> {
+  static getDerivedStateFromError() {
+    return { hasError: true }
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    reportError(error, { componentStack: info.componentStack })
+  }
+  render() {
+    return this.state.hasError ? <Fallback /> : this.props.children
+  }
+}
+```
+
+Everything passed as the second argument lands in the exception's
+`context` on the issue page, flattened to strings.
+
 ## What Lantern does that Sentry doesn't
 
 | | |
