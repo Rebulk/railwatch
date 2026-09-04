@@ -320,7 +320,9 @@ export function lanternRootOptions(): {
 function stringify(value: unknown) {
   try {
     if (value instanceof Error) return `${value.name}: ${value.message}`
-    if (typeof value === "object" && value !== null) return JSON.stringify(value).slice(0, MAX_CRUMB_TEXT)
+    if (Array.isArray(value) || (typeof value === "object" && value !== null && value.toString === Object.prototype.toString)) {
+      return JSON.stringify(value).slice(0, MAX_CRUMB_TEXT)
+    }
     return String(value)
   } catch {
     // A Symbol, a cyclic object, or an object whose toString throws.
