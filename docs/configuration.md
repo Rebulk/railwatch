@@ -438,7 +438,12 @@ record's `context` field (truncated at 64KB). `tenant` specifically is
 auto-detected with no explicit `Lantern.context` call needed when the app
 uses `activerecord-tenanted` (`ActiveRecord::Base.current_tenant`) or
 `TenantRecord` (`TenantRecord.current_tenant`) — `Context.current_tenant`
-checks both.
+checks both. The tenant is re-read while it is still nil, so a tenant bound
+*inside* the execution (activerecord-tenanted's `TenantSelector` middleware
+sits under Lantern's, as do `around_action`s and a job's `with_tenant`
+block) still lands on the request/job record and every child made after
+the bind. Records made before the bind (a `before_action` that loads the
+user, say) keep `tenant: nil`.
 
 ## Inertia: beacon and SSR
 

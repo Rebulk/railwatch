@@ -197,7 +197,19 @@ module Lantern
 
     # The envelope every child record shares with its parent. Rebuilt only
     # when a stage, user, tenant, or preview changes; records merge a copy.
+    #
+    # The app's tenant is usually bound INSIDE the execution -- a middleware
+    # nested under Lantern's (activerecord-tenanted's TenantSelector), an
+    # around_action, a job's with_tenant block -- so it was nil when the
+    # execution opened. While it is still nil, every envelope read asks the
+    # app again (two constant checks and a thread-local read) so the first
+    # record after the bind, and everything after it including the parent,
+    # carries the tenant.
     def envelope
+      if @tenant.nil? && (bound = Context.current_tenant)
+        @tenant = bound
+        @envelope = nil
+      end
       @envelope ||= {
         trace_id: @trace_id,
         execution_source: @source.name,
