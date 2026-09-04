@@ -53,6 +53,13 @@ module Lantern
         rescue SystemExit => e
           exit_code = e.status
           raise
+        rescue SignalException => e
+          # SIGTERM/SIGINT is how Kamal, systemd and Ctrl-C stop a long-running
+          # task (a litestream replicator, a queue worker); it is a shutdown,
+          # not a failure, so the command closes with the signal's exit code
+          # and no exception is reported.
+          exit_code = 128 + (e.signo || 0)
+          raise
         rescue Exception => e # rubocop:disable Lint/RescueException
           exit_code = 1
           Lantern::Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "application.rake")

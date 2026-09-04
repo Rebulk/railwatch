@@ -26,6 +26,7 @@ module Lantern
     # Sentry::Rails::Configuration::IGNORE_DEFAULT), so a Sentry app migrating
     # to Lantern sees the same signal-to-noise out of the box.
     DEFAULT_IGNORED_EXCEPTIONS = %w[
+      SignalException
       ActionController::BadRequest
       ActionController::InvalidAuthenticityToken
       ActionController::RoutingError

@@ -33,6 +33,17 @@ RSpec.describe Lantern::Patches::RakeTask do
     expect(lantern_records(:command).sole[:exit_code]).to eq(255)
   end
 
+  # SIGTERM is how Kamal and systemd stop a long-running task (the platform's
+  # own `litestream:replicate` role opened one issue per deploy this way).
+  it "treats a shutdown signal as an exit, not an error: exit_code 128+signo and no exception record" do
+    Rake::Task.define_task(:lantern_spec_term) { raise SignalException, "SIGTERM" }
+    expect { Rake::Task[:lantern_spec_term].execute }.to raise_error(SignalException)
+
+    cmd = lantern_records(:command).sole
+    expect(cmd[:exit_code]).to eq(128 + Signal.list["TERM"])
+    expect(lantern_records(:exception)).to be_empty
+  end
+
   it "reports exit_code 1 and captures the exception for an unhandled StandardError" do
     Rake::Task.define_task(:lantern_spec_boom) { raise "kaboom" }
     expect { Rake::Task[:lantern_spec_boom].execute }.to raise_error("kaboom")
