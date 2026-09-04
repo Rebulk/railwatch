@@ -6,7 +6,6 @@ module Lantern
     # lifecycle stages, catches anything that escapes the stack as an
     # unhandled exception, and emits the request record at the end.
     class Request
-      IGNORED_PATHS = %w[/up /lantern/beacon].freeze
       # Env keys repeat request after request (same client/proxy headers), so
       # the Rack key -> "Header-Name" conversion is cached instead of
       # split/map/capitalize/join-ing on every request.
@@ -34,7 +33,8 @@ module Lantern
       end
 
       def call(env)
-        return @app.call(env) unless Lantern.enabled? || IGNORED_PATHS.include?(env["PATH_INFO"])
+        return @app.call(env) unless Lantern.enabled?
+        return @app.call(env) if ignored_request?(env)
 
         trace_id, parent_id, upstream_sampled = self.class.traceparent(env["HTTP_TRACEPARENT"])
         exe = Lantern.start_execution(source: :request, sample_kind: :requests,
@@ -58,6 +58,38 @@ module Lantern
       end
 
       private
+
+      def ignored_request?(env)
+        path = env["PATH_INFO"].to_s
+        Lantern.config.ignored_request_paths.any? do |pattern|
+          pattern.is_a?(Regexp) ? pattern.match?(path) : pattern.to_s == path
+        end || self_ingest_request?(env, path)
+      end
+
+      # Lantern Cloud monitors itself. Its reporter therefore POSTs back into
+      # the same Rails process, and recording that POST would put another
+      # request record in the reporter forever: flush -> /ingest -> flush.
+      #
+      # Path alone is not enough: a customer application can own an unrelated
+      # /ingest route. This exemption needs the exact transport method, bearer
+      # token and public origin. Rack::Request normalizes Forwarded and
+      # X-Forwarded-* headers (including a non-default forwarded port), so the
+      # comparison still works behind a TLS-terminating reverse proxy without
+      # confusing the proxy's internal host with the public ingest origin.
+      def self_ingest_request?(env, path)
+        return false unless env["REQUEST_METHOD"] == "POST"
+        return false unless env["HTTP_AUTHORIZATION"] == "Bearer #{Lantern.config.token}"
+
+        endpoint = URI.join(Lantern.config.ingest_url, "/ingest")
+        return false unless path == endpoint.path
+
+        request = Rack::Request.new(env)
+        request.scheme.casecmp?(endpoint.scheme) &&
+          request.hostname.casecmp?(endpoint.host) &&
+          request.port == endpoint.port
+      rescue StandardError
+        false
+      end
 
       def finish(env, exe, status, headers)
         exe.finish_stages

@@ -16,9 +16,17 @@ win over the env var.
 | `deploy` | `LANTERN_DEPLOY` | `KAMAL_VERSION`, then `GIT_REV`, then nil | Version tag stamped on every record and used by `lantern:deploy`. |
 | `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
+| `ignored_request_paths` | `LANTERN_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/lantern/beacon` | Exact request paths that bypass Lantern's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
 
 `Lantern.enabled?` delegates to `config.enabled?`, which is `@enabled &&
 token.present?` — there is no separate "is configured" check elsewhere.
+
+The request middleware also recognizes the reporter's own `POST /ingest`
+when Lantern Cloud monitors itself. It bypasses that request only when the
+method, bearer token, configured ingest path, and public scheme/host/port all
+match; an unrelated application route named `/ingest` remains observable.
+Rack's normalized forwarded origin is used so this works behind a trusted
+TLS-terminating proxy with `Forwarded` or `X-Forwarded-*` headers.
 
 ## Sampling
 

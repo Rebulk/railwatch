@@ -25,6 +25,7 @@ Lantern.configure do |c|
   # c.capture_request_payload = false   # only captured for requests that raised, always redacted
   # c.redact_headers += %w[X-Api-Key]
   # c.redact_params  += %w[ssn]         # merged with Rails.application.config.filter_parameters
+  # c.ignored_request_paths += ["/internal/health"] # /up and /lantern/beacon are ignored by default
 
   # How the current user is described. Default reads Current.user then Warden.
   # c.user { |user| { id: user.id, name: user.name, email: user.email } }

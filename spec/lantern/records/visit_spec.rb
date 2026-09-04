@@ -26,6 +26,7 @@ RSpec.describe "visit record", type: :request do
     expect(visit[:only]).to eq([ "widgets" ])
     expect(visit[:props_bytes]).to eq(42)
     expect(visit[:user_agent]).to be_a(String)
+    expect(lantern_records(:request)).to be_empty
   end
 
   describe "Core Web Vitals" do
