@@ -23,6 +23,14 @@
   `backtrace_locations` is nil for them. `Backtrace.frames` now parses the
   String backtrace in that case.
 
+- Request exclusions now bypass instrumentation correctly. `/up` and
+  `/lantern/beacon` are excluded by default, apps can configure exact paths
+  or regexps through `ignored_request_paths`, and a same-origin authenticated
+  reporter POST to `/ingest` is recognized behind reverse proxies. The last
+  case prevents Lantern Cloud's self-monitoring from creating an endless
+  flush -> ingest-request -> flush feedback loop without hiding unrelated
+  application routes also named `/ingest`.
+
 - Browser JavaScript errors. The Inertia browser client now captures
   uncaught errors, unhandled promise rejections, and Inertia's failed-request
   events (`exception`/`invalid` on Inertia 2, `networkError`/`httpException`

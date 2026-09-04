@@ -128,6 +128,22 @@ RSpec.describe Lantern::Configuration do
     end
   end
 
+  describe "ignored_request_paths" do
+    it "defaults to health and beacon paths as a mutable copy" do
+      with_env("LANTERN_IGNORED_REQUEST_PATHS" => nil) do |config|
+        expect(config.ignored_request_paths).to eq(%w[/up /lantern/beacon])
+        config.ignored_request_paths << "/internal/health"
+        expect(described_class::DEFAULT_IGNORED_REQUEST_PATHS).not_to include("/internal/health")
+      end
+    end
+
+    it "splits LANTERN_IGNORED_REQUEST_PATHS on commas, replacing the defaults" do
+      with_env("LANTERN_IGNORED_REQUEST_PATHS" => "/healthz, /ready, ") do |config|
+        expect(config.ignored_request_paths).to eq(%w[/healthz /ready])
+      end
+    end
+  end
+
   describe "interactive_runner_paths" do
     it "defaults to the two scratch roots, as a mutable copy" do
       with_env("LANTERN_INTERACTIVE_RUNNER_PATHS" => nil) do |config|

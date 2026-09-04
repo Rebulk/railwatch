@@ -28,6 +28,13 @@ module Lantern
     # failure this must not cause.
     DEFAULT_INTERACTIVE_RUNNER_PATHS = %w[/tmp/ /var/tmp/].freeze
 
+    # Requests that are part of keeping the app observable rather than the
+    # application itself. Monitoring these creates noise (/up) or wraps
+    # Lantern's own browser transport in another request execution (the
+    # beacon). Apps can replace this list through LANTERN_IGNORED_REQUEST_PATHS
+    # or append exact paths/regexps in their initializer.
+    DEFAULT_IGNORED_REQUEST_PATHS = %w[/up /lantern/beacon].freeze
+
     # Exceptions that are routine 4xx plumbing rather than application bugs.
     # The Rails-relevant subset of Sentry's own defaults
     # (Sentry::Configuration::IGNORE_DEFAULT + PUMA_IGNORE_DEFAULT and
@@ -65,7 +72,7 @@ module Lantern
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
                   :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
-                  :capture_console, :interactive_runner_paths
+                  :capture_console, :interactive_runner_paths, :ignored_request_paths
 
     attr_reader :user_resolver, :beacon_user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
@@ -141,6 +148,8 @@ module Lantern
       @capture_console = env_bool("LANTERN_CAPTURE_CONSOLE", false)
       @interactive_runner_paths = ENV["LANTERN_INTERACTIVE_RUNNER_PATHS"]&.split(",")&.map(&:strip) ||
         DEFAULT_INTERACTIVE_RUNNER_PATHS.dup
+      @ignored_request_paths = ENV["LANTERN_IGNORED_REQUEST_PATHS"]&.split(",")&.map(&:strip)&.reject(&:empty?) ||
+        DEFAULT_IGNORED_REQUEST_PATHS.dup
       @user_resolver = nil
       @beacon_user_resolver = nil
       @fingerprint_resolver = nil
