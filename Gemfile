@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-gemspec
+gemspec name: "lantern-observability"
 
 gem "puma"
 gem "sqlite3", ">= 2.1"

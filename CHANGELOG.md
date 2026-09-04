@@ -10,6 +10,11 @@
   real runner ships its `command` record and an interactive one (`-`,
   inline code, a script under `/tmp`) withholds its exception as documented.
 
+- The public RubyGems distribution is `lantern-observability` (the existing
+  `lantern` and `lantern-rails` names belong to unrelated projects). The Ruby
+  namespace and require paths remain `Lantern::*` and `lantern/...`; a
+  transitional `lantern.gemspec` keeps existing Git-source consumers working.
+
 - Exceptions whose backtrace was assigned rather than raised
   (`ActiveRecord::StatementInvalid` via `set_backtrace`, `Faraday::Error`
   delegating to its wrapped exception) shipped with no frames, no

@@ -1,7 +1,8 @@
 # Lantern, for coding agents
 
-About *using* the `lantern` gem from a Rails application; copy this into that
-application's repository. Index of everything else: [`llms.txt`](llms.txt).
+About *using* the `lantern-observability` gem from a Rails application; copy
+this into that application's repository. Index of everything else:
+[`llms.txt`](llms.txt).
 
 Lantern instruments a Rails app end to end and ships linked telemetry to
 Lantern Cloud. Every request, job attempt, scheduled task run, and command is
@@ -12,7 +13,7 @@ render, exception, and span is a child of one, linked by
 ## Install
 
 ```sh
-bundle add lantern
+bundle add lantern-observability
 bin/rails generate lantern:install --token=lt_... --kamal-secrets
 ```
 
@@ -22,6 +23,8 @@ where the app has them, requires `lantern/rspec` (or `lantern/minitest`) in the
 test helper, and then runs `lantern:doctor`. `--token=`/`--url=` go into `.env`
 if the app uses dotenv, else are printed. Configuration lives only in that
 initializer; every option also has a `LANTERN_*` environment variable.
+The distribution name is `lantern-observability`, while the Ruby namespace and
+explicit require paths remain `Lantern::*` and `lantern/...`.
 
 ## Rake tasks
 

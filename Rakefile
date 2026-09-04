@@ -13,3 +13,10 @@ task :bench do
 end
 
 task default: :spec
+
+namespace :package do
+  desc "Build, inspect, install, and boot the public gem and legacy Git package"
+  task :verify do
+    sh "bundle exec ruby script/verify_package"
+  end
+end

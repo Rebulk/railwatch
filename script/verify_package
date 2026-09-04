@@ -1,0 +1,168 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "fileutils"
+require "open3"
+require "rubygems/package"
+require "tmpdir"
+
+ROOT = File.expand_path("..", __dir__)
+PUBLIC_NAME = "lantern-observability"
+LEGACY_NAME = "lantern"
+
+def run!(*command, chdir:, env: {}, print_output: true)
+  stdout, stderr, status = Open3.capture3(env, *command, chdir: chdir)
+  output = [ stdout, stderr ].reject(&:empty?).join
+  raise "#{command.join(" ")} failed:\n#{output}" unless status.success?
+
+  puts output if print_output && !output.empty?
+  stdout
+end
+
+def assert!(condition, message)
+  raise message unless condition
+end
+
+def without_bundler
+  environment = ENV.to_h
+  ENV.each_key do |key|
+    environment[key] = nil if key.start_with?("BUNDLE_", "BUNDLER_")
+  end
+  environment.merge("RUBYOPT" => nil, "RUBYLIB" => nil)
+end
+
+tmp = Dir.mktmpdir("lantern-package-")
+begin
+  version = File.read(File.join(ROOT, "lib/lantern/version.rb"))[/VERSION = "([^"]+)"/, 1]
+  gem_file = File.join(tmp, "#{PUBLIC_NAME}-#{version}.gem")
+
+  run!("gem", "build", "lantern-observability.gemspec", "--strict", "--output", gem_file, chdir: ROOT)
+
+  package_spec = Gem::Package.new(gem_file).spec
+  assert!(package_spec.name == PUBLIC_NAME, "public gem name is #{package_spec.name.inspect}")
+  assert!(package_spec.version.to_s == version, "package version does not match Lantern::VERSION")
+  assert!(package_spec.authors == [ "Cole Robertson" ], "package author changed")
+  assert!(package_spec.licenses == [ "MIT" ], "package must use the MIT license")
+  assert!(package_spec.homepage == "https://lantern.rebulk.com", "package homepage changed")
+  assert!(package_spec.required_ruby_version == Gem::Requirement.new(">= 3.4"), "supported Ruby constraint changed")
+  assert!(package_spec.metadata["rubygems_mfa_required"] == "true", "RubyGems MFA must be required")
+  assert!(package_spec.metadata["source_code_uri"] == "https://github.com/Rebulk/lantern", "source metadata changed")
+
+  runtime_dependencies = package_spec.runtime_dependencies.to_h { |dependency| [ dependency.name, dependency.requirement ] }
+  assert!(runtime_dependencies == { "rails" => Gem::Requirement.new(">= 8.1", "< 9") }, "runtime dependencies changed: #{runtime_dependencies}")
+
+  expected_files = %w[
+    AGENTS.md
+    CHANGELOG.md
+    MIT-LICENSE
+    README.md
+    app/controllers/lantern/beacon_controller.rb
+    config/routes.rb
+    docs/getting-started.md
+    lib/generators/lantern/install/install_generator.rb
+    lib/generators/lantern/install/templates/initializer.rb
+    lib/lantern-observability.rb
+    lib/lantern.rb
+    lib/lantern/version.rb
+    llms.txt
+  ]
+  missing = expected_files - package_spec.files
+  assert!(missing.empty?, "package is missing runtime/docs files: #{missing.join(", ")}")
+
+  forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|test|tmp|vendor)/})
+  forbidden.concat(package_spec.files.grep(/\A(?:Gemfile(?:\.lock)?|.*\.gemspec|lantern_specification\.rb)\z/))
+  assert!(forbidden.empty?, "package contains development files: #{forbidden.sort.join(", ")}")
+
+  gem_home = File.join(tmp, "gem-home")
+  run!("gem", "install", gem_file, "--local", "--ignore-dependencies", "--no-document", "--install-dir", gem_home,
+       chdir: tmp, env: without_bundler)
+
+  installed_root = File.join(gem_home, "gems", "#{PUBLIC_NAME}-#{version}")
+  boot = <<~'RUBY'
+    require "rubygems"
+    gem "lantern-observability", ENV.fetch("PACKAGE_VERSION")
+    require "lantern-observability"
+    require "lantern"
+
+    spec = Gem.loaded_specs.fetch("lantern-observability")
+    unless File.realpath(spec.full_gem_path) == File.realpath(ENV.fetch("INSTALLED_ROOT"))
+      abort "wrong installed gem activated: #{spec.full_gem_path} (expected #{ENV.fetch("INSTALLED_ROOT")})"
+    end
+    abort "Lantern::VERSION did not boot" unless defined?(Lantern::VERSION) && Lantern::VERSION == ENV.fetch("PACKAGE_VERSION")
+    abort "source checkout leaked onto load path" if $LOAD_PATH.any? { |path| File.expand_path(path) == ENV.fetch("SOURCE_ROOT") }
+    source_root = File.expand_path(ENV.fetch("SOURCE_ROOT"))
+    source_features = $LOADED_FEATURES.filter_map do |path|
+      expanded = File.expand_path(path)
+      next unless expanded.start_with?("#{source_root}/")
+
+      relative = expanded.delete_prefix("#{source_root}/")
+      relative if relative == "lib/lantern.rb" || relative == "lib/lantern-observability.rb" || relative.start_with?("lib/lantern/")
+    end
+    abort "source checkout supplied Lantern features: #{source_features.join(", ")}" unless source_features.empty?
+  RUBY
+  smoke_env = without_bundler.merge(
+    "GEM_HOME" => gem_home,
+    "GEM_PATH" => ([ gem_home ] + Gem.path).uniq.join(File::PATH_SEPARATOR),
+    "INSTALLED_ROOT" => installed_root,
+    "PACKAGE_VERSION" => version,
+    "SOURCE_ROOT" => ROOT
+  )
+  run!(Gem.ruby, "-e", boot, chdir: tmp, env: smoke_env)
+
+  # Existing private consumers, including Lantern Cloud, ask Bundler for a
+  # Git-source gem named `lantern`. Snapshot the working tree into a real Git
+  # repository and prove the transitional gemspec still resolves and boots.
+  git_source = File.join(tmp, "git-source")
+  FileUtils.mkdir_p(git_source)
+  tracked = run!("git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", chdir: ROOT,
+                 print_output: false).split("\0")
+  tracked.each do |relative|
+    source = File.join(ROOT, relative)
+    next unless File.file?(source)
+
+    target = File.join(git_source, relative)
+    FileUtils.mkdir_p(File.dirname(target))
+    FileUtils.cp(source, target, preserve: true)
+  end
+  run!("git", "init", "--quiet", "--initial-branch=main", chdir: git_source)
+  run!("git", "add", ".", chdir: git_source)
+  run!("git", "-c", "user.name=Lantern CI", "-c", "user.email=ci@rebulk.com", "commit", "--quiet", "-m", "package smoke",
+       chdir: git_source)
+
+  consumer = File.join(tmp, "git-consumer")
+  FileUtils.mkdir_p(consumer)
+  File.write(File.join(consumer, "Gemfile"), <<~GEMFILE)
+    source "https://rubygems.org"
+    gem "lantern", git: #{git_source.inspect}, branch: "main"
+  GEMFILE
+  consumer_env = without_bundler.merge(
+    "BUNDLE_GEMFILE" => File.join(consumer, "Gemfile"),
+    "BUNDLE_APP_CONFIG" => File.join(consumer, ".bundle"),
+    "GIT_CONFIG_COUNT" => "3",
+    "GIT_CONFIG_KEY_0" => "gc.auto",
+    "GIT_CONFIG_VALUE_0" => "0",
+    "GIT_CONFIG_KEY_1" => "maintenance.auto",
+    "GIT_CONFIG_VALUE_1" => "false",
+    "GIT_CONFIG_KEY_2" => "maintenance.autoDetach",
+    "GIT_CONFIG_VALUE_2" => "false"
+  )
+  run!("bundle", "install", "--local", chdir: consumer, env: consumer_env)
+  lock = File.read(File.join(consumer, "Gemfile.lock"))
+  assert!(lock.match?(/^GIT\n.*?^    lantern \(#{Regexp.escape(version)}\)$/m), "legacy Git gem was not locked")
+  assert!(!lock.include?("lantern-observability"), "Git consumer resolved the public package instead of the legacy spec")
+
+  legacy_boot = <<~'RUBY'
+    require "lantern"
+    abort "legacy Git gem did not activate" unless Gem.loaded_specs.key?("lantern")
+    abort "legacy Git gem loaded the wrong version" unless Lantern::VERSION == ENV.fetch("PACKAGE_VERSION")
+  RUBY
+  run!("bundle", "exec", Gem.ruby, "-e", legacy_boot, chdir: consumer,
+       env: consumer_env.merge("PACKAGE_VERSION" => version))
+
+  puts "Verified #{PUBLIC_NAME} #{version} package and #{LEGACY_NAME} Git-source compatibility."
+ensure
+  # A Git implementation may leave detached auto-maintenance finishing as the
+  # Bundler smoke exits. `rm_rf` tolerates one of its transient object files
+  # disappearing during cleanup; Dir.mktmpdir's block cleanup does not.
+  FileUtils.rm_rf(tmp)
+end

@@ -7,7 +7,7 @@ nothing else has to be wired by hand.
 ## 1. Add the gem
 
 ```sh
-bundle add lantern
+bundle add lantern-observability
 ```
 
 ## 2. Run the installer
@@ -15,6 +15,10 @@ bundle add lantern
 ```sh
 bin/rails generate lantern:install
 ```
+
+The RubyGems distribution is `lantern-observability`. Bundler auto-requires
+that entrypoint, which loads the unchanged `Lantern::*` API; explicit requires
+such as `require "lantern"` and `require "lantern/rspec"` remain valid.
 
 With the token already in hand you can hand it to the generator instead
 of editing files afterwards:

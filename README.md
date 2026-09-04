@@ -9,7 +9,7 @@ overhead per request and zero writes to your database.
 ## Install
 
 ```sh
-bundle add lantern                          # 1. add the gem
+bundle add lantern-observability            # 1. add the gem
 bin/rails generate lantern:install          # 2. initializer, routes, Kamal hook, browser client, test matchers
 LANTERN_TOKEN=lt_... bin/rails lantern:doctor   # 3. check every piece is wired up
 ```
@@ -27,6 +27,10 @@ write them into `.env`, or print exactly where to put them; add
 `config/deploy.yml`. It finishes by running `lantern:doctor` for you.
 `bin/rails lantern:token` says where to get a token; `bin/rails lantern:mcp`
 prints ready-to-paste MCP client configuration.
+
+The RubyGems package is named `lantern-observability`; Bundler loads it
+automatically. The public API remains `Lantern::*`, and explicit requires such
+as `require "lantern"` and `require "lantern/rspec"` are unchanged.
 
 ## Documentation
 
