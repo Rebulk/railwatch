@@ -125,10 +125,25 @@ startLantern()
 
 Errors ride the same beacon as visit timing — uncaught errors, unhandled
 promise rejections, and Inertia's own `exception` and `invalid` events —
-and land as ordinary issues next to your Ruby ones. `startLantern` takes
-optional `ignoreErrors`, `denyUrls`, and `tenant` settings, and the same
-file exports `reportError(error, context)` for errors your own code
-catches; see [`docs/configuration.md`](configuration.md) and
+and land as ordinary issues next to your Ruby ones.
+
+If you have React error boundaries, add one more line where the root is
+created. React does not report a boundary-caught error to `window.onerror`
+outside a development build, so this is the only thing that gets a caught
+render error out of production:
+
+```tsx
+import { createRoot } from "react-dom/client"
+import { lanternRootOptions } from "@/lib/lantern"
+
+createRoot(el, lanternRootOptions()).render(<App {...props} />)
+```
+
+On React 18, whose roots take no error options, call
+`reportError(error, { componentStack: info.componentStack })` from the
+boundary's `componentDidCatch` instead. `startLantern` also takes optional
+`ignoreErrors`, `denyUrls`, and `tenant` settings; see
+[`docs/configuration.md`](configuration.md) and
 [`docs/replacing-sentry.md`](replacing-sentry.md).
 
 **The Kamal post-deploy hook**, for deploy markers and the commit diff

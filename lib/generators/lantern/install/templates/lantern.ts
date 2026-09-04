@@ -278,15 +278,40 @@ function captureValue(value: unknown, fallback: string, context?: Record<string,
   else capture(fallback, stringify(value), undefined, context)
 }
 
-// An error the app caught itself, for the one place the window listener
-// cannot reach: a React error boundary's componentDidCatch, which is handed
-// a component stack that exists nowhere in the error object.
+// An error the app caught itself. On React 18, whose roots take no error
+// options, this is how a boundary reports what it caught -- and it has to,
+// because a production React 18 build does not re-throw a caught error to
+// window.onerror:
 //
 //   componentDidCatch(error: Error, info: ErrorInfo) {
 //     reportError(error, { componentStack: info.componentStack })
 //   }
 export function reportError(error: unknown, context?: Record<string, unknown>) {
   captureValue(error, "Error", context)
+}
+
+// React 19's root error options, for `createRoot(el, lanternRootOptions())`.
+//
+// onCaughtError is the one that matters: an error a boundary catches goes to
+// console.error and no further, so without this every render error a
+// boundary handles is invisible in production. onUncaughtError would reach
+// the window listener on its own (React's default hands it to
+// window.reportError), but taking it here attaches the component stack,
+// which exists nowhere else. onRecoverableError is deliberately left to
+// React: its default also goes through window.reportError, so a hydration
+// mismatch already arrives, and overriding it would take React's own
+// console warning away from whoever is debugging one.
+interface ReactErrorInfo {
+  componentStack?: string | null
+}
+
+export function lanternRootOptions(): {
+  onCaughtError: (error: unknown, info: ReactErrorInfo) => void
+  onUncaughtError: (error: unknown, info: ReactErrorInfo) => void
+} {
+  const report = (error: unknown, info: ReactErrorInfo) =>
+    captureValue(error, "Error", info.componentStack ? { componentStack: info.componentStack } : undefined)
+  return { onCaughtError: report, onUncaughtError: report }
 }
 
 function stringify(value: unknown) {

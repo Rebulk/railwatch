@@ -11,9 +11,12 @@
   error groups, regresses and resolves like any other issue. Each error
   carries the page URL, Inertia component, visit, tab session, user agent,
   and the last 20 breadcrumbs (console errors, clicks, navigations).
-  `startLantern({ ignoreErrors, denyUrls, tenant })` and a new exported
-  `reportError(error, context)` for React error boundaries. Replaces
-  `@sentry/react`; see `docs/replacing-sentry.md`.
+  `startLantern({ ignoreErrors, denyUrls, tenant })`, plus
+  `lanternRootOptions()` for React 19's `createRoot` and
+  `reportError(error, context)` for a React 18 boundary — outside a
+  development build React never hands a boundary-caught error to
+  `window.onerror`. Replaces `@sentry/react`; see
+  `docs/replacing-sentry.md`.
 
 - Release health: a new `session` record type, from the browser client (one
   session per tab, riding along on the visit beacon) and from the request

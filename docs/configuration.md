@@ -474,9 +474,13 @@ startLantern({
 })
 ```
 
-`reportError(error, context?)`, exported from the same file, reports an
-error the app caught itself — the usual caller is a React error
-boundary's `componentDidCatch`, passing `{ componentStack }`. See
+The same file exports two more things. `lanternRootOptions()` returns
+React 19's `onCaughtError`/`onUncaughtError` root options —
+`createRoot(el, lanternRootOptions())` — which is what reports an error a
+boundary caught, since React only sends those to `console.error` outside
+a development build. `reportError(error, context?)` reports an error the
+app caught itself, and is how a React 18 boundary's `componentDidCatch`
+does the same thing. See
 [`docs/replacing-sentry.md`](replacing-sentry.md) for what is and is not
 captured versus `@sentry/react`.
 

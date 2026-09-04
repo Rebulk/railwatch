@@ -368,7 +368,7 @@ startLantern({
 | `Sentry.captureException(e)` | `reportError(e)`. |
 | `Sentry.captureMessage(text)` | `reportError(new Error(text))` — Lantern has one shape for a browser problem, not two. |
 | Breadcrumbs (automatic) | Automatic: the last 20 of console errors/warnings, clicks, and Inertia navigations ride along on every error and are shown on the issue page. Click crumbs record the element, never an input's value. |
-| `Sentry.ErrorBoundary` | Not needed — see below. |
+| `Sentry.ErrorBoundary` | Your own boundary plus `lanternRootOptions()` (React 19) or `reportError` (React 18) — see below. |
 | `tracesSampleRate`, `replaysSessionSampleRate` | No equivalent. Lantern reports visit timing and Core Web Vitals instead of browser traces, and does not record sessions. |
 
 ### What is and is not captured
@@ -391,14 +391,35 @@ Minified frames are shown as the browser named them
 (`assets/index-Bq1x9K.js:41`) — Lantern does not yet upload source maps,
 so a production frame does not link to a line in your repository.
 
-### You do not need a JavaScript error boundary
+### Error boundaries: keep them, and wire the root
 
-React re-throws an error a boundary caught, so the window handler sees it
-whether or not you have one, and a boundary is not the thing that gets the
-error reported. Keep boundaries for what they are for — rendering a
-fallback UI instead of a blank screen — and add `reportError` where you
-want the *component stack*, which lives only in the `ErrorInfo` React
-hands `componentDidCatch` and appears in no error object:
+An error boundary is not what gets an error reported, and outside a
+development build React does **not** hand a caught error back to
+`window.onerror`. React 18 stops at `componentDidCatch`; React 19 routes
+it to the root's `onCaughtError`, whose default is `console.error`. So a
+boundary on a plain `startLantern()` app silently swallows every render
+error it catches. Two lines fix that.
+
+**React 19** — pass Lantern's root options where you create the root:
+
+```tsx
+import { createRoot } from "react-dom/client"
+import { lanternRootOptions, startLantern } from "@/lib/lantern"
+
+createRoot(el, lanternRootOptions()).render(<App {...props} />)
+startLantern()
+```
+
+That covers `onCaughtError` (the one React would otherwise only log) and
+`onUncaughtError` (which would reach the window listener anyway, but this
+way it arrives with the component stack attached). `onRecoverableError`
+is deliberately left alone: React's default already routes a hydration
+mismatch through `window.reportError`, so it reaches Lantern without help,
+and overriding it would take React's own console warning away from
+whoever is debugging one.
+
+**React 18**, whose roots take no error options — report from the
+boundary, which is also where the component stack lives:
 
 ```tsx
 import { reportError } from "@/lib/lantern"
@@ -416,8 +437,10 @@ class MapErrorBoundary extends Component<Props, State> {
 }
 ```
 
-Everything passed as the second argument lands in the exception's
-`context` on the issue page, flattened to strings.
+Either way, keep the boundaries for what they are for — rendering a
+fallback instead of a blank screen. Everything passed as `reportError`'s
+second argument lands in the exception's `context` on the issue page,
+flattened to strings.
 
 ## What Lantern does that Sentry doesn't
 
