@@ -46,6 +46,7 @@ module Lantern
       @flush_requested = false
       @retry_attempt = 0
       @retry_at = nil
+      @retry_batch = nil
       @in_flight_records = 0
       @in_flight_dropped = 0
       @shutdown_notified = false
@@ -99,6 +100,10 @@ module Lantern
       @flush_requested = false
       @retry_attempt = 0
       @retry_at = nil
+      # Newer reporters retain an immutable delivery batch (including its
+      # idempotency key) between attempts. Keep this reset forward-compatible
+      # so that batch can never cross a process boundary after fork.
+      @retry_batch = nil
       @in_flight_records = 0
       @in_flight_dropped = 0
       @shutdown_notified = false

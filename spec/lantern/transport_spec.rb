@@ -503,6 +503,7 @@ RSpec.describe Lantern::Reporter do
       reporter.instance_variable_set(:@flush_requested, true)
       reporter.instance_variable_set(:@retry_attempt, 3)
       reporter.instance_variable_set(:@retry_at, 123.0)
+      reporter.instance_variable_set(:@retry_batch, Object.new)
       reporter.instance_variable_set(:@in_flight_records, 2)
       reporter.instance_variable_set(:@in_flight_dropped, 4)
       reporter.instance_variable_set(:@shutdown_notified, true)
@@ -518,6 +519,7 @@ RSpec.describe Lantern::Reporter do
           flush_requested: Lantern.reporter.instance_variable_get(:@flush_requested),
           retry_attempt: Lantern.reporter.instance_variable_get(:@retry_attempt),
           retry_at: Lantern.reporter.instance_variable_get(:@retry_at),
+          retry_batch: Lantern.reporter.instance_variable_get(:@retry_batch),
           in_flight_records: Lantern.reporter.instance_variable_get(:@in_flight_records),
           in_flight_dropped: Lantern.reporter.instance_variable_get(:@in_flight_dropped),
           shutdown_notified: Lantern.reporter.instance_variable_get(:@shutdown_notified),
@@ -536,6 +538,7 @@ RSpec.describe Lantern::Reporter do
         "flush_requested" => false,
         "retry_attempt" => 0,
         "retry_at" => nil,
+        "retry_batch" => nil,
         "in_flight_records" => 0,
         "in_flight_dropped" => 0,
         "shutdown_notified" => false,
