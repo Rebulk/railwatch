@@ -149,6 +149,12 @@ module Lantern
     end
 
     def deliver_buffer
+      # A 401 was reported once, when the transport first saw it; after
+      # that the token is wrong until the process restarts, and repeating
+      # the callback every flush would be a self-sustaining error source in
+      # an app that turns on_unrecoverable into an error report.
+      return discard_unauthorized if @transport.respond_to?(:unauthorized?) && @transport.unauthorized?
+
       batch, dropped = drain_into_flight
       return if batch.empty?
 
@@ -196,6 +202,13 @@ module Lantern
             "(#{result.error || result.status}); retry #{@retry_attempt} in #{delay.round(3)}s"
         end
       end
+    end
+
+    def discard_unauthorized
+      batch, dropped = drain_into_flight
+      delivery_succeeded
+      Lantern.debug { "transport unauthorized; discarded #{batch.size} records (dropped #{dropped})" } unless batch.empty?
+      nil
     end
 
     def delivery_succeeded
