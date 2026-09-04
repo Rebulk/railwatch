@@ -9,13 +9,15 @@ RSpec.describe "lantern rake tasks" do
     Rails.application.load_tasks unless Rake::Task.task_defined?("lantern:status")
   end
 
-  after do
-    Rake::Task["lantern:status"].reenable
-    Rake::Task["lantern:deploy"].reenable
-    Rake::Task["lantern:doctor"].reenable
-    Rake::Task["lantern:token"].reenable
-    Rake::Task["lantern:mcp"].reenable
-  end
+  # Rake runs a task once per process; a second `invoke` is a silent no-op.
+  # Re-enabled BEFORE each example as well as after, because the install
+  # generator's own specs invoke lantern:doctor in-process and, depending on
+  # seed order, can run first -- leaving the task already-invoked and the
+  # first doctor example here capturing nothing at all.
+  TASKS = %w[lantern:status lantern:deploy lantern:doctor lantern:token lantern:mcp].freeze
+
+  before { TASKS.each { |name| Rake::Task[name].reenable } }
+  after { TASKS.each { |name| Rake::Task[name].reenable } }
 
   def capture_task(name, *args)
     out = StringIO.new
