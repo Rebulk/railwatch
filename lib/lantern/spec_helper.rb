@@ -15,7 +15,7 @@ module Lantern
     class MemoryTransport
       attr_reader :batches
       def initialize = @batches = []
-      def deliver(records, dropped: 0)
+      def deliver(records, dropped: 0, batch_id: nil)
         @batches << records
         Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
       end

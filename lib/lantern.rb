@@ -2,6 +2,7 @@
 
 require "base64"
 require "digest"
+require "securerandom"
 require "set"
 require "uri"
 require "zlib"
