@@ -305,11 +305,15 @@ database.
 Delivery (`Lantern::Transport::Http`, `lib/lantern/transport/http.rb`):
 gzip NDJSON POST to `{ingest_url}/ingest`, one retry on a raised error or
 a 5xx within each delivery attempt. If that still fails — or ingest returns
-402, 408, or 429 — the batch and its prior drop count are restored to the
-bounded buffer. The reporter retries with jittered exponential backoff
-(one second up to 60 seconds); it does not busy-loop. Records written while
-a request is in flight join the same bounded queue, and the oldest records
-still lose first under sustained pressure. A 401 marks the transport
+402, 408, or 429 — the immutable batch and its prior drop count are retained
+for retry. Every newly formed batch gets an `X-Lantern-Batch-Id` UUID which is
+reused for the immediate HTTP retry and every later reporter retry; the
+platform can therefore return the first committed result without inserting
+the payload twice. Records written while a request is in flight collect in a
+separate bounded buffer, so they never change the retained request's identity.
+At most one retained batch plus one live buffer are held in memory. The
+reporter retries with jittered exponential backoff (one second up to 60
+seconds); it does not busy-loop. A 401 marks the transport
 permanently unauthorized (no further HTTP attempts for the process's
 lifetime); it and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
