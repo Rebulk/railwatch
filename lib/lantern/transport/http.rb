@@ -34,6 +34,13 @@ module Lantern
         @unauthorized
       end
 
+      # The object itself is copied into a forked process, but its policy
+      # state belongs to the parent that observed those responses.
+      def reset_after_fork!
+        @unauthorized = false
+        self
+      end
+
       def deliver(records, dropped: 0)
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 

@@ -335,9 +335,11 @@ process exit after that deadline cannot preserve records for the next boot.
 |---|---|---|---|
 | `health_interval` | `LANTERN_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
 
-The sampler re-arms itself after `fork` (a `Process._fork` hook), so
-clustered Puma workers and forked Solid Queue workers each report without
-any `on_worker_boot` configuration.
+Lantern re-arms the reporter and sampler after `fork` (a `Process._fork`
+hook), so clustered Puma workers and forked Solid Queue workers each get a
+fresh buffer, transport policy state, process record, and health thread.
+The child never flushes records or drop accounting inherited from its
+parent, and no `on_worker_boot` configuration is needed.
 
 ### Release health
 

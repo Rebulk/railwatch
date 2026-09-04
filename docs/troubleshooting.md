@@ -132,14 +132,21 @@ end
 have workers.
 
 **What actually happens.** Ruby routes `fork`, `Process.fork`, and
-`Kernel#fork` through `Process._fork`, and Lantern prepends a hook onto
-it (`Lantern::Health::ForkHook`, `Lantern::Sessions::ForkHook`). In the
-child, `restart_after_fork!` drops the inherited dead thread — the
-sessions module also drops the parent's half-finished session map — and
-calls `start!` again, which notices the pid no longer matches and starts
-a fresh thread. The reporter thread re-arms on the same pid check, at the
-next `write`. **No `on_worker_boot` configuration is needed**, in Puma
-cluster mode or in Solid Queue's forked workers.
+`Kernel#fork` through `Process._fork`, and Lantern prepends hooks for the
+reporter, health sampler, and session flusher. Before the child returns
+from `fork`, it replaces the inherited reporter buffer, drop accounting,
+transport policy state, mutexes, condition variables, and dead threads.
+The parent's half-finished session map is discarded too. The child then
+emits its own `process` record and starts fresh health/session threads for
+its role. Parent records remain owned by and delivered from the parent;
+they can never be replayed by every child. **No `on_worker_boot`
+configuration is needed**, in Puma cluster mode or in Solid Queue's
+forked workers.
+
+The synchronization objects are replaced without locking them. That is
+deliberate: if another parent thread owned a mutex at the instant of
+`fork`, Ruby preserves the locked mutex in the child but not the thread
+that could unlock it.
 
 **When a process legitimately reports nothing.** `Health.start!` returns
 early unless the process's role is `web` or `worker`, and

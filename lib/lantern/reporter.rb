@@ -21,7 +21,16 @@ module Lantern
       end
     end
 
-    attr_reader :buffer
+    # Prepended onto Process's singleton class by the engine. The reset runs
+    # before the child returns from fork, so no app or at_exit path can touch
+    # the inherited parent buffer first.
+    module ForkHook
+      def _fork
+        pid = super
+        Lantern.restart_after_fork! if pid.zero?
+        pid
+      end
+    end
 
     def initialize(config, transport: nil, random: Random)
       @config = config
@@ -32,7 +41,7 @@ module Lantern
       @flush_mutex = Mutex.new
       @wakeup = ConditionVariable.new
       @thread = nil
-      @pid = nil
+      @pid = Process.pid
       @stopping = false
       @flush_requested = false
       @retry_attempt = 0
@@ -42,41 +51,63 @@ module Lantern
       @shutdown_notified = false
     end
 
+    def buffer
+      ensure_process!
+      @buffer
+    end
+
     def write(record)
+      ensure_process!
       size = @buffer.push(record)
-      ensure_thread
+      arm_thread unless @thread&.alive?
       request_flush if size >= @config.flush_threshold
     end
 
     # Wake the reporter immediately for unhandled exceptions without doing
     # network I/O on the application thread.
     def write_now(record)
+      ensure_process!
       @buffer.push(record)
-      ensure_thread
+      arm_thread unless @thread&.alive?
       request_flush
     end
 
     def flush
+      ensure_process!
       @flush_mutex.synchronize { deliver_buffer }
     end
 
     def ensure_thread
-      return if @thread&.alive? && @pid == Process.pid
+      ensure_process!
+      arm_thread unless @thread&.alive?
+    end
 
-      @mutex.synchronize do
-        return if @thread&.alive? && @pid == Process.pid
+    # Only valid in a forked child. It deliberately never acquires an
+    # inherited lock: another parent thread may have owned that mutex at the
+    # instant of fork, and its owner does not exist in the child.
+    def restart_after_fork!
+      return if @pid == Process.pid
 
-        @pid = Process.pid
-        @stopping = false
-        @shutdown_notified = false
-        @thread = Thread.new { run }
-        @thread.name = "lantern-reporter"
-        @thread.abort_on_exception = false
-        @thread.report_on_exception = false
-      end
+      @pid = Process.pid
+      @buffer = Buffer.new(@config.buffer_size)
+      @transport = forked_transport
+      @mutex = Mutex.new
+      @flush_mutex = Mutex.new
+      @wakeup = ConditionVariable.new
+      @thread = nil
+      @stopping = false
+      @flush_requested = false
+      @retry_attempt = 0
+      @retry_at = nil
+      @in_flight_records = 0
+      @in_flight_dropped = 0
+      @shutdown_notified = false
+      remove_instance_variable(:@shutdown_deadline) if defined?(@shutdown_deadline)
+      self
     end
 
     def shutdown
+      ensure_process!
       ensure_thread if @buffer.size.positive? && !@thread&.alive?
       thread = @thread
       return unless thread
@@ -100,6 +131,31 @@ module Lantern
     end
 
     private
+
+    def ensure_process!
+      restart_after_fork! if @pid != Process.pid
+    end
+
+    def arm_thread
+      @mutex.synchronize do
+        return if @thread&.alive?
+
+        @stopping = false
+        @shutdown_notified = false
+        @thread = Thread.new { run }
+        @thread.name = "lantern-reporter"
+        @thread.abort_on_exception = false
+        @thread.report_on_exception = false
+      end
+    end
+
+    def forked_transport
+      transport = @transport.dup
+      transport.reset_after_fork! if transport.respond_to?(:reset_after_fork!)
+      transport
+    rescue TypeError
+      @transport.tap { |object| object.reset_after_fork! if object.respond_to?(:reset_after_fork!) }
+    end
 
     def request_flush
       @mutex.synchronize do

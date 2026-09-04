@@ -11,6 +11,16 @@ module Lantern
       module_function
 
       def install!(app)
+        @app = app
+        @installed = true
+        record!
+      end
+
+      def restart_after_fork!
+        record! if @installed
+      end
+
+      def record!
         boot = Clock.monotonic - Lantern::BOOTED_AT
         Lantern.record(:process,
           pid: Process.pid,
@@ -18,7 +28,7 @@ module Lantern
           ruby_version: RUBY_VERSION,
           rails_version: (Rails.version rescue nil),
           lantern_version: Lantern::VERSION,
-          app: app&.class&.module_parent_name,
+          app: @app&.class&.module_parent_name,
           environment: Lantern.config.environment_name,
           boot_seconds: boot,
           database_adapter: (ActiveRecord::Base.connection_db_config.adapter rescue nil),
