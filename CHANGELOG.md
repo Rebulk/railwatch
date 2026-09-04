@@ -2,6 +2,14 @@
 
 ## 0.1.0 (unreleased)
 
+- `bin/rails runner` from a shell never got its command execution: the
+  runner patch is prepended during `boot_application!`, which the
+  already-running `#perform` calls, so the `#perform` override only ever
+  ran in this gem's own specs. The patch now also wraps
+  `conditional_executor`, which that `#perform` reaches after boot, so a
+  real runner ships its `command` record and an interactive one (`-`,
+  inline code, a script under `/tmp`) withholds its exception as documented.
+
 - Exceptions whose backtrace was assigned rather than raised
   (`ActiveRecord::StatementInvalid` via `set_backtrace`, `Faraday::Error`
   delegating to its wrapped exception) shipped with no frames, no

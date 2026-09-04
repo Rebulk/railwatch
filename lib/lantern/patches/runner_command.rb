@@ -39,14 +39,35 @@ module Lantern
       def perform(code_or_file = nil, *command_argv)
         return super unless Lantern.enabled? && Lantern.execution.nil?
 
+        RunnerCommand.instrument(code_or_file) { super }
+      end
+
+      # Patches.install! runs inside boot_application!, which #perform calls
+      # after it has already started -- so in a real `bin/rails runner`
+      # process the invocation on the stack is the unpatched one and the
+      # override above never runs (it does when railties' runner command was
+      # loaded before boot, as in this gem's own specs). Method lookup is
+      # dynamic, though: by the time that #perform reaches
+      # conditional_executor the prepend is in place, so this is where a
+      # runner started from the shell gets its execution. Thor keeps the
+      # positional arguments on #args, and the first one is code_or_file.
+      def conditional_executor(enabled, **kwargs, &block)
+        return super unless Lantern.enabled? && Lantern.execution.nil?
+
+        RunnerCommand.instrument(args.first) { super }
+      end
+
+      # Opens the command execution around the runner's work, withholding the
+      # exception (but not the command record) for an interactive run.
+      def self.instrument(code_or_file)
         preview = code_or_file.to_s[0, 200]
-        interactive = RunnerCommand.interactive?(code_or_file)
+        interactive = interactive?(code_or_file)
         exe = Lantern.start_execution(source: :command, sample_kind: :commands, preview: "rails runner #{preview}")
         exe.interactive = true if interactive
         exe.enter_stage(:action)
         exit_code = 0
         begin
-          super
+          yield
         rescue SystemExit => e
           exit_code = e.status
           raise

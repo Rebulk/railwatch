@@ -146,4 +146,39 @@ RSpec.describe Lantern::Patches::RunnerCommand do
       end
     end
   end
+
+  # In a real `bin/rails runner` process the prepend happens inside
+  # boot_application!, i.e. inside the #perform already on the stack, so the
+  # #perform override is never what runs. conditional_executor, called by
+  # that same #perform after boot, is -- and it has to classify from Thor's
+  # parsed args since nothing hands it code_or_file.
+  describe "when the patch lands mid-perform (a real shell invocation)" do
+    def run_unpatched_perform(*argv)
+      command = Rails::Command::RunnerCommand.new(argv)
+      command.send(:conditional_executor, true, source: "application.runner.railties") { yield }
+    end
+
+    it "still opens the execution, and withholds the exception of a script under /tmp" do
+      path = write_script("/tmp/lantern_probe_#{Process.pid}.rb", "")
+      expect { run_unpatched_perform(path) { raise "typed_from_a_shell" } }.to raise_error("typed_from_a_shell")
+
+      cmd = lantern_records(:command).sole
+      expect(cmd).to include(interactive: true, exit_code: 1, command: "rails runner #{path}")
+      expect(lantern_records(:exception)).to be_empty
+      expect(Lantern.execution).to be_nil
+    end
+
+    it "still reports the exception of a deployed script" do
+      path = write_script(File.join(Dir.pwd, "script", "lantern_probe_#{Process.pid}.rb"), "")
+      expect { run_unpatched_perform(path, "arg1") { raise "nightly_died" } }.to raise_error("nightly_died")
+
+      expect(lantern_records(:command).sole).not_to include(:interactive)
+      expect(lantern_records(:exception).sole).to include(message: "nightly_died")
+    end
+
+    it "does not open a second execution when the patched #perform is already on the stack" do
+      expect { run_runner("raise 'once'") }.to raise_error("once")
+      expect(lantern_records(:command).size).to eq(1)
+    end
+  end
 end
