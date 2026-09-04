@@ -149,9 +149,10 @@ raised network error or 5xx immediately. If delivery still fails, the batch
 and its drop counter go back into the bounded buffer; **402**, **408**,
 **429**, and all **5xx** responses are retained the same way. The reporter
 retries with jittered exponential backoff from one second up to 60 seconds,
-so an outage cannot create a busy loop. If newer traffic fills the buffer
-while an old batch is in flight, the oldest records are still the ones
-dropped and every loss remains counted.
+so an outage cannot create a busy loop. A retained batch is retried eight
+times (about four minutes on that ladder), then dropped and counted so the
+buffer's newest records win again; meanwhile newer traffic that overflows
+the buffer drops its oldest records, and every loss stays counted.
 
 Connect timeout is 1 second and read/write timeout 3 seconds by default,
 both configurable, and they're always on the reporter thread — even an

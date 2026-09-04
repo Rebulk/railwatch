@@ -2,6 +2,10 @@
 
 ## 0.1.0 (unreleased)
 
+- A retained delivery batch gives up after `Reporter::MAX_RETRY_ATTEMPTS`
+  (8) and is dropped and counted, so a batch that keeps failing cannot pin
+  itself in memory while every newer record is discarded around it.
+
 - `c.beacon_user { |request| ... }`: who is behind a browser beacon, for
   apps that authenticate in a `before_action` the gem's beacon controller
   never runs. Before this, every visit, browser session and JavaScript

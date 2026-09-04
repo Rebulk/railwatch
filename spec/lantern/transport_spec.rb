@@ -224,6 +224,30 @@ RSpec.describe Lantern::Reporter do
       expect(reporter.buffer.size).to eq(0)
     end
 
+    it "gives up on a batch after MAX_RETRY_ATTEMPTS, counts it as dropped, and lets newer records through" do
+      attempts = []
+      failure = delivery_result(ok: false, error: "Net::OpenTimeout")
+      success = delivery_result(ok: true, status: 200, accepted: 1)
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+        attempts << [ records.map { |r| r[:n] }, dropped ]
+        records.first[:n] == 0 ? failure : success
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ t: "log", n: 0 })
+
+      (described_class::MAX_RETRY_ATTEMPTS + 1).times do
+        reporter.instance_variable_set(:@retry_at, nil)
+        reporter.flush
+      end
+      reporter.buffer.push({ t: "log", n: 1 })
+      reporter.instance_variable_set(:@retry_at, nil)
+      expect(reporter.flush.ok).to be(true)
+
+      expect(attempts.count { |ns, _| ns == [ 0 ] }).to eq(described_class::MAX_RETRY_ATTEMPTS + 1)
+      expect(attempts.last).to eq([ [ 1 ], 1 ])
+    end
+
     it "uses a new batch id for each distinct batch formed from the buffer" do
       batch_ids = []
       transport = Object.new

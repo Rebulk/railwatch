@@ -9,6 +9,12 @@ module Lantern
   class Reporter
     INITIAL_RETRY_DELAY = 1.0
     MAX_RETRY_DELAY = 60.0
+    # A retained batch is retried this many times, then dropped (and
+    # counted) so the buffer's newest records win again. Without the cap a
+    # batch that keeps failing would be pinned forever while everything
+    # newer was discarded around it. Eight attempts on the backoff ladder is
+    # roughly four minutes of outage.
+    MAX_RETRY_ATTEMPTS = 8
     DeliveryBatch = Data.define(:id, :records, :dropped, :prepared)
 
     class DeliveryError < StandardError
@@ -257,10 +263,17 @@ module Lantern
 
     def retain(batch, result)
       @mutex.synchronize do
-        @retry_batch = batch
         @in_flight_records = 0
         @in_flight_dropped = 0
         @retry_attempt += 1
+        if @retry_attempt > MAX_RETRY_ATTEMPTS
+          @buffer.account_dropped(batch.records.size + batch.dropped)
+          @retry_attempt = 0
+          @retry_at = nil
+          Lantern.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
+          next
+        end
+        @retry_batch = batch
         delay = retry_delay(@retry_attempt)
         @retry_at = Clock.monotonic + delay
         @wakeup.signal
