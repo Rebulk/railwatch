@@ -378,7 +378,9 @@ unhandled promise rejections, Inertia's request-failed event (`exception`
 on Inertia 2, `networkError` on Inertia 3 — where a dropped connection
 lands as an axios `Network Error`), Inertia's non-Inertia-response event
 (`invalid` on Inertia 2, `httpException` on Inertia 3 — the server answered
-a visit with a 403 page, a login redirect, a proxy error page), and
+a visit with a 403 page, a login redirect, a proxy error page; an Inertia
+response that merely carries a 4xx status, such as a form re-rendered with
+validation errors at 422, is the app working and is not reported), and
 anything the app hands to `reportError`.
 
 Not captured: browser traces and session replay; failed resource loads

@@ -356,9 +356,27 @@ function onInertia(name: string, handler: (detail: Record<string, unknown>) => v
   })
 }
 
+// A response Inertia could not apply: an auth redirect's HTML, a 404 page,
+// a proxy error. Inertia 3's httpException ALSO fires for a perfectly valid
+// Inertia response carrying a 4xx status -- a form re-rendered with
+// validation errors at 422, a not-found page the app renders on purpose --
+// and those are the app working as designed, not errors. Inertia's own
+// predicate for the two cases is the x-inertia response header, so that is
+// the gate here; Inertia 2's `invalid` only ever fired for the first kind.
 function captureInvalidResponse(response: unknown) {
-  const status = (response as { status?: unknown } | undefined)?.status
-  capture("InertiaInvalidResponse", `Inertia invalid response (${typeof status === "number" ? status : "unknown status"})`)
+  const res = (response ?? {}) as { status?: unknown; headers?: Record<string, unknown> }
+  if (inertiaResponse(res.headers)) return
+  const status = typeof res.status === "number" ? res.status : "unknown status"
+  const contentType = res.headers?.["content-type"]
+  capture("InertiaInvalidResponse", `Inertia invalid response (${status})`, undefined, {
+    status,
+    ...(typeof contentType === "string" ? { content_type: contentType } : {}),
+  })
+}
+
+function inertiaResponse(headers: Record<string, unknown> | undefined): boolean {
+  if (!headers || typeof headers !== "object") return false
+  return Object.keys(headers).some((key) => key.toLowerCase() === "x-inertia" && headers[key])
 }
 
 // --- Core Web Vitals ---------------------------------------------------
