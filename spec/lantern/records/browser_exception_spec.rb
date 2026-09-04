@@ -111,6 +111,36 @@ RSpec.describe "browser exception record", type: :request do
     expect(lantern_records(:exception).size).to eq(50)
   end
 
+  it "asks the app's beacon_user block who is behind the beacon, and describes them like any user" do
+    session_user = Struct.new(:id, :name, :email).new(7, "Ada", "ada@example.com")
+    Lantern.config.beacon_user { |request| request.headers["X-Session"] == "tok" ? session_user : nil }
+
+    post "/lantern/beacon", params: { errors: [ { name: "TypeError", message: "boom", stack: STACK } ] }.to_json,
+         headers: { "Content-Type" => "application/json", "X-Session" => "tok" }
+
+    expect(lantern_records(:exception).sole[:user]).to eq("7")
+    expect(lantern_records(:user).sole).to include(id: "7", name: "Ada", email: "ada@example.com")
+  ensure
+    Lantern.config.beacon_user
+  end
+
+  it "falls back to the request-style lookup when the beacon_user block returns nil" do
+    Lantern.config.beacon_user { |_request| nil }
+    allow(Lantern::Subscribers::Users).to receive(:resolve_id).and_return("42")
+
+    expect(post_error({})[:user]).to eq("42")
+  ensure
+    Lantern.config.beacon_user
+  end
+
+  it "records no user when the beacon_user block raises" do
+    Lantern.config.beacon_user { |_request| raise "session store down" }
+
+    expect(post_error({})[:user]).to be_nil
+  ensure
+    Lantern.config.beacon_user
+  end
+
   it "threads Users.resolve_id's return value through as the exception's user field" do
     allow(Lantern::Subscribers::Users).to receive(:resolve_id).and_return("42")
 

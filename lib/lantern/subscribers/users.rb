@@ -31,6 +31,22 @@ module Lantern
         resolve_id(nil)
       end
 
+      # The beacon's resolution: the app's beacon_user block first, then the
+      # same Current.user / Warden lookup a request gets.
+      def resolve_beacon_id(request)
+        if (resolver = Lantern.config.beacon_user_resolver)
+          user = resolver.call(request)
+          if user
+            details = describe(user) or return nil
+            remember(details)
+            return details[:id]
+          end
+        end
+        resolve_id(request.env)
+      rescue StandardError
+        nil
+      end
+
       def resolve_object(env)
         if defined?(::Current) && ::Current.respond_to?(:user) && ::Current.user
           ::Current.user

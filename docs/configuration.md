@@ -450,6 +450,18 @@ Rails 8 auth generator convention) if defined, else Warden's `env["warden"].user
 `user` record ships once, not once per request (`Lantern::Subscribers::Users`,
 `docs/records.md`'s `user` section).
 
+```ruby
+c.beacon_user { |request| Session.find_by(id: request.cookie_jar.signed[:session_token])&.user }
+```
+
+Who is behind a browser beacon (visits, browser sessions, JavaScript
+errors). The beacon is handled by the gem's engine controller, outside your
+`ApplicationController`, so an app that authenticates in a `before_action`
+-- a signed session cookie looked up per request -- has not run it when the
+beacon arrives, and `Current.user` is nil there. Give Lantern the same
+lookup; it hands the result to the `user` block above. Not needed when
+`Current.user` is set in middleware or by Warden.
+
 ## Tenant / context
 
 ```ruby

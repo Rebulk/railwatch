@@ -22,7 +22,7 @@ module Lantern
       return head :no_content unless Lantern.config.beacon_enabled
 
       visits = Array(params[:visits]).first(50)
-      user_id = Subscribers::Users.resolve_id(request.env)
+      user_id = Subscribers::Users.resolve_beacon_id(request)
       tenant = beacon_tenant(params[:tenant])
       record_session(params[:session], visits, user_id, tenant)
       record_errors(params[:errors], user_id, tenant)

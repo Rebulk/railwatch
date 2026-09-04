@@ -314,11 +314,16 @@ export function lanternRootOptions(): {
   return { onCaughtError: report, onUncaughtError: report }
 }
 
+// What a console argument or a rejected value reads as in a breadcrumb or
+// an error message. A plain object or array is shown as JSON (capped) rather
+// than "[object Object]"; an Error keeps its own message.
 function stringify(value: unknown) {
   try {
+    if (value instanceof Error) return `${value.name}: ${value.message}`
+    if (typeof value === "object" && value !== null) return JSON.stringify(value).slice(0, MAX_CRUMB_TEXT)
     return String(value)
   } catch {
-    // A Symbol, or an object whose toString throws.
+    // A Symbol, a cyclic object, or an object whose toString throws.
     return `<${typeof value}>`
   }
 }

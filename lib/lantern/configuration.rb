@@ -67,7 +67,7 @@ module Lantern
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths
 
-    attr_reader :user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
+    attr_reader :user_resolver, :beacon_user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
     def initialize
       @enabled = env_bool("LANTERN_ENABLED", true)
@@ -142,6 +142,7 @@ module Lantern
       @interactive_runner_paths = ENV["LANTERN_INTERACTIVE_RUNNER_PATHS"]&.split(",")&.map(&:strip) ||
         DEFAULT_INTERACTIVE_RUNNER_PATHS.dup
       @user_resolver = nil
+      @beacon_user_resolver = nil
       @fingerprint_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }
@@ -150,6 +151,18 @@ module Lantern
 
     def user(&block)
       @user_resolver = block
+    end
+
+    # Lantern.beacon_user { |request| ... }: who is behind a browser beacon.
+    # The beacon is handled by the gem's own engine controller, outside the
+    # app's ApplicationController, so an app that authenticates in a
+    # before_action (a signed session cookie looked up per request, say)
+    # has not run it by the time the beacon is read. Return the user object
+    # the `user` block understands, or nil. Not needed when the app sets
+    # Current.user in middleware or uses Warden, which the default resolution
+    # already reads.
+    def beacon_user(&block)
+      @beacon_user_resolver = block
     end
 
     # Lantern.fingerprint { |error, default| ... }: one block, called with

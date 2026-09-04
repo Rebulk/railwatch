@@ -363,7 +363,7 @@ startLantern({
 | `environment` | Automatic — the ingest token identifies the environment. |
 | `ignoreErrors` | `startLantern({ ignoreErrors })`. Strings match anywhere in the message; regexes are tested against it. Both `ResizeObserver` messages are ignored by default. |
 | `denyUrls` | `startLantern({ denyUrls })`, matched against the top stack frame's URL. `/extensions\//i`, `/^chrome:\/\//i`, and `/^moz-extension:\/\//i` are denied by default, **and** any frame from an origin that isn't the app's own is dropped — extensions, injected widgets, tag managers. |
-| `Sentry.setUser` | Automatic. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Lantern.user`). |
+| `Sentry.setUser` | Server-side. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Lantern.user`) when `Current.user` or Warden is set by middleware; an app that authenticates in a `before_action` gives Lantern the same lookup with `c.beacon_user { \|request\| ... }`. Nothing the browser sends names the user, so it cannot be forged. |
 | `Sentry.setTag("org", …)` | `startLantern({ tenant })`, and `Lantern.context(...)` for everything else. |
 | `Sentry.captureException(e)` | `reportError(e)`. |
 | `Sentry.captureMessage(text)` | `reportError(new Error(text))` — Lantern has one shape for a browser problem, not two. |

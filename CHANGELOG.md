@@ -2,6 +2,12 @@
 
 ## 0.1.0 (unreleased)
 
+- `c.beacon_user { |request| ... }`: who is behind a browser beacon, for
+  apps that authenticate in a `before_action` the gem's beacon controller
+  never runs. Before this, every visit, browser session and JavaScript
+  error from such an app shipped with no user.
+- Console breadcrumbs render objects as JSON instead of `[object Object]`.
+
 - `bin/rails runner` from a shell never got its command execution: the
   runner patch is prepended during `boot_application!`, which the
   already-running `#perform` calls, so the `#perform` override only ever
