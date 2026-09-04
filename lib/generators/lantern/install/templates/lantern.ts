@@ -131,10 +131,14 @@ function observe(type: string, callback: (entries: VitalEntry[]) => void, option
   }
 }
 
+// Guarded by entryType rather than `instanceof PerformanceNavigationTiming`:
+// that constructor is a bare global that jsdom (and any non-browser runtime
+// this file is imported into) does not define, and a ReferenceError here
+// would take the whole client down with it.
 function navigationEntry(): PerformanceNavigationTiming | undefined {
   const entries: PerformanceEntry[] = performance.getEntriesByType?.("navigation") ?? []
   const nav = entries[0]
-  return nav instanceof PerformanceNavigationTiming ? nav : undefined
+  return nav?.entryType === "navigation" ? (nav as PerformanceNavigationTiming) : undefined
 }
 
 function startVitals() {
