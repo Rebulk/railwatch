@@ -89,7 +89,15 @@ Dir.mktmpdir("lantern-package-") do |tmp|
     end
     abort "Lantern::VERSION did not boot" unless defined?(Lantern::VERSION) && Lantern::VERSION == ENV.fetch("PACKAGE_VERSION")
     abort "source checkout leaked onto load path" if $LOAD_PATH.any? { |path| File.expand_path(path) == ENV.fetch("SOURCE_ROOT") }
-    abort "source checkout supplied a Lantern feature" if $LOADED_FEATURES.any? { |path| path.start_with?(ENV.fetch("SOURCE_ROOT")) && path.include?("lantern") }
+    source_root = File.expand_path(ENV.fetch("SOURCE_ROOT"))
+    source_features = $LOADED_FEATURES.filter_map do |path|
+      expanded = File.expand_path(path)
+      next unless expanded.start_with?("#{source_root}/")
+
+      relative = expanded.delete_prefix("#{source_root}/")
+      relative if relative == "lib/lantern.rb" || relative == "lib/lantern-observability.rb" || relative.start_with?("lib/lantern/")
+    end
+    abort "source checkout supplied Lantern features: #{source_features.join(", ")}" unless source_features.empty?
   RUBY
   smoke_env = without_bundler.merge(
     "GEM_HOME" => gem_home,
