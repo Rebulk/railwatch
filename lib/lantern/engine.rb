@@ -12,6 +12,20 @@ module Lantern
       app.middleware.insert_before 0, Lantern::Middleware::Request
     end
 
+    # Before anything subscribes or starts a thread, and after the app's own
+    # initializer has had its say about config: a console captures nothing.
+    initializer "lantern.console", after: :load_config_initializers, before: "lantern.subscribe" do
+      Lantern::Console.silence!
+    end
+
+    # Belt and braces for a console that reaches a prompt some other way than
+    # `bin/rails console` (`require "rails/console/app"` then IRB.start, say),
+    # where Rails::Console was not yet defined when the initializer above ran.
+    # Later, so this one has threads to stop.
+    console do
+      Lantern::Console.silence!
+    end
+
     initializer "lantern.subscribe", after: :load_config_initializers do |app|
       next unless Lantern.enabled?
 
@@ -68,6 +82,7 @@ module Lantern
   end
 end
 
+require "lantern/console"
 require "lantern/health"
 require "lantern/sessions"
 require "lantern/middleware/request"

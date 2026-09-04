@@ -20,6 +20,14 @@ module Lantern
       /\Aactive_storage/, /\Amigration_/, /\Aschema_cache/
     ].freeze
 
+    # Scratch roots. A deployed script ships in the image (under Rails.root,
+    # or wherever the ops scripts live); a `.rb` file under one of these was
+    # written by a human in a shell session, so `rails runner /tmp/probe.rb`
+    # counts as interactive. Deliberately narrow -- two literal temp roots,
+    # never "outside Rails.root" -- because a cron script going silent is the
+    # failure this must not cause.
+    DEFAULT_INTERACTIVE_RUNNER_PATHS = %w[/tmp/ /var/tmp/].freeze
+
     # Exceptions that are routine 4xx plumbing rather than application bugs.
     # The Rails-relevant subset of Sentry's own defaults
     # (Sentry::Configuration::IGNORE_DEFAULT + PUMA_IGNORE_DEFAULT and
@@ -56,7 +64,8 @@ module Lantern
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
                   :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
-                  :track_sessions, :session_flush_interval, :session_timeout
+                  :track_sessions, :session_flush_interval, :session_timeout,
+                  :capture_console, :interactive_runner_paths
 
     attr_reader :user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
@@ -126,6 +135,12 @@ module Lantern
       @track_sessions = env_bool("LANTERN_TRACK_SESSIONS", true)
       @session_flush_interval = env_float("LANTERN_SESSION_FLUSH_INTERVAL", 60.0)
       @session_timeout = env_float("LANTERN_SESSION_TIMEOUT", 1800.0)
+      # Interactive sessions: a `bin/rails console` process captures nothing
+      # at all, and a typed/piped `bin/rails runner` ships its command record
+      # but not its exception. A deployed script always reports.
+      @capture_console = env_bool("LANTERN_CAPTURE_CONSOLE", false)
+      @interactive_runner_paths = ENV["LANTERN_INTERACTIVE_RUNNER_PATHS"]&.split(",")&.map(&:strip) ||
+        DEFAULT_INTERACTIVE_RUNNER_PATHS.dup
       @user_resolver = nil
       @fingerprint_resolver = nil
       @redactors = Hash.new { |h, k| h[k] = [] }

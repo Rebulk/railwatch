@@ -107,6 +107,11 @@ namespace :lantern do
     check.call(true, "sample rates", config.sample.map { |kind, rate| "#{kind}=#{rate}" }.join(" "))
     check.call(true, "ignored record types", config.ignore.empty? ? "none" : config.ignore.join(", "))
 
+    check.call(true, "interactive sessions",
+               "console=#{config.capture_console ? 'captured' : 'quiet'} " \
+               "runner scratch paths=#{config.interactive_runner_paths.join(' ')} " \
+               "(a typed/piped runner ships its command record, not its exception)")
+
     hook = Rails.root.join(".kamal/hooks/post-deploy")
     check.call(hook.exist? && hook.read.include?("lantern"), "kamal post-deploy hook",
                hook.exist? ? hook.to_s : "not found (only needed when deploying with Kamal)")

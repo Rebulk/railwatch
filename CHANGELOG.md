@@ -2,6 +2,16 @@
 
 ## 0.1.0 (unreleased)
 
+- Interactive sessions are no longer treated as application failures.
+  `bin/rails console` captures nothing, starts no background thread, and
+  sends no `process`/`health` record (`config.capture_console` /
+  `LANTERN_CAPTURE_CONSOLE=1` re-enables everything). A `bin/rails runner`
+  the operator typed (`-`, inline code, or a `.rb` file under
+  `config.interactive_runner_paths`, default `/tmp/` and `/var/tmp/`) ships
+  its `command` record with `interactive: true` and its exit code, but does
+  not report the exception; a deployed script (`rails runner
+  script/nightly.rb`), a rake task, and a job report exactly as before.
+
 - Release health: a new `session` record type, from the browser client (one
   session per tab, riding along on the visit beacon) and from the request
   middleware (`Lantern::Sessions`, one flusher thread per web process).

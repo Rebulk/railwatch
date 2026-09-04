@@ -31,6 +31,12 @@ module Lantern
     # and whether an unhandled exception escaped it. Left uninitialized for
     # the same reason as the profiler pair above.
     attr_accessor :session_key, :session_crashed
+    # Set only by Lantern::Patches::RunnerCommand, for a `rails runner` an
+    # engineer typed or piped: the execution is still recorded, but its
+    # exceptions are a shell session's, not the application's, so nothing
+    # reports them (Subscribers::Exceptions.capture). Left uninitialized like
+    # the pairs above -- a request must not pay an ivar write for this.
+    attr_accessor :interactive
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)

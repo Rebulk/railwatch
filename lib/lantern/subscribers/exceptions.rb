@@ -92,6 +92,14 @@ module Lantern
         exe = execution
         exe&.count(:exceptions)
         exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255] if exe
+        # An interactive `rails runner` -- typed, piped, or a script in /tmp --
+        # is an engineer at a shell, and their typo is not an issue. Their
+        # command record still ships, carrying the exit code and the preview
+        # set just above, so the run is visible without opening one. Checked
+        # here rather than only where the patch rescues because the Rails
+        # executor reports the error to Rails.error first (source
+        # "application.runner.railties"), inside the runner's own call.
+        return if exe&.interactive
         # Release health: an unhandled exception ends this request's session
         # crashed. Flagged rather than written straight into the session map
         # because the key is only resolved once the request finishes (a
