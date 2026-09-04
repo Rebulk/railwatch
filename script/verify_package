@@ -31,7 +31,8 @@ def without_bundler
   environment.merge("RUBYOPT" => nil, "RUBYLIB" => nil)
 end
 
-Dir.mktmpdir("lantern-package-") do |tmp|
+tmp = Dir.mktmpdir("lantern-package-")
+begin
   version = File.read(File.join(ROOT, "lib/lantern/version.rb"))[/VERSION = "([^"]+)"/, 1]
   gem_file = File.join(tmp, "#{PUBLIC_NAME}-#{version}.gem")
 
@@ -136,7 +137,14 @@ Dir.mktmpdir("lantern-package-") do |tmp|
   GEMFILE
   consumer_env = without_bundler.merge(
     "BUNDLE_GEMFILE" => File.join(consumer, "Gemfile"),
-    "BUNDLE_APP_CONFIG" => File.join(consumer, ".bundle")
+    "BUNDLE_APP_CONFIG" => File.join(consumer, ".bundle"),
+    "GIT_CONFIG_COUNT" => "3",
+    "GIT_CONFIG_KEY_0" => "gc.auto",
+    "GIT_CONFIG_VALUE_0" => "0",
+    "GIT_CONFIG_KEY_1" => "maintenance.auto",
+    "GIT_CONFIG_VALUE_1" => "false",
+    "GIT_CONFIG_KEY_2" => "maintenance.autoDetach",
+    "GIT_CONFIG_VALUE_2" => "false"
   )
   run!("bundle", "install", "--local", chdir: consumer, env: consumer_env)
   lock = File.read(File.join(consumer, "Gemfile.lock"))
@@ -152,4 +160,9 @@ Dir.mktmpdir("lantern-package-") do |tmp|
        env: consumer_env.merge("PACKAGE_VERSION" => version))
 
   puts "Verified #{PUBLIC_NAME} #{version} package and #{LEGACY_NAME} Git-source compatibility."
+ensure
+  # A Git implementation may leave detached auto-maintenance finishing as the
+  # Bundler smoke exits. `rm_rf` tolerates one of its transient object files
+  # disappearing during cleanup; Dir.mktmpdir's block cleanup does not.
+  FileUtils.rm_rf(tmp)
 end
