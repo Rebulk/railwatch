@@ -2,6 +2,16 @@
 
 ## 0.1.0 (unreleased)
 
+- Active Job payloads now carry the enqueuing execution's user and tenant
+  (`lantern_user`/`lantern_tenant`) next to the trace and parent ids, and
+  the worker restores them before the attempt opens. A `job_attempt` and
+  every child record under it are attributed to the person whose request
+  enqueued the job instead of to a worker process with no signed-in user,
+  and jobs that enqueue jobs pass the same identity along. Identifier
+  strings only — no user or tenant model is serialized or hydrated.
+  Payloads without the keys (enqueued before this change) deserialize to
+  nil and fall back to local resolution as before.
+
 - A retained delivery batch gives up after `Reporter::MAX_RETRY_ATTEMPTS`
   (8) and is dropped and counted, so a batch that keeps failing cannot pin
   itself in memory while every newer record is discarded around it.

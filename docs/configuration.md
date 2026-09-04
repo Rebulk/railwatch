@@ -475,6 +475,20 @@ Rails 8 auth generator convention) if defined, else Warden's `env["warden"].user
 `user` record ships once, not once per request (`Lantern::Subscribers::Users`,
 `docs/records.md`'s `user` section).
 
+A request resolves its user at the end, but a job enqueued mid-action needs
+one immediately, so `JobTracing#serialize` resolves the enqueuing
+execution's user and tenant and puts those two identifier strings into the
+Active Job payload (`lantern_user`/`lantern_tenant`). The worker restores
+them before the attempt records anything, so a `job_attempt` and every
+child record under it are attributed to the person whose request enqueued
+the job rather than to a worker process that has no signed-in user — and a
+job that enqueues a job passes the same identity on. Nothing but the two
+strings crosses the queue; no model is serialized or hydrated. Payloads
+carry the keys only when there is something to carry, and a payload without
+them falls back to local resolution, so a queue drained across a deploy
+keeps working. See `docs/records.md`'s `job_attempt` section for retries,
+scheduled jobs, and the cardinality note.
+
 ```ruby
 c.beacon_user { |request| Session.find_by(id: request.cookie_jar.signed[:session_token])&.user }
 ```

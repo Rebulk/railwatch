@@ -43,7 +43,18 @@ module Lantern
             parent_id: job.respond_to?(:lantern_parent_id) ? job.lantern_parent_id : nil,
             preview: job.class.name)
           exe.enter_stage(:action)
-          exe.user_id = Users.resolve_from_current
+          # The enqueuing execution's identity, restored from the payload
+          # before anything is recorded, so the job_attempt parent and every
+          # child record under it carry the same user and tenant as the
+          # request that enqueued the job. Local resolution stays the
+          # fallback: an older payload, or a job nobody enqueued on a user's
+          # behalf, still resolves whatever this process can see. A tenant
+          # that was not propagated is left nil so Execution#envelope can
+          # still late-bind one the job binds itself (with_tenant).
+          propagated_user = job.lantern_user if job.respond_to?(:lantern_user)
+          propagated_tenant = job.lantern_tenant if job.respond_to?(:lantern_tenant)
+          exe.tenant = propagated_tenant if propagated_tenant
+          exe.user_id = propagated_user || Users.resolve_from_current
           exe.queue_latency = queue_latency_micros(job)
           exe.drift = drift_micros(run_at) if key
           job.instance_variable_set(:@__lantern_execution, exe)

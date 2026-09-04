@@ -30,8 +30,8 @@ execution's envelope (`Execution#envelope`, `lib/lantern/execution.rb`):
 | `parent_id` | UUID of the execution that enqueued this one (e.g. the request that enqueued a job), or nil. |
 | `execution_preview` | Human label for the parent, e.g. `"GET /posts"` or `"PostsController#index"`. |
 | `execution_stage` | Lifecycle stage active when the record was created (`middleware_before`, `action`, `render`, `middleware_after`, ...). |
-| `user` | Resolved user id (`Subscribers::Users`), or nil. |
-| `tenant` | `Lantern.context(tenant: ...)` / `Context.current_tenant`, or nil. |
+| `user` | Resolved user id (`Subscribers::Users`), or nil. On a job, the id propagated from whatever enqueued it (see `job_attempt` below). |
+| `tenant` | `Lantern.context(tenant: ...)` / `Context.current_tenant`, or nil. On a job, the tenant propagated from whatever enqueued it. |
 
 ## Parent records
 
@@ -116,6 +116,41 @@ scheduler didn't originate (see `scheduled_task` below for the ones it did).
 | `arguments` | The job's real arguments (`job.serialize["arguments"]`, Active Job's own JSON-safe form, so an Active Record argument is already a GlobalID). Only present when `config.capture_job_arguments` is on — off by default, because arguments routinely carry PII. Hash arguments (including hashes nested in an array argument) go through the same parameter filter as request params, so a `password:` keyword ships as `[FILTERED]`. |
 | `arguments_truncated` | `true` when trailing arguments had to be dropped to fit `arguments` into 8 KiB of JSON. Absent otherwise, and absent entirely when `capture_job_arguments` is off. |
 | `profiled` | `true` when a `profile` record shipped for this attempt; absent otherwise. |
+
+`user` and `tenant` on a job attempt (and therefore on every child record
+under it) come from the execution that enqueued the job, not from the
+worker process, which usually has no signed-in user to resolve.
+`JobTracing#serialize` puts the enqueuing execution's resolved user id and
+tenant into the Active Job payload as `lantern_user`/`lantern_tenant`,
+alongside `lantern_trace_id`/`lantern_parent_id`; `perform_start` restores
+them onto the job's execution before its first record is built. Details
+worth knowing:
+
+- **Identifiers only.** Two strings — the same tenant-prefixed id the
+  `user` record carries, and the tenant name. No user or tenant model is
+  serialized, hydrated, or looked up, on either side.
+- **Jobs enqueuing jobs.** A job serializes the values it was given, so a
+  chain of jobs keeps the identity of the request that started it.
+- **Retries and scheduled jobs.** A retry re-enqueues the same job object,
+  and Active Job re-serializes it, so every attempt keeps the original
+  identity. `perform_later(wait:)`/`set(wait_until:)` serialize at enqueue
+  time like any other job — a job scheduled for next week is attributed to
+  whoever scheduled it. Solid Queue's recurring scheduler enqueues nothing
+  on anyone's behalf, so a `scheduled_task` has no propagated user and
+  falls back to local resolution (normally nil).
+- **Nothing to propagate.** The keys are omitted from the payload when
+  there is no user or tenant, and a payload without them (one enqueued by
+  an older version of the gem, still sitting in a queue through a deploy)
+  deserializes to nil and falls back to `Users.resolve_from_current`,
+  exactly as before. Inline `perform_now` never serializes, so it resolves
+  locally too.
+- **A propagated user does not emit a `user` record.** The worker skips
+  local resolution, and it is resolution that emits the name/email record.
+  The enqueuing process already emitted it for that id.
+- **Cardinality.** The user id is one more high-cardinality dimension on
+  every job record. Apps that do not want a user attached to jobs at all
+  can return nil from `config.user` for the cases they care about — the
+  propagation only ever carries what that resolver already produced.
 
 Also has a special case with no `Execution`: **Solid Queue pruned jobs**
 (`fail_many_claimed.solid_queue`) never reach `perform.active_job` because
