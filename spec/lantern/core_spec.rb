@@ -218,12 +218,19 @@ RSpec.describe Lantern do
   end
 
   describe "self-monitoring" do
-    it "calls on_unrecoverable once when delivery still fails after its retry" do
-      stub_request(:post, "http://lantern.test/ingest").to_raise(StandardError.new("boom"))
+    it "calls on_unrecoverable when ingest permanently rejects a batch" do
+      stub_request(:post, "http://lantern.test/ingest").to_return(status: 422, body: "boom")
       errors = []
       Lantern.on_unrecoverable { |e| errors << e }
-      Lantern::Transport::Http.new(Lantern.config).deliver([ { t: "log" } ])
-      expect(errors.map(&:message)).to eq([ "boom" ])
+      reporter = Lantern::Reporter.new(Lantern.config)
+      reporter.buffer.push({ t: "log" })
+
+      reporter.flush
+
+      expect(errors.one?).to be(true)
+      expect(errors.first).to be_a(Lantern::Reporter::DeliveryError)
+      expect(errors.first.status).to eq(422)
+      expect(errors.first.message).to include("boom")
     ensure
       Lantern.config.on_unrecoverable = nil
     end

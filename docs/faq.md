@@ -144,22 +144,31 @@ waiting for room. The counter rides along on the next successful batch
 (`X-Lantern-Dropped`), so loss shows up on the platform instead of being
 silent.
 
-A background thread drains the buffer and POSTs. A failed POST is
-retried once, on a raised error or a 5xx, and then the batch is dropped.
-Connect timeout is 1 second and read/write timeout 3 seconds by default,
-both configurable, and they're on the reporter thread, not yours. Two
-statuses get special handling: a **401** marks the transport unauthorized
-and stops all further attempts for that process's lifetime (fix the token
-and restart), and a **402** — quota exceeded — backs off for 60 seconds
-before trying again.
+A background thread drains the buffer and POSTs. Each POST retries one
+raised network error or 5xx immediately. If delivery still fails, the batch
+and its drop counter go back into the bounded buffer; **402**, **408**,
+**429**, and all **5xx** responses are retained the same way. The reporter
+retries with jittered exponential backoff from one second up to 60 seconds,
+so an outage cannot create a busy loop. If newer traffic fills the buffer
+while an old batch is in flight, the oldest records are still the ones
+dropped and every loss remains counted.
 
-On shutdown, `at_exit` gives the thread `c.shutdown_timeout` (2 seconds)
-to finish and then flushes what's left, so a rolling deploy doesn't lose
-the last batch. If Lantern's own internals fail — a subscriber raising,
-delivery failing after its retry — the error goes to
-`Lantern.on_unrecoverable` if you registered a callback, and otherwise to
-stderr under `LANTERN_DEBUG=1`. Never to `Rails.logger`, which would turn
-Lantern's failures into `log` records about Lantern.
+Connect timeout is 1 second and read/write timeout 3 seconds by default,
+both configurable, and they're always on the reporter thread — even an
+unhandled exception only enqueues and wakes that thread. A **401** marks the
+transport unauthorized and stops further HTTP attempts for that process's
+lifetime (fix the token and restart). A 401 or other permanent client
+rejection drops that rejected batch and calls `Lantern.on_unrecoverable`
+with its status and record count.
+
+On shutdown, `at_exit` gives the thread `c.shutdown_timeout` (2 seconds) to
+attempt retained records immediately and retry within the remaining time.
+If the deadline expires, the records stay retained and their count is sent
+to `Lantern.on_unrecoverable` (or stderr under `LANTERN_DEBUG=1`). This is an
+in-memory buffer, not an on-disk spool: a hard kill, or exiting after that
+deadline, cannot carry those records into the next process. Lantern never
+uses `Rails.logger` for its own failures, which would turn them into `log`
+records about Lantern.
 
 ## See also
 

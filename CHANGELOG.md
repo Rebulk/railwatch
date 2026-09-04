@@ -31,6 +31,14 @@
   flush -> ingest-request -> flush feedback loop without hiding unrelated
   application routes also named `/ingest`.
 
+- Retryable ingest failures no longer discard a drained batch. Network
+  failures plus HTTP 402, 408, 429, and 5xx responses restore records and
+  their drop accounting to the bounded buffer, then retry on the reporter
+  thread with jittered exponential backoff. Permanent client rejections and
+  shutdown deadlines with unsent records remain observable through
+  `on_unrecoverable`; urgent exception reporting now wakes the background
+  thread instead of waiting through network timeouts on the request thread.
+
 - Browser JavaScript errors. The Inertia browser client now captures
   uncaught errors, unhandled promise rejections, and Inertia's failed-request
   events (`exception`/`invalid` on Inertia 2, `networkError`/`httpException`
