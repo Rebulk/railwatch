@@ -109,6 +109,8 @@ RSpec.describe Lantern::Configuration do
           "ActionController::RoutingError", "ActionController::InvalidAuthenticityToken",
           "ActiveRecord::RecordNotFound", "Rack::QueryParser::ParameterTypeError",
           "Puma::HttpParserError")
+        # Interrupt < SignalException: a shutdown is not an error.
+        expect(config.ignored_exceptions).to include("SignalException")
       end
     end
 

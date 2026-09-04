@@ -18,6 +18,10 @@ module Lantern
         rescue SystemExit => e
           exit_code = e.status
           raise
+        rescue SignalException => e
+          # A signal ends the runner by design (see the rake patch); not reported.
+          exit_code = 128 + (e.signo || 0)
+          raise
         rescue Exception => e # rubocop:disable Lint/RescueException
           exit_code = 1
           Lantern::Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "application.runner")
