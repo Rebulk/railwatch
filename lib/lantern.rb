@@ -115,7 +115,7 @@ module Lantern
       parent = parent_type && build_parent(parent_type, exe, group: group, **fields)
       if exe.sampled? || tail
         exe.records.each { |r| reporter.write(r) }
-        reporter.buffer.instance_variable_set(:@dropped, reporter.buffer.dropped + exe.dropped_records) if exe.dropped_records.positive?
+        reporter.buffer.account_dropped(exe.dropped_records) if exe.dropped_records.positive?
         reporter.write(parent) if parent
       elsif parent && exe.exception_sampled
         reporter.write(parent)
