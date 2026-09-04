@@ -189,3 +189,20 @@ RSpec.describe Lantern::Sessions::ForkHook do
     expect(fake._fork).to eq(4242)
   end
 end
+
+RSpec.describe "Lantern::Sessions fork state" do
+  it "replaces inherited synchronization, session, and drop state" do
+    old_mutex = Lantern::Sessions.instance_variable_get(:@mutex)
+    old_wakeup = Lantern::Sessions.instance_variable_get(:@wakeup)
+    Lantern::Sessions.instance_variable_set(:@sessions, "parent" => {})
+    Lantern::Sessions.instance_variable_set(:@dropped, 3)
+
+    Lantern::Sessions.restart_after_fork!
+
+    expect(Lantern::Sessions.instance_variable_get(:@mutex)).not_to equal(old_mutex)
+    expect(Lantern::Sessions.instance_variable_get(:@wakeup)).not_to equal(old_wakeup)
+    expect(Lantern::Sessions.instance_variable_get(:@sessions)).to be_empty
+    expect(Lantern::Sessions.dropped).to eq(0)
+    expect(Lantern::Sessions.instance_variable_get(:@pid)).to be_nil
+  end
+end

@@ -151,6 +151,20 @@ RSpec.describe Lantern::Reporter do
     Lantern::Transport::Http::Result.new(ok: ok, status: status, error: error, accepted: accepted)
   end
 
+  def fork_pipe_transport(writer)
+    Class.new do
+      def initialize(io)
+        @io = io
+      end
+
+      def deliver(records, dropped: 0)
+        @io.puts(JSON.generate(pid: Process.pid, records: records, dropped: dropped))
+        @io.flush
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
+      end
+    end.new(writer)
+  end
+
   describe "#flush" do
     it "passes the buffer's dropped count through to the transport" do
       captured_dropped = nil
@@ -391,28 +405,148 @@ RSpec.describe Lantern::Reporter do
   end
 
   describe "forked processes" do
-    it "re-arms the reporter thread after fork instead of reusing the parent's dead thread", :aggregate_failures do
+    it "keeps parent records and drop accounting out of the child, and emits child process and health records once", :aggregate_failures do
       skip "fork not supported on this platform" unless Process.respond_to?(:fork)
 
-      Lantern.reporter.write({ t: "log", message: "parent" })
+      reader, writer = IO.pipe
+      config = Lantern.config.dup
+      config.buffer_size = 10
+      config.flush_interval = 30
+      config.flush_threshold = 10
+      reporter = described_class.new(config, transport: fork_pipe_transport(writer))
+      Lantern.instance_variable_set(:@reporter, reporter)
+      reporter.buffer.push({ t: "log", owner: "parent" })
+      reporter.buffer.instance_variable_set(:@dropped, 4)
+
+      pid = Process.fork do
+        reader.close
+        Lantern.reporter.write({ t: "log", owner: "child" })
+        Lantern::Health.sample
+        Lantern.flush
+        writer.close
+        exit!(0)
+      end
+      Process.wait(pid)
+      reporter.flush
+      writer.close
+      deliveries = reader.each_line.map { |line| JSON.parse(line) }
+      reader.close
+
+      child_delivery = deliveries.find { |delivery| delivery["pid"] == pid }
+      parent_delivery = deliveries.find { |delivery| delivery["pid"] == Process.pid }
+      child_records = child_delivery.fetch("records")
+
+      expect(deliveries.size).to eq(2)
+      expect(parent_delivery.fetch("records")).to eq([ { "t" => "log", "owner" => "parent" } ])
+      expect(parent_delivery.fetch("dropped")).to eq(4)
+      expect(child_delivery.fetch("dropped")).to eq(0)
+      expect(child_records.count { |record| record["owner"] == "child" }).to eq(1)
+      expect(child_records.none? { |record| record["owner"] == "parent" }).to be(true)
+      expect(child_records.select { |record| record["t"] == "process" }.sole.fetch("pid")).to eq(pid)
+      expect(child_records.select { |record| record["t"] == "health" }.sole.fetch("pid")).to eq(pid)
+    end
+
+    it "replaces inherited locked reporter and buffer mutexes before the child records" do
+      skip "fork not supported on this platform" unless Process.respond_to?(:fork)
+
+      reporter = described_class.new(Lantern.config, transport: Lantern::SpecHelper::MemoryTransport.new)
+      Lantern.instance_variable_set(:@reporter, reporter)
+      flush_mutex = reporter.instance_variable_get(:@flush_mutex)
+      reporter_mutex = reporter.instance_variable_get(:@mutex)
+      buffer_mutex = reporter.buffer.instance_variable_get(:@mutex)
+      locked = Queue.new
+      release = Queue.new
+      locker = Thread.new do
+        flush_mutex.lock
+        reporter_mutex.lock
+        buffer_mutex.lock
+        locked << true
+        release.pop
+      ensure
+        buffer_mutex.unlock if buffer_mutex.owned?
+        reporter_mutex.unlock if reporter_mutex.owned?
+        flush_mutex.unlock if flush_mutex.owned?
+      end
+      locked.pop
 
       reader, writer = IO.pipe
       pid = Process.fork do
         reader.close
-        Lantern.reporter.write({ t: "log", message: "child" })
-        alive = Lantern.reporter.instance_variable_get(:@thread)&.alive?
-        recorded_pid = Lantern.reporter.instance_variable_get(:@pid)
-        writer.puts("#{alive}|#{recorded_pid == Process.pid}")
+        Lantern.reporter.write({ t: "log", owner: "child" })
+        Lantern.flush
+        writer.puts("completed")
+        writer.close
+        exit!(0)
+      end
+      release << true
+      locker.join
+      writer.close
+
+      ready = IO.select([ reader ], nil, nil, 3)
+      completed = ready && reader.gets&.strip
+      Process.kill("KILL", pid) unless completed
+      Process.wait(pid)
+      reader.close
+
+      expect(completed).to eq("completed")
+    ensure
+      release << true if release && release.empty?
+      locker&.join(1)
+    end
+
+    it "resets inherited retry, in-flight, and HTTP policy state without changing the parent" do
+      skip "fork not supported on this platform" unless Process.respond_to?(:fork)
+
+      transport = Lantern::Transport::Http.new(Lantern.config)
+      transport.instance_variable_set(:@unauthorized, true)
+      reporter = described_class.new(Lantern.config, transport: transport)
+      reporter.instance_variable_set(:@flush_requested, true)
+      reporter.instance_variable_set(:@retry_attempt, 3)
+      reporter.instance_variable_set(:@retry_at, 123.0)
+      reporter.instance_variable_set(:@retry_batch, Object.new)
+      reporter.instance_variable_set(:@in_flight_records, 2)
+      reporter.instance_variable_set(:@in_flight_dropped, 4)
+      reporter.instance_variable_set(:@shutdown_notified, true)
+      reporter.instance_variable_set(:@shutdown_deadline, 456.0)
+      Lantern.instance_variable_set(:@reporter, reporter)
+      reader, writer = IO.pipe
+
+      pid = Process.fork do
+        reader.close
+        child_transport = Lantern.reporter.instance_variable_get(:@transport)
+        writer.puts(JSON.generate(
+          unauthorized: child_transport.unauthorized?,
+          flush_requested: Lantern.reporter.instance_variable_get(:@flush_requested),
+          retry_attempt: Lantern.reporter.instance_variable_get(:@retry_attempt),
+          retry_at: Lantern.reporter.instance_variable_get(:@retry_at),
+          retry_batch: Lantern.reporter.instance_variable_get(:@retry_batch),
+          in_flight_records: Lantern.reporter.instance_variable_get(:@in_flight_records),
+          in_flight_dropped: Lantern.reporter.instance_variable_get(:@in_flight_dropped),
+          shutdown_notified: Lantern.reporter.instance_variable_get(:@shutdown_notified),
+          shutdown_deadline: Lantern.reporter.instance_variable_get(:@shutdown_deadline)
+        ))
         writer.close
         exit!(0)
       end
       writer.close
-      Process.wait(pid)
-      alive, pid_matches_child = reader.read.strip.split("|")
+      child_state = JSON.parse(reader.read)
       reader.close
+      Process.wait(pid)
 
-      expect(alive).to eq("true")
-      expect(pid_matches_child).to eq("true")
+      expect(child_state).to eq(
+        "unauthorized" => false,
+        "flush_requested" => false,
+        "retry_attempt" => 0,
+        "retry_at" => nil,
+        "retry_batch" => nil,
+        "in_flight_records" => 0,
+        "in_flight_dropped" => 0,
+        "shutdown_notified" => false,
+        "shutdown_deadline" => nil
+      )
+      expect(transport.unauthorized?).to be(true)
+      expect(reporter.instance_variable_get(:@retry_attempt)).to eq(3)
+      expect(reporter.instance_variable_get(:@in_flight_records)).to eq(2)
     end
   end
 
@@ -444,5 +578,21 @@ RSpec.describe Lantern::Reporter do
 
       expect(line).to eq("delivered:1")
     end
+  end
+end
+
+RSpec.describe Lantern::Reporter::ForkHook do
+  it "resets Lantern state in the child" do
+    expect(Lantern).to receive(:restart_after_fork!)
+    fake = Class.new { def _fork = 0 }.new
+    fake.singleton_class.prepend(described_class)
+    expect(fake._fork).to eq(0)
+  end
+
+  it "leaves Lantern state alone in the parent" do
+    expect(Lantern).not_to receive(:restart_after_fork!)
+    fake = Class.new { def _fork = 4242 }.new
+    fake.singleton_class.prepend(described_class)
+    expect(fake._fork).to eq(4242)
   end
 end

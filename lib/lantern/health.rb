@@ -52,10 +52,15 @@ module Lantern
     end
 
     # A forked child (Puma cluster worker, Solid Queue forked worker) inherits
-    # a dead thread and the parent's pid; start! sees the pid mismatch and
-    # starts a fresh one. Called from ForkHook, so no puma.rb hook is needed.
+    # a dead thread and may inherit a mutex held by a vanished parent thread,
+    # so every synchronization primitive must be replaced before start!.
     def restart_after_fork!
+      @mutex = Mutex.new
+      @wakeup = ConditionVariable.new
       @thread = nil
+      @pid = nil
+      @stopping = false
+      remove_instance_variable(:@puma_server) if defined?(@puma_server)
       start!
     end
 
