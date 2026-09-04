@@ -53,10 +53,19 @@ module Lantern
       at_exit { Lantern.reporter.shutdown if Lantern.enabled? }
     end
 
+    # Registered before the health/session hooks so its child callback
+    # unwinds first from Process._fork and replaces reporter state before
+    # either sampler can emit into it.
+    initializer "lantern.reporter_fork", after: "lantern.subscribe" do
+      next unless Lantern.enabled?
+
+      ::Process.singleton_class.prepend(Lantern::Reporter::ForkHook)
+    end
+
     # Declared after "lantern.shutdown" so its at_exit is registered later and
     # therefore runs first (at_exit is LIFO): the health thread is stopped
     # before the reporter's final flush, not after it.
-    initializer "lantern.health", after: "lantern.subscribe" do
+    initializer "lantern.health", after: "lantern.reporter_fork" do
       next unless Lantern.enabled?
 
       Lantern::Health.start!
@@ -68,7 +77,7 @@ module Lantern
 
     # Same shape as "lantern.health": one flusher thread per web process,
     # stopped before the reporter's final flush, re-armed after a fork.
-    initializer "lantern.sessions", after: "lantern.subscribe" do
+    initializer "lantern.sessions", after: "lantern.health" do
       next unless Lantern.enabled? && Lantern.config.track_sessions
 
       Lantern::Sessions.start!

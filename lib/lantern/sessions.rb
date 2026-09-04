@@ -139,8 +139,13 @@ module Lantern
     # A forked child inherits a dead thread, the parent's pid, and the
     # parent's half-finished session map; both are replaced here.
     def restart_after_fork!
+      @mutex = Mutex.new
+      @wakeup = ConditionVariable.new
       @thread = nil
+      @pid = nil
+      @stopping = false
       @sessions = {}
+      @dropped = 0
       start!
     end
 

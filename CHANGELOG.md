@@ -16,6 +16,12 @@
   real runner ships its `command` record and an interactive one (`-`,
   inline code, a script under `/tmp`) withholds its exception as documented.
 
+- Forked Puma and Active Job workers now replace inherited reporter buffers,
+  drop accounting, transport policy state, and synchronization primitives
+  before recording anything. Parent telemetry is delivered only by the
+  parent; each child emits its own process/health records, and a mutex held
+  by another thread at fork can no longer deadlock the child reporter.
+
 - Exceptions whose backtrace was assigned rather than raised
   (`ActiveRecord::StatementInvalid` via `set_backtrace`, `Faraday::Error`
   delegating to its wrapped exception) shipped with no frames, no

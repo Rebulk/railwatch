@@ -72,6 +72,14 @@ module Lantern
       @redactor = nil
     end
 
+    # Process._fork hook entry point. Reset the reporter before emitting the
+    # child's own process record, so nothing inherited from the parent can be
+    # flushed alongside it.
+    def restart_after_fork!
+      @reporter&.restart_after_fork!
+      Subscribers::ProcessInfo.restart_after_fork!
+    end
+
     # --- execution lifecycle -------------------------------------------------
 
     def execution

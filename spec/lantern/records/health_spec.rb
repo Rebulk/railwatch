@@ -184,3 +184,16 @@ RSpec.describe Lantern::Health::ForkHook do
     expect(fake._fork).to eq(4242)
   end
 end
+
+RSpec.describe "Lantern::Health fork state" do
+  it "replaces synchronization state inherited by the child" do
+    old_mutex = Lantern::Health.instance_variable_get(:@mutex)
+    old_wakeup = Lantern::Health.instance_variable_get(:@wakeup)
+
+    Lantern::Health.restart_after_fork!
+
+    expect(Lantern::Health.instance_variable_get(:@mutex)).not_to equal(old_mutex)
+    expect(Lantern::Health.instance_variable_get(:@wakeup)).not_to equal(old_wakeup)
+    expect(Lantern::Health.instance_variable_get(:@pid)).to be_nil
+  end
+end
