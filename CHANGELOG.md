@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- Exceptions whose backtrace was assigned rather than raised
+  (`ActiveRecord::StatementInvalid` via `set_backtrace`, `Faraday::Error`
+  delegating to its wrapped exception) shipped with no frames, no
+  culprit, and a fingerprint of class and message only, because
+  `backtrace_locations` is nil for them. `Backtrace.frames` now parses the
+  String backtrace in that case.
+
 - Browser JavaScript errors. The Inertia browser client now captures
   uncaught errors, unhandled promise rejections, and Inertia's failed-request
   events (`exception`/`invalid` on Inertia 2, `networkError`/`httpException`

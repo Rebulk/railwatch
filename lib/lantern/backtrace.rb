@@ -50,18 +50,40 @@ module Lantern
       Gem.path.any? { |p| path.start_with?("#{p}/") }
     end
 
+    # One line of a String backtrace: "path:line:in 'label'" (Ruby 3.4),
+    # "path:line:in `label'" (earlier), or a bare "path:line".
+    BACKTRACE_LINE = /\A(.+?):(\d+)(?::in [`'](.*)')?\z/
+
     def frames(exception, with_source: true, limit: 50)
-      Array(exception.backtrace_locations || []).first(limit).map do |loc|
-        path = loc.absolute_path || loc.path
+      raw_frames(exception, limit).map do |path, lineno, label|
         in_app = path.to_s.start_with?(app_root)
         frame = {
           file: in_app ? path.delete_prefix(app_root) : path,
-          line: loc.lineno,
-          function: loc.label,
+          line: lineno,
+          function: label,
           in_app: in_app
         }
-        frame[:code] = source_snippet(path, loc.lineno) if with_source && in_app
+        frame[:code] = source_snippet(path, lineno) if with_source && in_app
         frame
+      end
+    end
+
+    # [path, line, label] per frame. backtrace_locations is nil for any
+    # exception whose backtrace was assigned rather than raised into it --
+    # ActiveRecord::StatementInvalid (set_backtrace from the driver error),
+    # Faraday::Error (delegates #backtrace to the wrapped exception) -- which
+    # are the most common production exceptions, so fall back to parsing the
+    # strings rather than shipping them with no frames, no culprit, and a
+    # fingerprint of nothing but class and message.
+    def raw_frames(exception, limit)
+      locations = exception.backtrace_locations
+      if locations
+        locations.first(limit).map { |loc| [ loc.absolute_path || loc.path, loc.lineno, loc.label ] }
+      else
+        Array(exception.backtrace).first(limit).filter_map do |line|
+          match = BACKTRACE_LINE.match(line.to_s) or next
+          [ match[1], match[2].to_i, match[3] ]
+        end
       end
     end
 

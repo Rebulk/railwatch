@@ -234,7 +234,7 @@ it never reaches the point where buffered records would flush.
 | `severity` | `:error`/`:warning`/etc., as a string. |
 | `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"application.action_cable"` (a channel action that raised), `"lantern.middleware"`, `"action_controller.rescue_from"`, or `"browser"` for a JavaScript error (see below). |
 | `file` / `line` | Top in-app backtrace frame. |
-| `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. |
+| `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. Read from `backtrace_locations`, or parsed from the String backtrace when that is nil (an exception whose backtrace was assigned with `set_backtrace` or delegated to a wrapped error, as `ActiveRecord::StatementInvalid` and `Faraday::Error` do). |
 | `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
 | `context` | Serialized `Lantern.context(...)` active when the error was captured. |
 | `code` | `Errno` constant, or `error.errno`/`error.code` if the error exposes one. |
