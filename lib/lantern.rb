@@ -110,7 +110,8 @@ module Lantern
     # Ends the execution. A sampled-in execution ships all of its buffered
     # child records plus the parent; a sampled-out one ships only the parent,
     # and only if it raised (so every unhandled exception has a parent) --
-    # unless the tail decision (tail_keep?) rescues the whole tree.
+    # unless the tail decision (tail_keep?) rescues the whole tree, which is
+    # also how a failure-context ring is promoted.
     def finish_execution(parent_type = nil, group: nil, **fields)
       exe = Current.execution
       return Current.clear unless exe
@@ -379,7 +380,15 @@ module Lantern
     # the lone parent exactly as it did before.
     def tail_keep?(exe)
       return false unless exe.tail_buffering?
-      return true if exe.keep || exe.exception_sampled
+      return true if exe.keep
+      # A failure-context ring is promoted by one thing only: an unhandled
+      # exception this execution actually reported. An execution that
+      # completed normally -- or whose exception was ignored, handled,
+      # withheld from an interactive runner, raised inside Lantern.ignore, or
+      # lost to the exceptions sample rate -- discards the ring here and
+      # ships exactly what it would have shipped without one.
+      return exe.exception_reported || false if exe.failure_context?
+      return true if exe.exception_sampled
 
       slow = config.tail_sample_slow_ms
       !slow.nil? && exe.duration >= slow * 1_000

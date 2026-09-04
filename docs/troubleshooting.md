@@ -183,6 +183,11 @@ decision can't be made until it ends.
 - `c.profile_slow_ms` compounds it: it profiles every tail-buffering
   execution from its first line and throws away the fast ones, so the
   profiler's stack table is held alongside the record buffer.
+- `c.failure_context` buffers sampled-out executions too, but a ring of
+  that many records each rather than all of them. If RSS climbed after
+  setting it, lower the count: it is a per-execution bound, so the
+  process-wide cost is that many records times the executions running
+  concurrently.
 
 **Fix.** Lower `tail_sample_slow_ms` so fewer executions qualify to be
 buffered, drop the highest-volume child types for tail-kept traffic with

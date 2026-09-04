@@ -12,6 +12,17 @@
   Payloads without the keys (enqueued before this change) deserialize to
   nil and fall back to local resolution as before.
 
+- `c.failure_context = 200` (`LANTERN_FAILURE_CONTEXT`) keeps a
+  head-sampled-out execution's last 200 child records in a ring and ships
+  them only if that execution reports an unhandled exception, so an
+  unsampled failure is diagnosable without enabling slow-request tail
+  sampling globally. Off (0) by default, which leaves the sampled-out path
+  building and buffering nothing exactly as before. `exceptions: 0`,
+  ignored and handled exceptions, `Lantern.pause`/`ignore`, and an
+  interactive `rails runner` never promote a ring; overflow is counted onto
+  the batch's dropped-record count; with `tail_sample_slow_ms` also set,
+  tail sampling's larger buffer wins.
+
 - A retained delivery batch gives up after `Reporter::MAX_RETRY_ATTEMPTS`
   (8) and is dropped and counted, so a batch that keeps failing cannot pin
   itself in memory while every newer record is discarded around it.

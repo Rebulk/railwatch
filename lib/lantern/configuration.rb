@@ -66,7 +66,7 @@ module Lantern
                   :beacon_enabled, :debug, :capture_default_vendor_commands,
                   :capture_default_vendor_cache_keys, :on_unrecoverable,
                   :capture_framework_events,
-                  :tail_sample_slow_ms, :propagate_traces, :trace_propagation_hosts,
+                  :tail_sample_slow_ms, :failure_context, :propagate_traces, :trace_propagation_hosts,
                   :health_interval, :capture_query_explain, :explain_threshold_ms,
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
@@ -120,6 +120,11 @@ module Lantern
       # Tail-based sampling: a head-sampled-out execution is still kept when
       # it ran at least this long, raised, or Lantern.keep! was called. nil = off.
       @tail_sample_slow_ms = ENV["LANTERN_TAIL_SAMPLE_SLOW_MS"]&.then { |v| Float(v) }
+      # Failure context: how many of a head-sampled-out execution's child
+      # records to hold in a ring so an unhandled exception can ship what led
+      # up to it. 0 = off, which is the default -- a sampled-out execution
+      # then builds and buffers nothing, exactly as before.
+      @failure_context = env_int("LANTERN_FAILURE_CONTEXT", 0)
       @propagate_traces = env_bool("LANTERN_PROPAGATE_TRACES", true)
       @trace_propagation_hosts = ENV["LANTERN_TRACE_PROPAGATION_HOSTS"]&.split(",")&.map(&:strip)
       @health_interval = env_float("LANTERN_HEALTH_INTERVAL", 15.0)

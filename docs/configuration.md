@@ -100,6 +100,58 @@ exactly the behaviour Lantern had before. `Lantern.keep!` can only keep
 records made *after* the call unless tail sampling was already on: what
 was never buffered can't be resurrected.
 
+### Failure context
+
+Tail sampling buys diagnosability for sampled-out executions with the
+memory to buffer *every* one of them. Failure context is the same trade
+on a much shorter leash: keep a bounded ring of a head-sampled-out
+execution's most recent child records, and ship it only if that
+execution reports an unhandled exception.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `failure_context` | `LANTERN_FAILURE_CONTEXT` | `0` (off) | How many child records a head-sampled-out execution keeps, so an unhandled exception can ship what led up to it. |
+
+```ruby
+c.sample = { requests: 0.05 }   # keep 5% of requests...
+c.failure_context = 200         # ...and the last 200 records of any that fails
+```
+
+With this set, a head-sampled-out request, job attempt, scheduled task,
+or command buffers its child records in a ring of that many. If it
+reports an unhandled exception — the same policy that decides whether
+the exception itself ships, i.e. subject to the `exceptions` rate — the
+ring is promoted, and the parent, the exception, and the retained
+children all ship together, with `tail_sampled: true` on the parent. If
+it completes normally the ring is discarded at the end and nothing ships,
+exactly as before.
+
+Nothing else promotes a ring. `exceptions: 0`, an exception in
+`ignored_exceptions`, an exception `Lantern.report`s as handled or that a
+controller's `rescue_from` swallowed, one reported inside
+`Lantern.ignore` / between `Lantern.pause` and `Lantern.resume`, and an
+interactive `bin/rails runner`'s error all leave the sampled-out
+execution shipping exactly what it shipped before the ring existed
+(nothing, or the lone parent record that gives an unhandled exception
+somewhere to hang). `Lantern.sample(1.0)` and `Lantern.keep!` still work
+from inside the execution, and now ship the ring's contents with it
+rather than only what followed the call.
+
+**The cost** is that a sampled-out execution builds and buffers child
+records again — the ring bounds how many are *kept*, not how many are
+built — so this is a fraction of what tail sampling costs, but it is not
+free, which is why it is off by default. There is no separate byte
+limit: every record type is already truncated where it is built (SQL at
+16 KB, exception messages at 4 KB, attributes at 200 bytes), so
+`failure_context` records is also the memory bound, and overflow
+increments the same dropped-record counter tail sampling uses, reported
+with the batch rather than swallowed.
+
+`failure_context` and `tail_sample_slow_ms` are independent. With both
+set, tail sampling's larger buffer wins for the whole execution: it keeps
+everything, up to `Execution::MAX_RECORDS`, and promotes on duration as
+well as on failure.
+
 ### Profiling
 
 Sampling and tail sampling say *which* executions ship; profiling says

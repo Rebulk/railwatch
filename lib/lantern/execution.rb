@@ -19,6 +19,12 @@ module Lantern
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
                   :queue_latency, :drift, :exception_sampled, :parent_execution
+    # Set by Subscribers::Exceptions.capture at the moment it actually writes
+    # an unhandled exception for this execution -- not when it rolls the
+    # exceptions sample -- so it is the one signal that promotes a
+    # failure-context ring. Left uninitialized (nil) like the pairs below:
+    # an execution that never fails must not pay a write for one that does.
+    attr_accessor :exception_reported
     # Set only when this execution started the process-global sampling
     # profiler (Lantern.start_profile): the backend handle, plus whether the
     # head profile_sample roll -- rather than profile_slow_ms -- is what
@@ -82,6 +88,17 @@ module Lantern
       # execution so the ship/discard decision can be made at the end. Read
       # once here rather than per record: recording? is on the hot path.
       @tail_buffering = !Lantern.config.tail_sample_slow_ms.nil?
+      # Failure context is the same mechanism on a shorter leash: with tail
+      # sampling off, a head-sampled-out execution still buffers its last
+      # config.failure_context child records in a ring, and only an unhandled
+      # exception promotes them (Lantern.tail_keep?). Skipped when tail
+      # sampling is already buffering everything -- the larger buffer wins --
+      # and when the head kept this execution, which buffers everything
+      # anyway. Off by default, so a sampled-out execution stays as cheap as
+      # it has always been.
+      @failure_context = !sampled && !@tail_buffering && Lantern.config.failure_context.positive?
+      @tail_buffering ||= @failure_context
+      @record_limit = @failure_context ? Lantern.config.failure_context : MAX_RECORDS
       @transaction_statement_counts = Hash.new(0)
       @allocations_start = GC.stat(:total_allocated_objects)
       @gc_time_start = GC.stat(:time) if GC.stat.key?(:time)
@@ -104,12 +121,22 @@ module Lantern
     def keep!
       @keep = true
       @tail_buffering = true
+      # Whatever the ring already dropped is gone, but a kept execution ships
+      # its whole tree, so from here on it buffers like any other.
+      @failure_context = false
+      @record_limit = MAX_RECORDS
     end
 
     # Whether child records are buffered even when the head decision sampled
     # this execution out, so finish_execution can still decide to ship them.
     def tail_buffering?
       @tail_buffering
+    end
+
+    # Whether that buffer is a failure-context ring (bounded, promoted only
+    # by an unhandled exception) rather than a full tail-sampling buffer.
+    def failure_context?
+      @failure_context
     end
 
     def stage
@@ -138,11 +165,16 @@ module Lantern
     # decision made late (route-level lantern_sample, dont_sample) still
     # applies to everything recorded before it.
     def buffer(record)
-      if @records.size >= MAX_RECORDS
+      if @records.size >= @record_limit
         @dropped_records += 1
-      else
-        @records << record
+        # A failure-context ring keeps the LAST record_limit records: the
+        # ones just before the exception are the ones worth having. Every
+        # other buffer keeps the earliest and drops the overflow. Either way
+        # the loss is counted onto the parent's batch (Lantern.finish_execution).
+        return unless @failure_context
+        @records.shift
       end
+      @records << record
     end
 
     # Resident set size in bytes, Linux only. Reading /proc costs ~14µs, so
