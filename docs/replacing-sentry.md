@@ -82,6 +82,9 @@ Lantern.configure do |c|
                scheduled_tasks: 1.0, exceptions: 1.0 }
   # ...but keep every slow or failing request regardless
   c.tail_sample_slow_ms = 500
+  # ...or, for failures only and a fraction of the memory: the last 200
+  # child records of any sampled-out execution that raises
+  c.failure_context = 200
 
   # was excluded_exceptions: [...] (the Sentry defaults are already here)
   c.ignored_exceptions += %w[MyApp::Expected]

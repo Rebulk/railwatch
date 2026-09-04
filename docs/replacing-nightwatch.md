@@ -126,6 +126,16 @@ per execution) instead of discarding them as they happen. With it off —
 the default — nothing is built or buffered for a sampled-out execution
 at all.
 
+**And failure context.** Nightwatch, like Lantern before this, ships an
+unsampled execution's unhandled exception with its parent record and
+nothing else: no queries, logs or outgoing requests from the moments
+before it. Set `c.failure_context = 200` and a head-sampled-out
+execution keeps its last 200 child records in a ring, shipping them only
+if it reports an unhandled exception. It is the failure half of tail
+sampling without the memory bill of keeping every sampled-out execution
+alive; the two are independent, and tail sampling's larger buffer wins if
+both are set. See `docs/configuration.md`.
+
 ## Facade parity
 
 Same facade, Ruby names:

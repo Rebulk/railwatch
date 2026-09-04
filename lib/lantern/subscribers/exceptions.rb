@@ -142,6 +142,12 @@ module Lantern
         if handled
           Lantern.record(:exception, group: group, **rec)
         else
+          # The one signal that promotes a failure-context ring, set here --
+          # where the exception is actually written -- rather than where the
+          # exceptions sample was rolled above, so an exception dropped on
+          # the way to this line never ships a sampled-out execution's
+          # children (Lantern.tail_keep?).
+          exe.exception_reported = true if exe
           Lantern.record_now(:exception, group: group, **rec)
         end
       end
