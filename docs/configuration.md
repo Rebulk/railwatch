@@ -292,21 +292,32 @@ database.
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
 | `timeout` | `LANTERN_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
-| `shutdown_timeout` | `LANTERN_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | How long `at_exit` waits for the reporter thread to join before force-flushing anyway. This is the number a Kamal `drain_timeout` needs to clear — see `lantern-cloud/config/deploy.yml`'s own comment on this. |
+| `shutdown_timeout` | `LANTERN_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. This is the number a Kamal `drain_timeout` needs to clear — see `lantern-cloud/config/deploy.yml`'s own comment on this. |
 
 Delivery (`Lantern::Transport::Http`, `lib/lantern/transport/http.rb`):
 gzip NDJSON POST to `{ingest_url}/ingest`, one retry on a raised error or
-a 5xx, then the batch is dropped. A 401 marks the transport permanently
-unauthorized (no further flush attempts for the process's lifetime); a
-402 (quota exceeded) backs off for 60 seconds before the next attempt.
-Delivery never raises into app code.
+a 5xx within each delivery attempt. If that still fails — or ingest returns
+402, 408, or 429 — the batch and its prior drop count are restored to the
+bounded buffer. The reporter retries with jittered exponential backoff
+(one second up to 60 seconds); it does not busy-loop. Records written while
+a request is in flight join the same bounded queue, and the oldest records
+still lose first under sustained pressure. A 401 marks the transport
+permanently unauthorized (no further HTTP attempts for the process's
+lifetime); it and other permanent client rejections are reported through
+`on_unrecoverable`. Delivery never raises into app code.
 
 `Lantern.flush` forces an immediate flush (also called by the `command`
 patches after a rake task/runner invocation finishes, so short-lived
-processes don't lose their last batch to the flush interval). An
-unhandled exception bypasses the buffer entirely (`Lantern.record_now` →
-`Reporter#write_now`) so a crashing process still reports even if it
-never reaches a normal flush.
+processes don't lose their last batch to the flush interval). An unhandled
+exception (`Lantern.record_now` → `Reporter#write_now`) enqueues and wakes
+the reporter immediately; it never performs network I/O or a timeout cycle
+on the application thread.
+
+During shutdown the reporter immediately attempts any retained batch and
+keeps retrying within `shutdown_timeout`. If the deadline expires, the batch
+remains accounted for in memory and `on_unrecoverable` receives the unsent
+record/drop counts. The buffer is deliberately memory-only: a hard kill or
+process exit after that deadline cannot preserve records for the next boot.
 
 ## Query and view thresholds
 
@@ -601,11 +612,12 @@ when Lantern is disabled or the payload is empty.
 Lantern.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 ```
 
-Called whenever Lantern rescues one of its own internal errors — a
-subscriber block raising, or delivery failing after its retry. With no
-callback registered, falls back to `Lantern.debug` (stderr, gated on
-`LANTERN_DEBUG`, never `Rails.logger` — so gem-internal failures can
-never themselves become `log` records).
+Called whenever Lantern rescues one of its own internal errors, ingest
+permanently rejects a batch, or shutdown expires with retained records that
+could not be sent. Retryable delivery failures stay buffered and do not fire
+the callback on every attempt. With no callback registered, this falls back
+to `Lantern.debug` (stderr, gated on `LANTERN_DEBUG`, never `Rails.logger` —
+so gem-internal failures can never themselves become `log` records).
 
 ## Faraday
 
