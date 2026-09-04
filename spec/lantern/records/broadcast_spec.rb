@@ -56,6 +56,24 @@ RSpec.describe "broadcast record" do
       action_rec = lantern_records(:broadcast).find { |r| r[:kind] == "perform_action" }
       expect(action_rec[:channel]).to eq("WidgetChannel")
       expect(action_rec[:action]).to eq("follow")
+      expect(action_rec[:failed]).to be(false)
+    end
+
+    # Action Cable's worker rescues and logs a channel action that raises; it
+    # never reaches Rails.error or a Rack middleware. Sentry reported these
+    # through its own cable hook, so parity means catching them here.
+    it "reports an exception raised inside a channel action as an unhandled application.action_cable error" do
+      Lantern.start_execution(source: :command, sample_kind: :commands)
+      subscribe
+      expect { perform :explode }.to raise_error(RuntimeError, "channel action failed")
+      finish!
+
+      ex = lantern_records(:exception).sole
+      expect(ex[:class]).to eq("RuntimeError")
+      expect(ex[:handled]).to be(false)
+      expect(ex[:source]).to eq("application.action_cable")
+      expect(JSON.parse(ex[:context])).to include("channel" => "WidgetChannel", "action" => "explode")
+      expect(lantern_records(:broadcast).find { |r| r[:kind] == "perform_action" }[:failed]).to be(true)
     end
   end
 end

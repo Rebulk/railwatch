@@ -6,4 +6,8 @@ class WidgetChannel < ActionCable::Channel::Base
   def follow(data)
     transmit({ status: "following", id: data["id"] })
   end
+
+  def explode(_data)
+    raise "channel action failed"
+  end
 end

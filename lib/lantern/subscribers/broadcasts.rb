@@ -35,11 +35,20 @@ module Lantern
         end
 
         subscribe("perform_action.action_cable") do |event|
-          next unless recording?
           p = event.payload
+          # A channel action that raises is logged by Action Cable's worker and
+          # never reaches Rails.error or a Rack middleware, so this is the only
+          # place it can be reported. Notifications hands the raised error over
+          # as :exception_object, the same way perform.active_job does.
+          if p[:exception_object]
+            Exceptions.capture(p[:exception_object], handled: false, severity: :error,
+                               source: "application.action_cable",
+                               context: { channel: p[:channel_class].to_s, action: p[:action].to_s })
+          end
+          next unless recording?
           Lantern.record(:broadcast, group: Record.group_hash(p[:channel_class].to_s, p[:action].to_s),
                          timestamp: started_at(event), kind: "perform_action", channel: p[:channel_class].to_s,
-                         action: p[:action].to_s, duration: micros(event))
+                         action: p[:action].to_s, duration: micros(event), failed: p[:exception_object] ? true : false)
         end
       end
 

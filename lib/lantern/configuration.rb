@@ -64,7 +64,11 @@ module Lantern
       @token = ENV["LANTERN_TOKEN"]
       @ingest_url = ENV.fetch("LANTERN_INGEST_URL", "https://lantern.rebulk.com")
       @deploy = ENV["LANTERN_DEPLOY"] || ENV["KAMAL_VERSION"] || ENV["GIT_REV"]
-      @server = ENV["LANTERN_SERVER"] || Socket.gethostname
+      # Kamal names the container after the host plus a container id, so a
+      # bare hostname changes on every deploy and never matches the host the
+      # post-deploy hook registers as expected. KAMAL_HOST, which Kamal sets
+      # in every container it starts, is that host.
+      @server = ENV["LANTERN_SERVER"] || ENV["KAMAL_HOST"] || Socket.gethostname
       @environment = nil # resolved lazily from Rails.env
       @sample = {
         requests: env_float("LANTERN_REQUEST_SAMPLE_RATE", 1.0),

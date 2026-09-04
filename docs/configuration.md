@@ -14,7 +14,7 @@ win over the env var.
 | `token` | `LANTERN_TOKEN` | nil | Bearer token for `/ingest`. Required. |
 | `ingest_url` | `LANTERN_INGEST_URL` | `https://lantern.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
 | `deploy` | `LANTERN_DEPLOY` | `KAMAL_VERSION`, then `GIT_REV`, then nil | Version tag stamped on every record and used by `lantern:deploy`. |
-| `server` | `LANTERN_SERVER` | `Socket.gethostname` | Hostname stamped on every record. |
+| `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
 
 `Lantern.enabled?` delegates to `config.enabled?`, which is `@enabled &&

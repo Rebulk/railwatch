@@ -231,7 +231,7 @@ it never reaches the point where buffered records would flush.
 | `message` | Truncated to 4096 chars. |
 | `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
 | `severity` | `:error`/`:warning`/etc., as a string. |
-| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"lantern.middleware"`, `"action_controller.rescue_from"`. |
+| `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"application.action_cable"` (a channel action that raised), `"lantern.middleware"`, `"action_controller.rescue_from"`. |
 | `file` / `line` | Top in-app backtrace frame. |
 | `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. |
 | `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
@@ -325,6 +325,7 @@ and `inertia_cable` since both go through `broadcast.action_cable`
 | `channel` | transmit, perform_action | Channel class name. |
 | `via` | transmit | How the transmit happened (`payload[:via]`), truncated to 255 chars. |
 | `action` | perform_action | Channel action name. |
+| `failed` | perform_action | `true` when the action raised; the exception itself is reported separately with source `"application.action_cable"`. |
 | `duration` | all | Microseconds. |
 
 ### `notification`

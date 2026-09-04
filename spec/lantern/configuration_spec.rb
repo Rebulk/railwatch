@@ -18,7 +18,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_ENABLED" => [ :enabled, "0", false, true ],
       "LANTERN_TOKEN" => [ :token, "abc123", "abc123", nil ],
       "LANTERN_INGEST_URL" => [ :ingest_url, "https://custom.example", "https://custom.example", "https://lantern.rebulk.com" ],
-      "LANTERN_SERVER" => [ :server, "web-1", "web-1", Socket.gethostname ],
+      "LANTERN_SERVER" => [ :server, "web-1", "web-1", ENV["KAMAL_HOST"] || Socket.gethostname ],
       "LANTERN_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
       "LANTERN_CAPTURE_REQUEST_PAYLOAD" => [ :capture_request_payload, "1", true, false ],
       "LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE" => [ :capture_exception_source, "0", false, true ],
@@ -191,6 +191,28 @@ RSpec.describe Lantern::Configuration do
     it "uses a Regexp pattern as-is" do
       expect(described_class.match_cache_key?(/\Aflipper\//, "flipper/feature")).to be(true)
       expect(described_class.match_cache_key?(/\Aflipper\//, "not_flipper/feature")).to be(false)
+    end
+  end
+end
+
+RSpec.describe Lantern::Configuration, "server under Kamal" do
+  def with_env(pairs)
+    saved = pairs.keys.to_h { |k| [ k, ENV[k] ] }
+    pairs.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+    yield
+  ensure
+    saved.each { |k, v| v.nil? ? ENV.delete(k) : ENV[k] = v }
+  end
+
+  it "stamps records with the Kamal host rather than the per-deploy container hostname" do
+    with_env("KAMAL_HOST" => "5.78.218.245", "LANTERN_SERVER" => nil) do
+      expect(described_class.new.server).to eq("5.78.218.245")
+    end
+  end
+
+  it "still lets LANTERN_SERVER override the Kamal host" do
+    with_env("KAMAL_HOST" => "5.78.218.245", "LANTERN_SERVER" => "web-1") do
+      expect(described_class.new.server).to eq("web-1")
     end
   end
 end
