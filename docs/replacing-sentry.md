@@ -442,6 +442,50 @@ fallback instead of a blank screen. Everything passed as `reportError`'s
 second argument lands in the exception's `context` on the issue page,
 flattened to strings.
 
+## 12. Console and runner sessions
+
+Sentry never hooked `bin/rails console`: sentry-rails has no console railtie
+block, so an engineer's typo at a production prompt was never an issue.
+Lantern subscribes to far more than Sentry did — every query, every log line,
+`Rails.error` — and starts reporter/health/session threads at boot, so it has
+to say this out loud rather than inherit it by accident. It does: a console
+process **captures nothing, starts no thread, and sends no `process` or
+`health` record**. Turn that off with `c.capture_console = true`
+(`LANTERN_CAPTURE_CONSOLE=1`) when you actually want to trace a console
+session.
+
+`bin/rails runner` is the case that needs a rule rather than a switch.
+sentry-rails installs an `at_exit` hook for every runner process and reports
+whatever killed it, tagged `source: "runner"`. That is right for a *deployed*
+script and wrong for a *typed* one — and on this app the typed ones dominated:
+four of fifteen unresolved issues were a human poking at production (a
+misspelled attribute, a tenant slug that did not exist, an `unless … next`
+that did not parse). So the filter is **not** "source == runner", which would
+silence exactly the runner errors worth waking up for. The line is where the
+code came from, and the argument says it:
+
+| Invocation | railties runs | Treated as | Reported? |
+|---|---|---|---|
+| `rails runner -` | `eval($stdin.read, …, "stdin")` | interactive | no |
+| `rails runner 'Some.code'` | `eval(code_or_file, …)` | interactive | no |
+| `rails runner /tmp/probe.rb` | `Kernel.load` | interactive (scratch path) | no |
+| `rails runner script/nightly.rb` | `Kernel.load` | deployed | **yes** |
+
+Anything that is not a `.rb` file was typed. A `.rb` file is deployed unless
+it sits under `config.interactive_runner_paths` (`/tmp/`, `/var/tmp/`) —
+deliberately two literal temp roots rather than "outside `Rails.root`",
+because a scheduled script going silent is the failure this must never cause.
+Rake tasks, Solid Queue jobs, and recurring tasks are never interactive.
+
+An interactive run is still *recorded*: its `command` record ships with
+`interactive: true`, the `exit_code`, the duration, and the
+`exception_preview`, so the run is visible on the platform without opening an
+issue. Only the exception is withheld.
+
+If your app carried an app-side version of this (a `Lantern.before_ingest`
+hook matching `rails runner …` previews, or `sentry_runner_noise.rb` under
+`before_send`), delete it — this is the gem's job now.
+
 ## What Lantern does that Sentry doesn't
 
 | | |

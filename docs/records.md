@@ -155,6 +155,7 @@ vs `#execute`). `db:migrate` and other tasks in
 | `name` | Task name, or `"runner"`. |
 | `command` | Full invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`. |
 | `exit_code` | 0 on success, `SystemExit`'s status, or 1 on an unhandled exception, clamped to 0-255. |
+| `interactive` | `true` on a `bin/rails runner` an engineer typed or piped (`-`, inline code, or a `.rb` file under `config.interactive_runner_paths`); absent otherwise. Such a run ships this record — with its `exit_code` and `exception_preview` — but its exception is not reported. A deployed script (`rails runner script/nightly.rb`), a rake task, and a job are never interactive. See [Console and runner sessions](replacing-sentry.md#console-and-runner-sessions). |
 
 ## Child records
 

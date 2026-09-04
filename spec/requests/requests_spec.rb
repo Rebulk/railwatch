@@ -38,6 +38,34 @@ RSpec.describe "request instrumentation", type: :request do
     Lantern.config.n_plus_one_threshold = 5
   end
 
+  # activerecord-tenanted's TenantSelector (and any around_action) binds the
+  # tenant INSIDE the controller stack, after Lantern's Rack middleware has
+  # already opened the execution. rebulk-system's first production hour
+  # shipped 2,900 requests with no tenant on any of them because of this.
+  it "stamps the tenant bound during the request onto the request record and its children" do
+    tenant_record = Class.new do
+      class << self
+        attr_accessor :current_tenant
+      end
+    end
+    stub_const("TenantRecord", tenant_record)
+    allow_any_instance_of(WidgetsController).to receive(:index).and_wrap_original do |m, *args|
+      TenantRecord.current_tenant = "acme"
+      m.call(*args)
+    ensure
+      TenantRecord.current_tenant = nil
+    end
+
+    get "/widgets"
+
+    expect(lantern_records(:request).sole[:tenant]).to eq("acme")
+    before_bind, after_bind = lantern_records(:query).partition { |q| q[:sql].include?("users") }
+    # The dummy app's before_action loads the user before the tenant is bound.
+    expect(before_bind.map { |q| q[:tenant] }).to eq([ nil ])
+    expect(after_bind.size).to be >= 2
+    expect(after_bind).to all(include(tenant: "acme"))
+  end
+
   it "captures an unhandled exception with frames and marks the request 500" do
     get "/boom"
     expect(response).to have_http_status(:internal_server_error)

@@ -35,6 +35,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_EXPLAIN_THRESHOLD_MS" => [ :explain_threshold_ms, "250.0", 250.0, 100.0 ],
       "LANTERN_CAPTURE_RESCUED_EXCEPTIONS" => [ :capture_rescued_exceptions, "0", false, true ],
       "LANTERN_BEACON" => [ :beacon_enabled, "0", false, true ],
+      "LANTERN_CAPTURE_CONSOLE" => [ :capture_console, "1", true, false ],
       "LANTERN_DEBUG" => [ :debug, "1", true, false ]
     }.each do |env_key, (attr, raw, expected, default)|
       it "maps #{env_key} to config.#{attr}, defaulting to #{default.inspect}" do
@@ -123,6 +124,22 @@ RSpec.describe Lantern::Configuration do
     it "splits LANTERN_IGNORED_EXCEPTIONS on commas, replacing the default list" do
       with_env("LANTERN_IGNORED_EXCEPTIONS" => "Foo::Bar, Baz") do |config|
         expect(config.ignored_exceptions).to eq(%w[Foo::Bar Baz])
+      end
+    end
+  end
+
+  describe "interactive_runner_paths" do
+    it "defaults to the two scratch roots, as a mutable copy" do
+      with_env("LANTERN_INTERACTIVE_RUNNER_PATHS" => nil) do |config|
+        expect(config.interactive_runner_paths).to eq(%w[/tmp/ /var/tmp/])
+        config.interactive_runner_paths << "/scratch/"
+        expect(described_class::DEFAULT_INTERACTIVE_RUNNER_PATHS).not_to include("/scratch/")
+      end
+    end
+
+    it "splits LANTERN_INTERACTIVE_RUNNER_PATHS on commas, replacing the default list" do
+      with_env("LANTERN_INTERACTIVE_RUNNER_PATHS" => "/scratch/, /var/tmp/") do |config|
+        expect(config.interactive_runner_paths).to eq(%w[/scratch/ /var/tmp/])
       end
     end
   end

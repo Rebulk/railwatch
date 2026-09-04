@@ -31,6 +31,12 @@ module Lantern
     # and whether an unhandled exception escaped it. Left uninitialized for
     # the same reason as the profiler pair above.
     attr_accessor :session_key, :session_crashed
+    # Set only by Lantern::Patches::RunnerCommand, for a `rails runner` an
+    # engineer typed or piped: the execution is still recorded, but its
+    # exceptions are a shell session's, not the application's, so nothing
+    # reports them (Subscribers::Exceptions.capture). Left uninitialized like
+    # the pairs above -- a request must not pay an ivar write for this.
+    attr_accessor :interactive
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)
@@ -197,7 +203,19 @@ module Lantern
 
     # The envelope every child record shares with its parent. Rebuilt only
     # when a stage, user, tenant, or preview changes; records merge a copy.
+    #
+    # The app's tenant is usually bound INSIDE the execution -- a middleware
+    # nested under Lantern's (activerecord-tenanted's TenantSelector), an
+    # around_action, a job's with_tenant block -- so it was nil when the
+    # execution opened. While it is still nil, every envelope read asks the
+    # app again (two constant checks and a thread-local read) so the first
+    # record after the bind, and everything after it including the parent,
+    # carries the tenant.
     def envelope
+      if @tenant.nil? && (bound = Context.current_tenant)
+        @tenant = bound
+        @envelope = nil
+      end
       @envelope ||= {
         trace_id: @trace_id,
         execution_source: @source.name,

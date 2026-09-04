@@ -241,6 +241,12 @@ RSpec.describe "lantern rake tasks" do
       Lantern.config.ignore = []
     end
 
+    it "reports whether a console is captured and which runner paths count as scratch" do
+      output, = run_doctor
+
+      expect(output).to include("✓ interactive sessions: console=quiet runner scratch paths=/tmp/ /var/tmp/")
+    end
+
     it "names the profiler backend the app has installed" do
       output, = run_doctor
 

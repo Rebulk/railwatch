@@ -40,11 +40,16 @@ RSpec.describe "command record" do
       expect(cmd[:exit_code]).to eq(0)
     end
 
-    it "reports exit_code 1 and captures the exception when the evaluated code raises" do
+    # Inline code is typed by a human, so the record is marked interactive and
+    # the exception is not reported -- see spec/lantern/patches/runner_command_spec.rb
+    # for the four shapes and the deployed script that still reports.
+    it "reports exit_code 1 and marks a typed one-liner interactive when the evaluated code raises" do
       expect { Rails::Command::RunnerCommand.new([]).perform("raise 'kaboom_runner'") }.to raise_error("kaboom_runner")
 
-      expect(lantern_records(:command).sole[:exit_code]).to eq(1)
-      expect(lantern_records(:exception).sole[:message]).to eq("kaboom_runner")
+      cmd = lantern_records(:command).sole
+      expect(cmd[:exit_code]).to eq(1)
+      expect(cmd[:interactive]).to be(true)
+      expect(lantern_records(:exception)).to be_empty
     end
   end
 end

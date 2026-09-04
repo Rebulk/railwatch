@@ -371,6 +371,32 @@ dominated by Rails' own housekeeping:
 `Lantern.reject_cache_keys` above) is separate from these vendor
 defaults and always applies.
 
+## Interactive sessions: console and runner
+
+An engineer poking at production from a shell is not the application failing.
+Sentry never hooked `bin/rails console` at all, and Lantern keeps that
+behaviour — while making sure a deployed script still reports.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `capture_console` | `LANTERN_CAPTURE_CONSOLE` | `false` | When `false`, a `bin/rails console` process captures nothing — no exceptions, queries, or logs — starts no reporter/health/session thread, and sends no `process` or `health` record. Set it to `true` for the rare "trace what I'm about to do in here" session. Detected from `Rails::Console`, which railties defines before the app boots (`lib/lantern/console.rb`). |
+| `interactive_runner_paths` | `LANTERN_INTERACTIVE_RUNNER_PATHS` (comma-separated) | `Configuration::DEFAULT_INTERACTIVE_RUNNER_PATHS`: `/tmp/`, `/var/tmp/` | Scratch roots. A `bin/rails runner` given a `.rb` file under one of these is treated as hand-written (typed in a shell inside a container) rather than deployed. |
+
+`bin/rails runner` is classified by **where the code came from**, which is
+the only thing that separates a typo from a cron job:
+
+| Invocation | Treated as | Result |
+|---|---|---|
+| `rails runner -` | interactive | `command` record with `interactive: true`, no exception reported |
+| `rails runner 'Some.code'` | interactive | same |
+| `rails runner /tmp/probe.rb` | interactive | same (a `.rb` file under `interactive_runner_paths`) |
+| `rails runner script/nightly.rb` | deployed | `command` record and the exception, as before |
+
+An interactive run is still recorded: the `command` record ships with its
+`exit_code`, duration, and `exception_preview`, so you can see that someone
+ran something and that it died — it just doesn't open an issue. Rake tasks
+and Solid Queue jobs are never interactive.
+
 ## Exception source and request payload
 
 | Attribute | Env var | Default | Meaning |
@@ -438,7 +464,12 @@ record's `context` field (truncated at 64KB). `tenant` specifically is
 auto-detected with no explicit `Lantern.context` call needed when the app
 uses `activerecord-tenanted` (`ActiveRecord::Base.current_tenant`) or
 `TenantRecord` (`TenantRecord.current_tenant`) — `Context.current_tenant`
-checks both.
+checks both. The tenant is re-read while it is still nil, so a tenant bound
+*inside* the execution (activerecord-tenanted's `TenantSelector` middleware
+sits under Lantern's, as do `around_action`s and a job's `with_tenant`
+block) still lands on the request/job record and every child made after
+the bind. Records made before the bind (a `before_action` that loads the
+user, say) keep `tenant: nil`.
 
 ## Inertia: beacon and SSR
 
