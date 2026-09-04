@@ -275,7 +275,8 @@ the `retry_stopped`/`discard` subscriptions in
 #### Browser errors (`source: "browser"`)
 
 Every JavaScript error the browser client catches — `window.onerror`,
-unhandled promise rejections, Inertia's `exception` and `invalid` events,
+unhandled promise rejections, Inertia's failed-request events (`exception`
+and `invalid` on Inertia 2, `networkError` and `httpException` on 3),
 and anything the app reports itself with `reportError` — arrives on the
 same beacon as visits (`POST /lantern/beacon`, 50 errors per beacon at
 most) and is recorded as an ordinary `exception`: `source: "browser"`,

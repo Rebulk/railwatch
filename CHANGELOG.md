@@ -3,8 +3,9 @@
 ## 0.1.0 (unreleased)
 
 - Browser JavaScript errors. The Inertia browser client now captures
-  uncaught errors, unhandled promise rejections, and Inertia's `exception`
-  and `invalid` events, batches them onto the existing beacon, and the
+  uncaught errors, unhandled promise rejections, and Inertia's failed-request
+  events (`exception`/`invalid` on Inertia 2, `networkError`/`httpException`
+  on Inertia 3), batches them onto the existing beacon, and the
   beacon controller records each as an `exception` with `source: "browser"`
   — stack parsed into the same `{file, line, function, in_app}` frames a
   Ruby backtrace produces, and the same default fingerprint, so a browser

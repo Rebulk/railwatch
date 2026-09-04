@@ -323,12 +323,16 @@ function stringify(value: unknown) {
   }
 }
 
-// Every route a JavaScript error can take to get here. Inertia's `exception`
-// event carries anything the request itself threw -- a dropped connection
-// arrives as an axios "Network Error" here, since Inertia has no separate
-// networkError event -- and `invalid` fires when the server answered with
-// something that was not an Inertia response at all: a 403 page from an
-// authorization filter, a login redirect, an error page from a proxy.
+// Every route a JavaScript error can take to get here. A failed Inertia
+// request has two: the request itself threw (a dropped connection arrives
+// as an axios "Network Error"), or the server answered with something that
+// was not an Inertia response at all -- a 403 page from an authorization
+// filter, a login redirect, an error page from a proxy. Inertia 2 calls
+// those `exception` and `invalid`; Inertia 3 renamed them `networkError`
+// and `httpException`. Both versions dispatch every router event as a
+// CustomEvent "inertia:<name>" on document, so listening there for all
+// four names works on either without the typed router.on, whose event map
+// only knows its own version's names.
 function startErrorCapture() {
   window.addEventListener("error", (event) => {
     // Neither an error object nor a message means there is nothing to
@@ -339,12 +343,22 @@ function startErrorCapture() {
   window.addEventListener("unhandledrejection", (event) => {
     captureValue(event.reason as unknown, "UnhandledRejection")
   })
-  router.on("exception", (event) => {
-    captureValue(event.detail.exception, "InertiaException")
+  onInertia("exception", (detail) => captureValue(detail.exception, "InertiaException"))
+  onInertia("networkError", (detail) => captureValue(detail.error, "InertiaException"))
+  onInertia("invalid", (detail) => captureInvalidResponse(detail.response))
+  onInertia("httpException", (detail) => captureInvalidResponse(detail.response))
+}
+
+function onInertia(name: string, handler: (detail: Record<string, unknown>) => void) {
+  document.addEventListener(`inertia:${name}`, (event) => {
+    const detail = (event as CustomEvent<unknown>).detail
+    handler(typeof detail === "object" && detail !== null ? (detail as Record<string, unknown>) : {})
   })
-  router.on("invalid", (event) => {
-    capture("InertiaInvalidResponse", `Inertia invalid response (${event.detail.response.status})`)
-  })
+}
+
+function captureInvalidResponse(response: unknown) {
+  const status = (response as { status?: unknown } | undefined)?.status
+  capture("InertiaInvalidResponse", `Inertia invalid response (${typeof status === "number" ? status : "unknown status"})`)
 }
 
 // --- Core Web Vitals ---------------------------------------------------

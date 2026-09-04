@@ -124,7 +124,8 @@ startLantern()
 ```
 
 Errors ride the same beacon as visit timing — uncaught errors, unhandled
-promise rejections, and Inertia's own `exception` and `invalid` events —
+promise rejections, and Inertia's own failed-request events (`exception`
+and `invalid` on Inertia 2, `networkError` and `httpException` on 3) —
 and land as ordinary issues next to your Ruby ones.
 
 If you have React error boundaries, add one more line where the root is

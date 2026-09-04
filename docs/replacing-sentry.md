@@ -374,11 +374,11 @@ startLantern({
 ### What is and is not captured
 
 Captured: uncaught errors (`window.onerror` / the `error` event),
-unhandled promise rejections, Inertia's `exception` event (which is where
-a dropped connection lands — Inertia has no separate `networkError`
-event, an axios `Network Error` is an `exception`), Inertia's `invalid`
-event (the server answered a visit with something that was not an Inertia
-response — a 403 page, a login redirect, a proxy error page), and
+unhandled promise rejections, Inertia's request-failed event (`exception`
+on Inertia 2, `networkError` on Inertia 3 — where a dropped connection
+lands as an axios `Network Error`), Inertia's non-Inertia-response event
+(`invalid` on Inertia 2, `httpException` on Inertia 3 — the server answered
+a visit with a 403 page, a login redirect, a proxy error page), and
 anything the app hands to `reportError`.
 
 Not captured: browser traces and session replay; failed resource loads
