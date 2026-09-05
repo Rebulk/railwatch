@@ -26,11 +26,13 @@ module Lantern
           @headers = headers
           @context_snapshot = context_snapshot
           @origin_thread = Thread.current
+          @origin_context = ActiveSupport::IsolatedExecutionState.context
           @completion_mutex = Mutex.new
           @active_consumptions = 0
           @close_started = false
           @close_finished = false
           @finalization_claimed = false
+          @cross_thread_profile_stopped = false
           @preserving = nil
           @finish_context = nil
         end
@@ -85,6 +87,13 @@ module Lantern
           consume { @body.__send__(:to_ary, *args, &block) }
         end
 
+        def consume_stream(stream)
+          downstream_error = nil
+          capture_error = ->(error) { !EnumerableResponseBody::IDENTICAL.bind_call(error, downstream_error) }
+          proxy = DownstreamStream.new(stream, ->(error) { downstream_error = error })
+          consume(capture_error: capture_error) { yield proxy }
+        end
+
         def complete(preserving: nil, consumption_finished: false)
           close_owner = false
           should_finalize = false
@@ -137,13 +146,23 @@ module Lantern
         end
 
         def with_request_state(&block)
+          stop_cross_thread_profile unless Thread.current.equal?(@origin_thread)
           Current.with(@execution) do
-            if Thread.current.equal?(@origin_thread)
+            if ActiveSupport::IsolatedExecutionState.context.equal?(@origin_context)
               block.call
             else
               Context.with(@context_snapshot, &block)
             end
           end
+        end
+
+        def stop_cross_thread_profile
+          should_stop = @completion_mutex.synchronize do
+            next false if @cross_thread_profile_stopped
+
+            @cross_thread_profile_stopped = true
+          end
+          Lantern.discard_execution(@execution) if should_stop
         end
 
         def capture(error)
@@ -178,8 +197,34 @@ module Lantern
 
       class StreamingResponseBody < ResponseBody
         def call(stream)
-          consume { @body.call(stream) }
+          consume_stream(stream) { |proxy| @body.call(proxy) }
         end
+      end
+
+      # Identifies the exact exception raised by the downstream connection.
+      # Streaming bodies write to an IO rather than yielding chunks, so there
+      # is otherwise no boundary that distinguishes an application failure
+      # from an EPIPE/IOError raised while sending to a disconnected client.
+      class DownstreamStream
+        def initialize(stream, on_error)
+          @stream = stream
+          @on_error = on_error
+        end
+
+        def respond_to_missing?(method_name, include_all = false)
+          @stream.respond_to?(method_name, include_all) || super
+        end
+
+        def method_missing(method_name, *args, &block)
+          result = @stream.__send__(method_name, *args, &block)
+          # IO#<< returns the receiver. Keep chained writes on this proxy so
+          # a later chunk's disconnect is identified at the same boundary.
+          result.equal?(@stream) && method_name == :<< ? self : result
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          @on_error.call(e)
+          raise
+        end
+        ruby2_keywords(:method_missing) if respond_to?(:ruby2_keywords, true) # :nocov:
       end
 
       class HijackCallback
@@ -188,8 +233,8 @@ module Lantern
           @lifecycle = lifecycle
         end
 
-        def call(*args, &block)
-          @lifecycle.__send__(:consume) { @callback.call(*args, &block) }
+        def call(stream, *args, &block)
+          @lifecycle.__send__(:consume_stream, stream) { |proxy| @callback.call(proxy, *args, &block) }
         end
         ruby2_keywords(:call) if respond_to?(:ruby2_keywords, true) # :nocov:
       end
@@ -261,9 +306,14 @@ module Lantern
           begin
             if (hijack = headers && headers["rack.hijack"])
               context_snapshot = streaming_context(env, exe)
-              lifecycle = ResponseBody.new(body, self, env, exe, status, headers, context_snapshot)
+              lifecycle = response_body(body, env, exe, status, headers, context_snapshot)
               headers = headers.dup
               headers["rack.hijack"] = HijackCallback.new(hijack, lifecycle)
+              # Rack servers ignore the body after a partial hijack, but they
+              # must still close it. Return the shared lifecycle wrapper so a
+              # disconnect while sending headers (before callback invocation)
+              # cannot strand the request execution or process-global profile.
+              body = lifecycle
             # A literal Array is already materialized and has no close
             # lifecycle, so retain the allocation-free pre-streaming path for
             # the common Rack response used by small endpoints and middleware.
@@ -272,10 +322,10 @@ module Lantern
               finish(env, exe, status, headers, preserving: nil)
             elsif body.respond_to?(:each)
               context_snapshot = streaming_context(env, exe)
-              body = EnumerableResponseBody.new(body, self, env, exe, status, headers, context_snapshot)
+              body = response_body(body, env, exe, status, headers, context_snapshot)
             else
               context_snapshot = streaming_context(env, exe)
-              body = StreamingResponseBody.new(body, self, env, exe, status, headers, context_snapshot)
+              body = response_body(body, env, exe, status, headers, context_snapshot)
             end
           rescue Exception => setup_error # rubocop:disable Lint/RescueException
             finish(env, exe, status, headers, preserving: setup_error)
@@ -299,6 +349,11 @@ module Lantern
         # request record.
         exe.user_id ||= Subscribers::Users.resolve_id(env)
         Context.snapshot
+      end
+
+      def response_body(body, env, exe, status, headers, context_snapshot)
+        wrapper = body.respond_to?(:each) ? EnumerableResponseBody : StreamingResponseBody
+        wrapper.new(body, self, env, exe, status, headers, context_snapshot)
       end
 
       def ignored_request?(env)

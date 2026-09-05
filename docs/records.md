@@ -66,7 +66,11 @@ call-style streaming body, or partial-hijack callback stays inside this
 execution through consumption and close, including when the server consumes
 it on another thread. Its chunk-producing queries, logs, spans, and failures
 therefore belong to this request, and `duration` includes that work without
-borrowing the consumer thread's tenant or context. A literal,
+borrowing the consumer thread or fiber's tenant or context. Because the
+optional profiler is process-global and pins samples to its starting thread,
+Lantern safely discards a request profile if the body moves to another thread;
+request records and all other child telemetry still span the full lifecycle.
+A literal,
 already-materialized Array response without a partial hijack still finalizes
 as soon as the Rack application returns it.
 

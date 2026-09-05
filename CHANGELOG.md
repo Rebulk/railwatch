@@ -7,9 +7,11 @@
   an explicit close completes. Work performed while producing chunks now
   contributes duration, child records, and unhandled exceptions to the
   correct request even when a server consumes the body on another thread;
-  request context is isolated from that thread, downstream disconnects are
-  not misreported as application failures, and concurrent close/finalization
-  still occurs exactly once.
+  request context is isolated from that thread or fiber, downstream
+  disconnects are not misreported as application failures, and concurrent
+  close/finalization still occurs exactly once. A cross-thread body discards
+  its optional origin-thread profile so unrelated work cannot be attributed
+  to the request.
 
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost

@@ -421,6 +421,27 @@ RSpec.describe Lantern::Middleware::Request do
     expect(close_calls).to eq(1)
   end
 
+  it "does not report a call-style stream disconnect as an application exception" do
+    disconnect = Errno::EPIPE.new("client disconnected")
+    writes = 0
+    downstream = Object.new
+    downstream.define_singleton_method(:<<) do |_chunk|
+      writes += 1
+      raise disconnect if writes == 2
+
+      self
+    end
+    stream = Object.new
+    stream.define_singleton_method(:call) { |io| io << "first" << "second" }
+    stream.define_singleton_method(:close) { nil }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/call-stream"))
+
+    expect { body.call(downstream) }.to raise_error { |error| expect(error).to equal(disconnect) }
+    expect(lantern_records(:request).size).to eq(1)
+    expect(lantern_records(:exception)).to be_empty
+  end
+
   it "passes a Rack::Lint round trip with a call-only streaming body" do
     stream = Object.new
     stream.define_singleton_method(:call) { |io| io << "linted" }
@@ -496,6 +517,49 @@ RSpec.describe Lantern::Middleware::Request do
     ActiveSupport::ExecutionContext.clear
   end
 
+  it "isolates request tenant and context on another fiber of the origin thread" do
+    original_level = ActiveSupport::IsolatedExecutionState.isolation_level
+    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber
+    tenant_record = Class.new do
+      def self.current_tenant
+        ActiveSupport::IsolatedExecutionState[:lantern_request_spec_tenant]
+      end
+    end
+    stub_const("TenantRecord", tenant_record)
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      Lantern.context(stream_phase: "enumeration")
+      Lantern.record(:span, name: "fiber each")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { nil }
+    app = lambda do |_|
+      ActiveSupport::IsolatedExecutionState[:lantern_request_spec_tenant] = "request-tenant"
+      ActiveSupport::ExecutionContext.set(request_marker: "request-value")
+      [ 200, {}, stream ]
+    end
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/fiber-stream"))
+    consumer_context = Fiber.new do
+      ActiveSupport::IsolatedExecutionState[:lantern_request_spec_tenant] = "consumer-tenant"
+      ActiveSupport::ExecutionContext.set(consumer_secret: "must-not-leak")
+      body.each { |_| nil }
+      ActiveSupport::ExecutionContext.to_h
+    end.resume
+
+    request = lantern_records(:request).sole
+    expect(lantern_records(:span).sole[:tenant]).to eq("request-tenant")
+    expect(request[:tenant]).to eq("request-tenant")
+    expect(JSON.parse(request[:context])).to include(
+      "request_marker" => "request-value", "stream_phase" => "enumeration"
+    )
+    expect(request[:context]).not_to include("consumer_secret")
+    expect(consumer_context).to include(consumer_secret: "must-not-leak")
+  ensure
+    ActiveSupport::IsolatedExecutionState.clear
+    ActiveSupport::IsolatedExecutionState.isolation_level = original_level if original_level
+  end
+
   it "does not report a downstream client disconnect as an application exception" do
     disconnect = Errno::EPIPE.new("client disconnected")
     stream = Object.new
@@ -516,6 +580,7 @@ RSpec.describe Lantern::Middleware::Request do
     hijack = proc do |stream|
       callback_execution = Lantern.execution
       callback_stream = stream
+      stream.write("attached")
       Lantern.record(:span, name: "partial hijack")
       :attached
     end
@@ -525,17 +590,74 @@ RSpec.describe Lantern::Middleware::Request do
     status, returned_headers, body = described_class.new(app).call(env_for("http://customer.test/hijack"))
 
     expect(status).to eq(200)
-    expect(body).to equal(response_body)
+    expect(body).to be_a(described_class::EnumerableResponseBody)
     expect(returned_headers["X-Stream"]).to eq("yes")
     expect(lantern_records).to be_empty
+    writes = []
     io = Object.new
+    io.define_singleton_method(:write) { |chunk| writes << chunk }
     expect(returned_headers["rack.hijack"].call(io)).to eq(:attached)
 
     request = lantern_records(:request).sole
     expect(callback_execution).to be_a(Lantern::Execution)
-    expect(callback_stream).to equal(io)
+    expect(callback_stream).to be_a(described_class::DownstreamStream)
+    expect(writes).to eq([ "attached" ])
     expect(lantern_records(:span).sole).to include(name: "partial hijack", execution_id: request[:execution_id])
     expect(Lantern.execution).to be_nil
+  end
+
+  it "finalizes a partial hijack when the server closes the body without invoking its callback" do
+    close_calls = 0
+    response_body = Object.new
+    response_body.define_singleton_method(:each) { |_| nil }
+    response_body.define_singleton_method(:close) { close_calls += 1 }
+    hijack = ->(_stream) { raise "must not be called" }
+    app = ->(_) { [ 200, { "rack.hijack" => hijack }, response_body ] }
+
+    _, returned_headers, body = described_class.new(app).call(env_for("http://customer.test/hijack"))
+    expect(returned_headers["rack.hijack"]).not_to equal(hijack)
+    expect(lantern_records).to be_empty
+
+    body.close
+
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:request).size).to eq(1)
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "does not report a partial-hijack stream disconnect as an application exception" do
+    disconnect = Errno::EPIPE.new("client disconnected")
+    downstream = Object.new
+    downstream.define_singleton_method(:write) { |_chunk| raise disconnect }
+    hijack = ->(stream) { stream.write("chunk") }
+    app = ->(_) { [ 200, { "rack.hijack" => hijack }, [] ] }
+    _, headers, body = described_class.new(app).call(env_for("http://customer.test/hijack"))
+
+    expect { headers["rack.hijack"].call(downstream) }.to raise_error do |error|
+      expect(error).to equal(disconnect)
+    end
+    expect(lantern_records(:request).size).to eq(1)
+    expect(lantern_records(:exception)).to be_empty
+    body.close
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "passes a Rack::Lint partial-hijack round trip with the shared lifecycle body" do
+    hijack = ->(stream) { stream.write("hijacked") }
+    app = ->(_) { [ 200, { "rack.hijack" => hijack }, [] ] }
+    linted = Rack::Lint.new(described_class.new(app))
+    rack_env = env_for("http://customer.test/hijack", headers: { "rack.hijack?" => true })
+
+    status, headers, body = linted.call(rack_env)
+    io = StringIO.new
+    io.define_singleton_method(:close_read) { nil }
+    io.define_singleton_method(:close_write) { nil }
+    headers["rack.hijack"].call(io)
+    body.close
+
+    expect(status).to eq(200)
+    expect(io.string).to eq("hijacked")
+    expect(lantern_records(:request).size).to eq(1)
   end
 
   it "waits to finalize until active enumeration ends when another thread closes" do
@@ -592,6 +714,33 @@ RSpec.describe Lantern::Middleware::Request do
     expect(Lantern::Profiler).to have_received(:stop).with(handle).once
     expect(Lantern.execution).to be_nil
   ensure
+    Lantern.config.profile_sample = 0.0
+  end
+
+  it "discards an origin-thread profile before cross-thread body work" do
+    handle = Object.new
+    Lantern.config.profile_sample = 1.0
+    allow(Lantern::Profiler).to receive(:available?).and_return(true)
+    allow(Lantern::Profiler).to receive(:start).and_return(handle)
+    allow(Lantern::Profiler).to receive(:stop).with(handle).and_return(nil)
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      Lantern.record(:span, name: "cross-thread body")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { nil }
+    request_middleware = described_class.new(->(_) { [ 200, {}, stream ] })
+    _, _, body = request_middleware.call(env_for("http://customer.test/stream"))
+
+    worker = Thread.new { body.each { |_| nil } }
+    worker.join
+
+    expect(Lantern::Profiler).to have_received(:stop).with(handle).once
+    expect(lantern_records(:span).sole[:name]).to eq("cross-thread body")
+    expect(lantern_records(:profile)).to be_empty
+    expect(lantern_records(:request).size).to eq(1)
+  ensure
+    worker&.join
     Lantern.config.profile_sample = 0.0
   end
 
