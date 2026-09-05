@@ -18,6 +18,10 @@ module Lantern
     MAX_CONTEXT_VALUE = 4096
     CRUMB_KINDS = %w[console click navigate].freeze
 
+    RATE_LIMIT_WINDOW = 60 # seconds
+
+    before_action :throttle
+
     def create
       return head :no_content unless Lantern.config.beacon_enabled
 
@@ -51,6 +55,24 @@ module Lantern
     end
 
     private
+
+    # The beacon takes no credential and keeps every browser error it is
+    # sent, so a client that is not the page -- a script, a bored visitor
+    # with curl -- could otherwise fill the app's quota with junk issues.
+    # Same shape as Rails' rate_limit (a counter per client IP in the app's
+    # cache store), read from config at request time so an initializer can
+    # raise or disable it. A store that cannot count (NullStore) fails open:
+    # the beacon keeps working, just unthrottled.
+    def throttle
+      limit = Lantern.config.beacon_rate_limit.to_i
+      return unless limit.positive?
+
+      count = cache_store.increment("lantern:beacon:#{request.remote_ip}", 1, expires_in: RATE_LIMIT_WINDOW)
+      return unless count && count > limit
+
+      response.set_header("Retry-After", RATE_LIMIT_WINDOW.to_s)
+      head :too_many_requests
+    end
 
     # The browser half of release health: one `session` record per beacon
     # flush, never more, whatever the flush carried. The first one the client

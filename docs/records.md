@@ -634,8 +634,9 @@ Standalone — Inertia page-visit timing reported by the browser client
 to `POST /lantern/beacon` and recorded server-side by
 `Lantern::BeaconController` (`app/controllers/lantern/beacon_controller.rb`).
 Batched client-side (flushed every 5s, on `pagehide`, or once 20 visits
-queue up) and capped at 50 visits per beacon request. No-ops entirely if
-`config.beacon_enabled` is off.
+queue up) and capped at 50 visits per beacon request, and at
+`config.beacon_rate_limit` requests per client IP per minute (default 120).
+No-ops entirely if `config.beacon_enabled` is off.
 
 | Field | Meaning |
 |---|---|

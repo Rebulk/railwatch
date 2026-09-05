@@ -17,6 +17,7 @@ win over the env var.
 | `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
 | `ignored_request_paths` | `LANTERN_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/lantern/beacon` | Exact request paths that bypass Lantern's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
+| `beacon_rate_limit` | `LANTERN_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /lantern/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
 `Lantern.enabled?` delegates to `config.enabled?`, which is `@enabled &&
 token.present?` — there is no separate "is configured" check elsewhere.
@@ -621,7 +622,10 @@ user, say) keep `tenant: nil`.
 `docs/records.md` for the full field lists and client batching behavior.
 The same beacon carries visit timing, Core Web Vitals, browser sessions,
 and every JavaScript error the page throws; turning `beacon_enabled` off
-turns off all four. Client setup: call `startLantern()` (generated at
+turns off all four. The endpoint takes no credential, so it is throttled
+per client IP (`beacon_rate_limit`, default 120 a minute, `0` to disable);
+a client past the limit gets a 429 with `Retry-After` and nothing from that
+POST is recorded. Client setup: call `startLantern()` (generated at
 `app/frontend/lib/lantern.ts`) from your Inertia entrypoint.
 
 `startLantern` takes three optional settings, none of which has a

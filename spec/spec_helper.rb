@@ -29,6 +29,9 @@ RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }
 
   config.before(:each) do
+    # The beacon's per-IP counter lives in Rails.cache; every request spec
+    # posts from 127.0.0.1, so a suite-wide count would trip the limit.
+    Rails.cache.clear
     stub_request(:post, "http://lantern.test/ingest").to_return do |request|
       accepted = Zlib::GzipReader.new(StringIO.new(request.body)).each_line.count
       { status: 200, body: JSON.generate(accepted: accepted, rejected: 0) }
