@@ -13,9 +13,11 @@ module Lantern
     SENSITIVE_HEADER_NAME = %r{
       (?:\A|-)
       (?:
-        api-?key|access-?key|private-?key|
-        auth(?:entication|orization)?|bearer|credential|
-        hmac|jwt|token|secret|signature
+        api-?key|access-?(?:key|token)|private-?(?:key|token)|
+        auth(?:entication|orization)?(?:-?token)?|bearer(?:-?token)?|
+        client-?secret|csrf-?token|xsrf-?token|credential|
+        hmac(?:-?signature)?|jwt(?:-?(?:assertion|token))?|
+        webhook-?(?:hmac|secret|signature)|token|secret|signature
       )
       (?:-|\z)
     }ix

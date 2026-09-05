@@ -55,8 +55,10 @@ Two things are redacted with no configuration:
   credential-shaped name segment such as `api-key`, `access-key`,
   `private-key`, `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`,
   `secret`, or `signature` (including vendor headers such as
-  `X-Shopify-Hmac-Sha256`). Values are replaced with `[FILTERED]`. Extend the
-  exact denylist for application-specific names with
+  `X-Shopify-Hmac-Sha256` and concatenated Rack aliases such as `X-AuthToken`,
+  `X-AccessToken`, `X-BearerToken`, `X-HmacSignature`, and `X-CSRFToken`).
+  Values are replaced with `[FILTERED]`. Extend the exact denylist for
+  application-specific names with
   `c.redact_headers += [...]`.
 - **Parameters**, by name: `password`, `password_confirmation`,
   `authenticity_token`, `_token` — merged with your app's own

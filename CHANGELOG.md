@@ -46,12 +46,13 @@
 
 - Header masking no longer depends on an app enumerating every vendor
   header name. A header whose name has a credential-shaped segment
-  (`api-key`/`apikey`, `access-key`, `private-key`,
+  (`api-key`/`apikey`, `access-key`/`accesstoken`, `private-key`,
   `auth`/`authentication`/`authorization`, `bearer`, `credential`, `hmac`,
   `jwt`, `token`, `secret`, `signature`) is masked as `[FILTERED]` on top of
-  the exact `redact_headers` denylist, so `X-Api-Key`, `X-Auth-Token`,
-  `Stripe-Signature` and `X-Hub-Signature-256` are private by default.
-  Ordinary diagnostic headers are untouched.
+  the exact `redact_headers` denylist. Concatenated Rack aliases such as
+  `X-AuthToken`, `X-AccessToken`, `X-BearerToken`, `X-HmacSignature`, and
+  `X-CSRFToken` are covered alongside `X-Api-Key`, `Stripe-Signature`, and
+  `X-Hub-Signature-256`. Ordinary diagnostic headers are untouched.
 
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost

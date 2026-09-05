@@ -31,6 +31,15 @@ RSpec.describe "redaction and rejection", type: :request do
         "X-Jwt-Assertion" => "jwt-secret",
         "X-Bearer" => "bearer-secret",
         "X-Private-Key" => "private-key",
+        "X-AuthToken" => "concatenated-auth-secret",
+        "X-AccessToken" => "concatenated-access-secret",
+        "X-BearerToken" => "concatenated-bearer-secret",
+        "X-HmacSignature" => "concatenated-hmac-secret",
+        "X-CSRFToken" => "concatenated-csrf-secret",
+        "X-XSRFToken" => "concatenated-xsrf-secret",
+        "X-Authenticated-User" => "diagnostic-user",
+        "X-Tokenizer-Version" => "v2",
+        "X-Secretariat" => "office",
         "X-Custom" => "keep-me"
       }
       req = lantern_records(:request).sole
@@ -47,6 +56,15 @@ RSpec.describe "redaction and rejection", type: :request do
       expect(req[:headers]["X-Jwt-Assertion"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Bearer"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Private-Key"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Authtoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Accesstoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Bearertoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Hmacsignature"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Csrftoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Xsrftoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Authenticated-User"]).to eq("diagnostic-user")
+      expect(req[:headers]["X-Tokenizer-Version"]).to eq("v2")
+      expect(req[:headers]["X-Secretariat"]).to eq("office")
       expect(req[:headers]["X-Custom"]).to eq("keep-me")
     end
   end
