@@ -128,7 +128,7 @@ module Lantern
           route_domain: req.host,
           controller: controller,
           action: action,
-          format: request_format(env, req, app_failed: app_failed),
+          format: request_format(env),
           ip: req.remote_ip,
           status_code: status.to_i,
           request_size: req.content_length.to_i,
@@ -144,23 +144,26 @@ module Lantern
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
-          files: request_files(env, req, app_failed: app_failed)
+          files: request_files(env)
         }
       end
 
-      # A rejected JSON or urlencoded request may never otherwise need its
-      # body parsed. Only multipart forms can contain UploadedFile objects,
-      # so do not make Lantern the component that consumes a hostile body
-      # while the outer middleware is finishing the request.
-      def request_files(env, request, app_failed:)
+      # Request teardown must never be the component that parses a body. The
+      # controller subscriber captures normal Rails uploads while their
+      # tempfiles are live; Rack endpoints and middleware can still contribute
+      # metadata when they populated ActionDispatch's parameter cache first.
+      def request_files(env)
         return env["lantern.files"] if env.key?("lantern.files")
-        # If the inner stack raised, Rack::TempfileReaper has already run its
-        # exception cleanup before control reaches this outer ensure. Parsing
-        # now could create upload tempfiles that nobody will close.
-        return [] if app_failed
         return [] unless RequestMediaType.multipart_form_data?(env["CONTENT_TYPE"])
 
-        uploaded_files(request.params)
+        parameters = if env.key?("action_dispatch.request.parameters")
+          env["action_dispatch.request.parameters"]
+        elsif env.key?("action_dispatch.request.request_parameters")
+          env["action_dispatch.request.request_parameters"]
+        else
+          return []
+        end
+        uploaded_files(parameters)
       rescue StandardError => e
         Lantern.debug { "request upload inspection failed: #{e.class}: #{e.message}" }
         []
@@ -179,13 +182,11 @@ module Lantern
         nil
       end
 
-      # ActionDispatch derives multipart formats through `parameters`, which
-      # parses the body. During exception unwind only use a value Rails has
-      # already cached; Rack's tempfile exception cleanup has already run.
-      def request_format(env, request, app_failed:)
-        return "" if app_failed && !env.key?("action_dispatch.request.formats")
-
-        request.format&.symbol.to_s
+      # ActionDispatch derives formats through `parameters`, which can parse
+      # the body. Controller processing normally populated this cache already;
+      # an upstream rejection safely records no format instead of reading it.
+      def request_format(env)
+        env["action_dispatch.request.formats"]&.first&.symbol.to_s
       rescue StandardError
         ""
       end

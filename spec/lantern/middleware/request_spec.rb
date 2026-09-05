@@ -15,6 +15,11 @@ RSpec.describe Lantern::Middleware::Request do
     end)
   end
 
+  def multipart_body(boundary)
+    "--#{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"a.txt\"\r\n" \
+      "Content-Type: text/plain\r\n\r\nhello\r\n--#{boundary}--\r\n"
+  end
+
   it "does not open an execution when Lantern is disabled" do
     Lantern.config.enabled = false
     seen = []
@@ -123,43 +128,77 @@ RSpec.describe Lantern::Middleware::Request do
 
   it "does not read rejected JSON or form bodies while finishing telemetry" do
     %w[application/json application/x-www-form-urlencoded].each do |content_type|
+      calls = []
       input = Object.new
-      input.define_singleton_method(:read) { |*| raise "request body was parsed" }
-      input.define_singleton_method(:gets) { |*| raise "request body was parsed" }
-      input.define_singleton_method(:each) { |*| raise "request body was parsed" }
-      input.define_singleton_method(:rewind) { raise "request body was parsed" }
+      %i[read gets each rewind].each do |method|
+        input.define_singleton_method(method) do |*|
+          calls << method
+          raise "request body was parsed"
+        end
+      end
       env = env_for("http://customer.test/rejected", method: "POST", headers: {
         "CONTENT_TYPE" => content_type, "CONTENT_LENGTH" => "10000000", "rack.input" => input
       })
 
       expect { middleware.call(env) }.not_to raise_error
+      expect(calls).to be_empty
     end
 
     expect(lantern_records(:request).map { |request| request[:files] }).to eq([ [], [] ])
   end
 
-  it "preserves the parent when multipart upload inspection raises" do
+  it "does not parse an uncached multipart body without a tempfile reaper" do
+    boundary = "AaB03x"
+    body = multipart_body(boundary)
     calls = []
-    input = Object.new
-    %i[read gets each rewind].each do |method|
-      input.define_singleton_method(method) { |*| calls << method; raise IOError, "hostile #{method}" }
+    input = StringIO.new(body)
+    tracker = Module.new do
+      %i[read gets each rewind].each do |method|
+        define_method(method) do |*args, &block|
+          calls << method
+          super(*args, &block)
+        end
+      end
     end
+    input.singleton_class.prepend(tracker)
     env = env_for("http://customer.test/rejected", method: "POST", headers: {
-      "CONTENT_TYPE" => "Multipart/Form-Data; boundary=x", "CONTENT_LENGTH" => "10000000", "rack.input" => input
+      "CONTENT_TYPE" => "Multipart/Form-Data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => input
     })
     rejecting = described_class.new(->(_) { [ 413, { "Content-Type" => "text/plain" }, [] ] })
 
     status, = rejecting.call(env)
 
     expect(status).to eq(413)
-    expect(calls).not_to be_empty
+    expect(calls).to be_empty
+    expect(env.fetch("rack.tempfiles", [])).to be_empty
     expect(lantern_records(:request).sole).to include(status_code: 413, files: [])
+  end
+
+  it "uses multipart parameters that upstream code already cached" do
+    file = Tempfile.new([ "cached-upload", ".txt" ])
+    file.write("hello")
+    file.rewind
+    upload = ActionDispatch::Http::UploadedFile.new(
+      tempfile: file, filename: "a.txt", type: "text/plain", headers: ""
+    )
+    env = env_for("http://customer.test/upload", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=already-parsed",
+      "action_dispatch.request.request_parameters" => { "attachment" => upload }
+    })
+
+    middleware.call(env)
+
+    expect(lantern_records(:request).sole[:files].sole).to include(
+      name: "attachment", size: 5, content_type: "text/plain"
+    )
+  ensure
+    file&.close!
   end
 
   it "does not parse multipart uploads after Rack has unwound an app exception" do
     boundary = "AaB03x"
-    body = "--#{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"a.txt\"\r\n" \
-      "Content-Type: text/plain\r\n\r\nhello\r\n--#{boundary}--\r\n"
+    body = multipart_body(boundary)
     env = env_for("http://customer.test/boom", method: "POST", headers: {
       "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
       "rack.input" => StringIO.new(body)
@@ -171,6 +210,29 @@ RSpec.describe Lantern::Middleware::Request do
 
     expect(env.fetch("rack.tempfiles")).to be_empty
     expect(lantern_records(:request).sole[:files]).to eq([])
+  ensure
+    env&.fetch("rack.tempfiles", [])&.each(&:close!)
+  end
+
+  it "does not parse multipart after outer middleware catches an exception from inside the tempfile reaper" do
+    boundary = "AaB03x"
+    body = multipart_body(boundary)
+    env = env_for("http://customer.test/boom", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => StringIO.new(body)
+    })
+    inner = Rack::TempfileReaper.new(->(_) { raise "original app error" })
+    catcher = lambda do |request_env|
+      inner.call(request_env)
+    rescue StandardError
+      [ 500, { "Content-Type" => "text/plain" }, [] ]
+    end
+
+    status, = described_class.new(catcher).call(env)
+
+    expect(status).to eq(500)
+    expect(env.fetch("rack.tempfiles")).to be_empty
+    expect(lantern_records(:request).sole).to include(status_code: 500, files: [])
   ensure
     env&.fetch("rack.tempfiles", [])&.each(&:close!)
   end

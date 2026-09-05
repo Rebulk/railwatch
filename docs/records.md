@@ -88,7 +88,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/lantern/redactor.rb`). |
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
-| `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). Non-multipart request bodies are never parsed to populate this field. |
+| `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). Request finalization only uses parameters already parsed upstream; Lantern never initiates body parsing to populate this field. |
 | `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |
 
 ### `job_attempt`
