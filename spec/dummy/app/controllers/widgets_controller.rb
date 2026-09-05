@@ -96,6 +96,10 @@ class WidgetsController < ApplicationController
     redirect_to "/widgets"
   end
 
+  def redirected_with_credentials
+    redirect_to "http://api-key:api-secret@www.example.com/widgets?password=secret&token=reset-token&code=oauth-code&X-Amz-Signature=signed-secret#private-fragment"
+  end
+
   def halted
     render plain: "unreachable"
   end

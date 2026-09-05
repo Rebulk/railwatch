@@ -19,6 +19,7 @@ Rails.application.routes.draw do
   get "override_sample", to: "widgets#override_sample"
   get "deprecated", to: "widgets#deprecated_action"
   get "redirected", to: "widgets#redirected"
+  get "redirected_with_credentials", to: "widgets#redirected_with_credentials"
   get "halted", to: "widgets#halted"
   get "unpermitted", to: "widgets#unpermitted"
   get "rate_limited", to: "widgets#rate_limited"

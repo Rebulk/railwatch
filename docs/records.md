@@ -67,7 +67,7 @@ stage boundaries (the `action`/`render` boundaries come from
 |---|---|
 | `group` | Hash of `method` + route `pattern`. |
 | `method` | HTTP verb. |
-| `url` | Full request URL, truncated to 2048 chars. |
+| `url` | Request origin + path, with authority credentials, the entire query string, and fragment removed, truncated to 2048 chars. |
 | `path` | Request path. |
 | `route` | Matched route pattern (`request.route_uri_pattern`), or `"unmatched"` for a 404. |
 | `route_methods` | Array with the route's declared verb, if known. |
@@ -80,7 +80,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `request_size` / `response_size` | Bytes, from `Content-Length`. |
 | `queue_time` | Microseconds the request waited in the proxy/web-server queue before the execution started, parsed from `X-Request-Start` (or `X-Queue-Start`): `t=1700000000.123` (seconds), `t=1700000000123` (ms), `t=1700000000123456` (µs), or the same values bare — the unit is decided by magnitude. A proxy clock running ahead clamps to `0`; anything over 60 seconds is treated as clock skew and dropped. nil when the header is absent or unparseable. |
 | `view_runtime` / `db_runtime` | Milliseconds, from Action Controller's own `process_action.action_controller` payload. |
-| `redirect_to` | Redirect target, truncated to 512 chars, if `redirect_to` was called. |
+| `redirect_to` | Redirect target with authority credentials, the entire query string, and fragment removed, truncated to 512 chars, if `redirect_to` was called. This sanitizes telemetry only; it does not change the response's `Location` header. |
 | `halted_callback` | Filter that halted the callback chain (`throw :abort`), if any. |
 | `unpermitted_parameters` | Array of param keys strong parameters rejected. |
 | `rate_limited` | `{name:, count:, to:}` if `ActionController::RateLimiting` fired, else nil. |
@@ -439,7 +439,7 @@ thread-local reentry flag, so it's never double-recorded.
 | `group` | Hash of host + method. |
 | `host` | Request host. |
 | `method` | HTTP verb. |
-| `url` | Scheme + host + path (query string stripped), truncated to 2048 chars. |
+| `url` | Scheme + host + path, with authority credentials, the entire query string, and fragment removed, truncated to 2048 chars. |
 | `duration` | Microseconds. |
 | `status_code` | Response status, 0 if the request errored before a response. |
 | `request_size` | Bytes (Net::HTTP path only). |

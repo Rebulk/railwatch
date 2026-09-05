@@ -55,13 +55,13 @@ module Lantern
       def self.record(http, req, response, error, start, started_at)
         host = http.address
         default_port = http.use_ssl? ? 443 : 80
-        url = "#{http.use_ssl? ? 'https' : 'http'}://#{host}#{http.port == default_port ? '' : ":#{http.port}"}#{req.path.to_s.split('?').first}"
+        url = "#{http.use_ssl? ? 'https' : 'http'}://#{host}#{http.port == default_port ? '' : ":#{http.port}"}#{req.path}"
         Lantern.record(:outgoing_request,
           group: Record.group_hash(host, req.method),
           timestamp: started_at,
           host: host,
           method: req.method,
-          url: url[0, 2048],
+          url: Record.url_without_sensitive_components(url, limit: 2048),
           duration: Clock.micros_since(start),
           status_code: response&.code.to_i,
           request_size: (req.body || "").bytesize,

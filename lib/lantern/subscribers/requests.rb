@@ -45,7 +45,7 @@ module Lantern
 
         subscribe("redirect_to.action_controller") do |event|
           env = event.payload[:request]&.env or next
-          env["lantern.redirect_to"] = event.payload[:location].to_s[0, 512]
+          env["lantern.redirect_to"] = Record.url_without_sensitive_components(event.payload[:location], limit: 512)
         end
 
         subscribe("halted_callback.action_controller") do |event|

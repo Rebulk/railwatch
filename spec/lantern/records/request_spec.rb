@@ -27,6 +27,16 @@ RSpec.describe "request record", type: :request do
     expect(req[:_group]).to eq(Lantern::Record.group_hash("GET", "/widgets(.:format)"))
   end
 
+  it "strips every query parameter from the request URL without changing route grouping" do
+    get "/widgets?password=secret&token=reset-token&code=oauth-code&X-Amz-Signature=signed-secret"
+    get "/widgets?password=other&token=other&code=other&X-Amz-Signature=other"
+
+    requests = lantern_records(:request)
+    expect(requests.map { |request| request[:url] }).to eq([ "http://www.example.com/widgets" ] * 2)
+    expect(requests.map { |request| request[:path] }).to eq([ "/widgets" ] * 2)
+    expect(requests.map { |request| request[:_group] }.uniq).to eq([ Lantern::Record.group_hash("GET", "/widgets(.:format)") ])
+  end
+
   it "captures view_runtime and db_runtime from the controller's process_action payload" do
     3.times { |i| Widget.create!(name: "w#{i}", gadget: Gadget.create!(name: "g#{i}")) }
     get "/many"
@@ -42,6 +52,19 @@ RSpec.describe "request record", type: :request do
     req = lantern_records(:request).sole
     expect(req[:redirect_to]).to eq("http://www.example.com/widgets")
     expect(req[:status_code]).to eq(302)
+  end
+
+  it "strips credentials, query, and fragment from the recorded redirect target without touching the Location header" do
+    get "/redirected_with_credentials"
+
+    req = lantern_records(:request).sole
+    expect(response.location).to include("api-key:api-secret@", "password=secret", "token=reset-token", "code=oauth-code", "X-Amz-Signature=signed-secret", "#private-fragment")
+    expect(req[:redirect_to]).to eq("http://www.example.com/widgets")
+  end
+
+  it "strips a fragment even when a URL has no query string" do
+    expect(Lantern::Record.url_without_sensitive_components("https://example.test/widgets#token=secret", limit: 2048))
+      .to eq("https://example.test/widgets")
   end
 
   it "captures the halting filter's name when a before_action halts the chain" do
