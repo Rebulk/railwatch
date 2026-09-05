@@ -9,9 +9,6 @@ gem "rails", ENV.fetch("LANTERN_RAILS_REQUIREMENT") if ENV.key?("LANTERN_RAILS_R
 
 gem "puma"
 gem "sqlite3", ">= 2.1"
-# Ruby 4 ships CGI as a bundled gem. Activating the maintained release avoids
-# the old bundled implementation that is incompatible with current GlobalID.
-gem "cgi", ">= 0.5.2"
 gem "solid_queue"
 gem "solid_cache"
 gem "solid_cable"
