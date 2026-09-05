@@ -50,8 +50,9 @@ module Lantern
     end
 
     def configure
+      config.prepare_for_configuration!
       yield config
-      config
+      config.validate!
     end
 
     def reporter
@@ -427,7 +428,7 @@ module Lantern
     # execution or one the head profile_sample roll picked. Returns whether
     # a record was buffered, which is what puts `profiled` on the parent.
     def ship_profile(exe, ships)
-      profile = Profiler.stop
+      profile = Profiler.stop(exe.profiler_handle)
       return false unless profile && ships
 
       slow = config.profile_slow_ms

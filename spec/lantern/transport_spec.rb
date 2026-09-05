@@ -661,6 +661,7 @@ end
 
 RSpec.describe Lantern::Reporter::ForkHook do
   it "resets Lantern state in the child" do
+    expect(Lantern::Profiler).to receive(:fork_safely).and_call_original.ordered
     expect(Lantern).to receive(:restart_after_fork!)
     fake = Class.new { def _fork = 0 }.new
     fake.singleton_class.prepend(described_class)
@@ -668,6 +669,7 @@ RSpec.describe Lantern::Reporter::ForkHook do
   end
 
   it "leaves Lantern state alone in the parent" do
+    expect(Lantern::Profiler).to receive(:fork_safely).and_call_original
     expect(Lantern).not_to receive(:restart_after_fork!)
     fake = Class.new { def _fork = 4242 }.new
     fake.singleton_class.prepend(described_class)

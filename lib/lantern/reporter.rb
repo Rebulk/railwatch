@@ -33,7 +33,10 @@ module Lantern
     # the inherited parent buffer first.
     module ForkHook
       def _fork
-        pid = super
+        # Native profilers are not fork-safe while collecting. Stop and
+        # discard the parent's in-flight sample before Ruby reaches the real
+        # Process._fork; clearing only the child's Ruby handle is too late.
+        pid = Lantern::Profiler.fork_safely { super }
         Lantern.restart_after_fork! if pid.zero?
         pid
       end

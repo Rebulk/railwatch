@@ -141,6 +141,15 @@ RSpec.describe Lantern::Profiler do
       described_class.stop
     end
 
+    it "does not let a quiesced execution stop a newer execution's profile" do
+      interrupted = described_class.start
+      described_class.fork_safely { 4242 }
+      replacement = described_class.start
+
+      expect(described_class.stop(interrupted)).to be_nil
+      expect(described_class.stop(replacement)).to be_a(described_class::Profile)
+    end
+
     it "degrades to nil, and stays startable, when the backend raises on start" do
       allow(::Vernier).to receive(:start_profile).and_raise("no profiler for you")
 
@@ -167,12 +176,16 @@ RSpec.describe Lantern::Profiler do
 
   describe ".restart_after_fork!" do
     it "clears a profile the parent was taking so the child can profile again" do
+      old_lock = described_class.instance_variable_get(:@lock)
       described_class.instance_variable_set(:@running, :parent_profile)
+      described_class.instance_variable_set(:@loadable, vernier: true)
       described_class.instance_variable_set(:@skipped, 7)
 
       described_class.restart_after_fork!
 
+      expect(described_class.instance_variable_get(:@lock)).not_to equal(old_lock)
       expect(described_class.instance_variable_get(:@running)).to be_nil
+      expect(described_class.instance_variable_get(:@loadable)).to eq({})
       expect(described_class.skipped).to eq(0)
       expect(described_class.start(mode: :wall)).to be_a(described_class::Handle)
     ensure
@@ -192,16 +205,12 @@ RSpec.describe Lantern::Profiler do
       holder&.join
     end
 
-    it "runs in the child from the Process._fork hook, leaving no parent profile behind" do
+    it "resets the inherited profiler without touching its old lock in the child" do
       skip "fork not supported on this platform" unless Process.respond_to?(:fork)
 
-      # Exercise our real fork hook with a parent Handle, without forking an
-      # active native sampler: Vernier can deadlock in the child before this
-      # block runs. Native profiling is covered by the start/stop examples.
       allow(described_class).to receive(:start_backend).and_return(true)
       allow(described_class).to receive(:stop_backend).and_return(nil)
       described_class.start(mode: :wall)
-      parent_handle = described_class.instance_variable_get(:@running)
       reader, writer = IO.pipe
       pid = fork do
         reader.close
@@ -218,7 +227,7 @@ RSpec.describe Lantern::Profiler do
       reaped = true
 
       expect(result).to eq("ok")
-      expect(described_class.instance_variable_get(:@running)).to equal(parent_handle)
+      expect(described_class.instance_variable_get(:@running)).to be_nil
     ensure
       reader&.close unless reader&.closed?
       writer&.close unless writer&.closed?
@@ -234,6 +243,132 @@ RSpec.describe Lantern::Profiler do
           # A completed wait already reaped it.
         end
       end
+      described_class.stop
+    end
+
+    it "quiesces each real native backend before fork and lets the child start and stop a fresh profile" do
+      skip "fork not supported on this platform" unless Process.respond_to?(:fork)
+
+      described_class::BACKENDS.each do |backend|
+        Lantern.config.profiler = backend
+        Lantern.config.profile_interval_us = 500
+        described_class.reset!
+        parent_handle = described_class.start(mode: :wall)
+        expect(parent_handle&.backend).to eq(backend)
+
+        reader, writer = IO.pipe
+        pid = Process.fork do
+          reader.close
+          payload = begin
+            child_handle = described_class.start(mode: :wall)
+            churn(40)
+            profile = described_class.stop
+            { ok: child_handle&.backend == backend && profile&.profiler == backend,
+              backend: child_handle&.backend, profile: profile&.profiler, samples: profile&.samples }
+          rescue Exception => e # rubocop:disable Lint/RescueException -- report any child failure to the bounded parent
+            { ok: false, error: "#{e.class}: #{e.message}" }
+          end
+          writer.write(Marshal.dump(payload))
+          writer.close
+          exit!(payload[:ok] ? 0 : 1)
+        end
+        writer.close
+
+        ready = IO.select([ reader ], nil, nil, 10)
+        Process.kill("KILL", pid) unless ready
+        encoded = ready ? reader.read : nil
+        _child, status = Process.wait2(pid)
+        result = encoded.present? ? Marshal.load(encoded) : { ok: false, error: "child timed out" }
+
+        expect(status).to be_success
+        expect(result).to include(ok: true, backend: backend, profile: backend)
+        expect(result[:samples]).to be_positive
+        # The fork hook discarded the interrupted parent sample. Its execution
+        # may later call stop, which must be a harmless no-op.
+        expect(described_class.stop).to be_nil
+        replacement = described_class.start
+        expect(replacement&.backend).to eq(backend)
+        expect(described_class.stop(replacement)).to be_a(described_class::Profile)
+      ensure
+        reader&.close unless reader&.closed?
+        writer&.close unless writer&.closed?
+        described_class.stop
+      end
+    end
+  end
+
+  describe ".fork_safely" do
+    it "keeps a replacement start blocked until native shutdown and the fork boundary both complete" do
+      allow(described_class).to receive(:available?).and_return(true)
+      allow(described_class).to receive(:backend).and_return(:vernier)
+      allow(described_class).to receive(:start_backend).and_return(true)
+      allow(described_class).to receive(:stop_backend).and_return(nil)
+      interrupted = described_class.start
+      entered_stop = Queue.new
+      release_stop = Queue.new
+      entered_fork = Queue.new
+      release_fork = Queue.new
+      attempting_start = Queue.new
+      replacement_backend_started = Queue.new
+      allow(described_class).to receive(:stop_backend) do
+        entered_stop << true
+        release_stop.pop
+      end
+
+      forker = Thread.new do
+        described_class.fork_safely do
+          entered_fork << true
+          release_fork.pop
+          4242
+        end
+      end
+      entered_stop.pop
+      allow(described_class).to receive(:start_backend) do
+        replacement_backend_started << true
+        true
+      end
+      starter = Thread.new do
+        attempting_start << true
+        described_class.start
+      end
+      attempting_start.pop
+      expect(starter.join(0.05)).to be_nil
+      expect(replacement_backend_started).to be_empty
+
+      release_stop << true
+      entered_fork.pop
+      expect(starter.join(0.05)).to be_nil
+      expect(replacement_backend_started).to be_empty
+
+      release_fork << true
+      expect(forker.join(1)).to equal(forker)
+      expect(starter.join(1)).to equal(starter)
+      expect(replacement_backend_started.pop).to be(true)
+      replacement = starter.value
+      expect(replacement).to be_a(described_class::Handle)
+      expect(described_class.stop(interrupted)).to be_nil
+      expect(described_class.instance_variable_get(:@running)).to equal(replacement)
+    ensure
+      release_stop << true if release_stop&.empty?
+      release_fork << true if release_fork&.empty?
+      forker&.join(1)
+      starter&.join(1)
+      described_class.reset!
+    end
+
+    it "fails closed before fork when native profiler shutdown raises" do
+      handle = described_class.start
+      allow(described_class).to receive(:stop_backend).and_raise("native stop failed")
+      crossed_boundary = false
+
+      expect {
+        described_class.fork_safely { crossed_boundary = true }
+      }.to raise_error(described_class::ForkSafetyError, /shutdown is uncertain/)
+
+      expect(crossed_boundary).to be(false)
+      expect(described_class.instance_variable_get(:@running)).to equal(handle)
+    ensure
+      allow(described_class).to receive(:stop_backend).and_call_original
       described_class.stop
     end
   end

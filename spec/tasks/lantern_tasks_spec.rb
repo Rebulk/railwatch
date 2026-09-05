@@ -215,6 +215,33 @@ RSpec.describe "lantern rake tasks" do
       expect(output).not_to include(Lantern.config.token)
     end
 
+    it "names invalid environment and initializer settings, uses safe defaults, and exits non-zero" do
+      previous_config = Lantern.config
+      original = { "LANTERN_FLUSH_INTERVAL" => ENV["LANTERN_FLUSH_INTERVAL"],
+                   "LANTERN_BUFFER_SIZE" => ENV["LANTERN_BUFFER_SIZE"] }
+      ENV["LANTERN_FLUSH_INTERVAL"] = "never"
+      ENV["LANTERN_BUFFER_SIZE"] = "-4"
+      config = Lantern::Configuration.new
+      config.prepare_for_configuration!
+      config.profile_sample = Float::INFINITY
+      config.validate!
+      Lantern.instance_variable_set(:@config, config)
+
+      output, aborted = run_doctor
+
+      expect(aborted).to be(true)
+      expect(output).to include("✗ numeric configuration:")
+      expect(output).to include('LANTERN_FLUSH_INTERVAL="never" must be a number; using 2.0')
+      expect(output).to include("LANTERN_BUFFER_SIZE=-4 must be an integer at least 1; using 10000")
+      expect(output).to include("config.profile_sample=Infinity must be a finite number at least 0 at most 1; using 0.0")
+      expect(Lantern.config.flush_interval).to eq(2.0)
+      expect(Lantern.config.buffer_size).to eq(10_000)
+      expect(Lantern.config.profile_sample).to eq(0.0)
+    ensure
+      original&.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+      Lantern.instance_variable_set(:@config, previous_config) if previous_config
+    end
+
     it "passes every fatal check and does not abort on a healthy install" do
       output, aborted = run_doctor
 

@@ -15,6 +15,7 @@ isn't wired, not that the install is broken.
 | Doctor line | What a `✗` means |
 |---|---|
 | `token` | `LANTERN_TOKEN` is unset or empty. Fatal: nothing is recorded at all. |
+| `numeric configuration` | One or more environment/initializer values are malformed, non-finite, or outside their supported domain. Fatal: Lantern uses the printed safe defaults, but the deployment configuration must be corrected. |
 | `ingest url` | `ingest_url` isn't a parseable HTTP(S) URL. |
 | `ingest reachable` | `GET {ingest_url}/ingest/ping` didn't return success. Fatal. |
 | `request middleware` | `Lantern::Middleware::Request` isn't in the stack, so requests aren't executions. |
@@ -133,11 +134,14 @@ have workers.
 
 **What actually happens.** Ruby routes `fork`, `Process.fork`, and
 `Kernel#fork` through `Process._fork`, and Lantern prepends hooks for the
-reporter, health sampler, and session flusher. Before the child returns
-from `fork`, it replaces the inherited reporter buffer, drop accounting,
-transport policy state, mutexes, condition variables, dead threads, and the
-profiler's process-global state (a parent's in-flight profile would
-otherwise leave the child permanently unable to profile).
+reporter, health sampler, and session flusher. Before the native fork, Lantern
+stops any active Vernier/StackProf profile and prevents another from starting
+until the native fork returns. A failed native shutdown aborts the fork rather
+than crossing it with uncertain sampler state. Afterward, the child replaces
+the inherited reporter buffer, drop accounting, transport policy state,
+mutexes, condition variables, dead threads, and profiler backend
+cache/counters/handle. Forking the native profiler and only clearing its Ruby
+handle afterward can hang or crash when the child starts another profile.
 The parent's half-finished session map is discarded too. The child then
 emits its own `process` record and starts fresh health/session threads for
 its role. Parent records remain owned by and delivered from the parent;

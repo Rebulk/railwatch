@@ -415,13 +415,23 @@ process exit after that deadline cannot preserve records for the next boot.
 Lantern re-arms the reporter, sampler, and profiler after `fork` (a
 `Process._fork` hook), so clustered Puma workers and forked Solid Queue
 workers each get a fresh buffer, transport policy state, process record,
-health thread, and profiler slot. The child never flushes records or drop
-accounting inherited from its parent, and no `on_worker_boot` configuration
-is needed.
+health thread, and profiler slot. Any active Vernier/StackProf session is
+stopped before the native fork, and new profiles remain gated until that fork
+returns. If native profiler shutdown fails, the unsafe fork is aborted. The
+child replaces inherited profiler locks, backend cache, counters, and handle
+before it can profile. The child never flushes records or drop accounting
+inherited from its parent, and no `on_worker_boot` configuration is needed.
 
-A numeric `LANTERN_*` value that is not a number (`LANTERN_BUFFER_SIZE=12px`)
-falls back to the default documented in the tables above rather than being
-coerced to `0`.
+Numeric settings are strictly parsed and validated after environment loading
+and every `Lantern.configure` block. Malformed values, NaN/infinity, negative
+or zero values where the setting must be positive, and sample rates outside
+`0.0..1.0` fall back to the default documented in the tables rather than
+breaking application boot or reaching a buffer, timeout, or wait primitive.
+Zero remains valid for settings where it means disabled or no wait (including
+`failure_context`, `profile_sample`, `shutdown_timeout`, and threshold
+settings). Run `bin/rails lantern:doctor`; its fatal `numeric configuration`
+line names every invalid environment variable or `config.<attribute>` and the
+fallback in use.
 
 ### Release health
 
@@ -769,13 +779,14 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention
 - **`lantern:status`** — pings `{ingest_url}/ingest/ping` with the
   configured token; aborts if `LANTERN_TOKEN` is unset or the ping fails.
 - **`lantern:doctor`** — prints a ✓/✗ checklist of the whole install: token,
+  finite/in-domain numeric configuration,
   ingest URL, `GET /ingest/ping`, `Lantern::Middleware::Request` in the
   middleware stack, the mounted engine's beacon route, `config.deploy` and
   which env var it came from, sample rates, ignored record types, the Kamal
   `post-deploy` hook, `app/frontend/lib/lantern.ts`, and whether
   `lantern/rspec` (or `lantern/minitest`) is required by the test helper.
-  The last five are informational; it exits non-zero only when the token is
-  missing or the ping fails.
+  The last five are informational; it exits non-zero when the token is
+  missing, a numeric setting is invalid, or the ping fails.
 - **`lantern:deploy[ref,name,url]`** — POSTs `{deploy, ref, name, url,
   server, timestamp, performer, destination, service, commits}` to
   `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`; aborts

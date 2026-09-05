@@ -8,19 +8,18 @@
   in likely secret-bearing files tracked by Git. The legacy `--token=` option
   remains compatible but warns about shell-history and process-list exposure.
 
-- A forked worker profiles again. `Process._fork` now resets the profiler's
-  process-global state in the child: it used to inherit `@running` holding
-  the handle of a profile the parent was taking, which nothing in the child
-  ever stopped, so every execution in that worker was counted as skipped and
-  never profiled for the life of the process.
+- A forked worker profiles again without inheriting unsafe native state.
+  `Process._fork` now stops any real Vernier/StackProf profile before the
+  native fork, keeps new profiles gated until the fork completes, then replaces
+  the child profiler's locks, backend cache, counters, and handle. The fork is
+  aborted if native shutdown fails. Clearing only the Ruby handle after fork
+  could hang or crash when the child started its first profile.
 
-- Numeric `LANTERN_*` environment variables are parsed with `Integer()`/
-  `Float()` and fall back to the documented default when the value is not a
-  number. `LANTERN_BUFFER_SIZE=12px` used to become `0` via `String#to_i`,
-  silently turning off buffering; the same applied to timeouts, intervals
-  and sample rates.
-
-
+- Every numeric environment and initializer setting is strictly parsed and
+  domain-checked at configuration finalization. Malformed, NaN/infinite,
+  non-positive timeout/interval/limit, and out-of-range sample values fall
+  back to documented safe defaults without breaking app boot;
+  `lantern:doctor` names every invalid setting and exits non-zero.
 
 - Inbound `traceparent` parsing follows the W3C trace-context validity
   rules: version `ff`, an all-zero trace id, and an all-zero parent id are

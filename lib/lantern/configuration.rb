@@ -56,6 +56,48 @@ module Lantern
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
+    SAMPLE_DEFAULTS = {
+      requests: 1.0,
+      jobs: 1.0,
+      commands: 1.0,
+      scheduled_tasks: 1.0,
+      exceptions: 1.0
+    }.freeze
+
+    SAMPLE_ENV_KEYS = {
+      requests: "LANTERN_REQUEST_SAMPLE_RATE",
+      jobs: "LANTERN_JOB_SAMPLE_RATE",
+      commands: "LANTERN_COMMAND_SAMPLE_RATE",
+      scheduled_tasks: "LANTERN_SCHEDULED_TASK_SAMPLE_RATE",
+      exceptions: "LANTERN_EXCEPTION_SAMPLE_RATE"
+    }.freeze
+
+    # Runtime-safe defaults and accepted domains for every numeric setting.
+    # Invalid environment/configuration values are reported but replaced with
+    # these defaults so observability configuration can never break app boot
+    # or reach a negative slice, timeout, or condition-variable wait.
+    NUMERIC_SETTINGS = {
+      buffer_size: { env: "LANTERN_BUFFER_SIZE", default: 10_000, integer: true, min: 1 },
+      flush_interval: { env: "LANTERN_FLUSH_INTERVAL", default: 2.0, min: 0, exclusive_min: true },
+      flush_threshold: { env: "LANTERN_FLUSH_THRESHOLD", default: 500, integer: true, min: 1 },
+      connect_timeout: { env: "LANTERN_CONNECT_TIMEOUT", default: 1.0, min: 0, exclusive_min: true },
+      timeout: { env: "LANTERN_TIMEOUT", default: 3.0, min: 0, exclusive_min: true },
+      shutdown_timeout: { env: "LANTERN_SHUTDOWN_TIMEOUT", default: 2.0, min: 0 },
+      slow_query_threshold_ms: { env: "LANTERN_SLOW_QUERY_MS", default: 5.0, min: 0 },
+      n_plus_one_threshold: { env: "LANTERN_N_PLUS_ONE_THRESHOLD", default: 5, integer: true, min: 1 },
+      max_view_renders_per_execution: { default: 20, integer: true, min: 0 },
+      tail_sample_slow_ms: { env: "LANTERN_TAIL_SAMPLE_SLOW_MS", default: nil, min: 0, allow_nil: true },
+      failure_context: { env: "LANTERN_FAILURE_CONTEXT", default: 0, integer: true, min: 0 },
+      health_interval: { env: "LANTERN_HEALTH_INTERVAL", default: 15.0, min: 0, exclusive_min: true },
+      explain_threshold_ms: { env: "LANTERN_EXPLAIN_THRESHOLD_MS", default: 100.0, min: 0 },
+      profile_sample: { env: "LANTERN_PROFILE_SAMPLE_RATE", default: 0.0, min: 0, max: 1 },
+      profile_slow_ms: { env: "LANTERN_PROFILE_SLOW_MS", default: nil, min: 0, allow_nil: true },
+      profile_interval_us: { env: "LANTERN_PROFILE_INTERVAL_US", default: 1_000, integer: true, min: 1 },
+      max_attachment_bytes: { env: "LANTERN_MAX_ATTACHMENT_BYTES", default: 1_048_576, integer: true, min: 1 },
+      session_flush_interval: { env: "LANTERN_SESSION_FLUSH_INTERVAL", default: 60.0, min: 0, exclusive_min: true },
+      session_timeout: { env: "LANTERN_SESSION_TIMEOUT", default: 1800.0, min: 0, exclusive_min: true }
+    }.freeze
+
     attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
@@ -77,6 +119,7 @@ module Lantern
     attr_reader :user_resolver, :beacon_user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
     def initialize
+      @numeric_errors = {}
       @enabled = env_bool("LANTERN_ENABLED", true)
       @token = ENV["LANTERN_TOKEN"]
       @ingest_url = ENV.fetch("LANTERN_INGEST_URL", "https://lantern.rebulk.com")
@@ -87,13 +130,7 @@ module Lantern
       # in every container it starts, is that host.
       @server = ENV["LANTERN_SERVER"] || ENV["KAMAL_HOST"] || Socket.gethostname
       @environment = nil # resolved lazily from Rails.env
-      @sample = {
-        requests: env_float("LANTERN_REQUEST_SAMPLE_RATE", 1.0),
-        jobs: env_float("LANTERN_JOB_SAMPLE_RATE", 1.0),
-        commands: env_float("LANTERN_COMMAND_SAMPLE_RATE", 1.0),
-        scheduled_tasks: env_float("LANTERN_SCHEDULED_TASK_SAMPLE_RATE", 1.0),
-        exceptions: env_float("LANTERN_EXCEPTION_SAMPLE_RATE", 1.0)
-      }
+      @sample = SAMPLE_DEFAULTS.to_h { |kind, default| [ kind, env_float(SAMPLE_ENV_KEYS.fetch(kind), default) ] }
       self.ignore = RECORD_TYPES.select { |t| env_bool("LANTERN_IGNORE_#{t.to_s.upcase}", false) }
       @log_level = (ENV["LANTERN_LOG_LEVEL"] || "info").to_sym
       @capture_request_payload = env_bool("LANTERN_CAPTURE_REQUEST_PAYLOAD", false)
@@ -123,7 +160,7 @@ module Lantern
       @debug = env_bool("LANTERN_DEBUG", false)
       # Tail-based sampling: a head-sampled-out execution is still kept when
       # it ran at least this long, raised, or Lantern.keep! was called. nil = off.
-      @tail_sample_slow_ms = ENV["LANTERN_TAIL_SAMPLE_SLOW_MS"]&.then { |v| Float(v) }
+      @tail_sample_slow_ms = env_optional_float("LANTERN_TAIL_SAMPLE_SLOW_MS")
       # Failure context: how many of a head-sampled-out execution's child
       # records to hold in a ring so an unhandled exception can ship what led
       # up to it. 0 = off, which is the default -- a sampled-out execution
@@ -140,7 +177,7 @@ module Lantern
       # (0 = off), and always profile ones slower than profile_slow_ms once
       # tail sampling keeps them. Uses vernier when available, else stackprof.
       @profile_sample = env_float("LANTERN_PROFILE_SAMPLE_RATE", 0.0)
-      @profile_slow_ms = ENV["LANTERN_PROFILE_SLOW_MS"]&.then { |v| Float(v) }
+      @profile_slow_ms = env_optional_float("LANTERN_PROFILE_SLOW_MS")
       @profile_interval_us = env_int("LANTERN_PROFILE_INTERVAL_US", 1_000)
       @profiler = ENV["LANTERN_PROFILER"]&.to_sym
       @capture_job_arguments = env_bool("LANTERN_CAPTURE_JOB_ARGUMENTS", false)
@@ -165,6 +202,27 @@ module Lantern
       @redactors = Hash.new { |h, k| h[k] = [] }
       @rejectors = Hash.new { |h, k| h[k] = [] }
       @before_ingest = []
+      validate_numeric_settings!(:environment)
+      validate_sample_settings!(:environment)
+    end
+
+    # Starts a new configure transaction. Old initializer errors remain, but
+    # repaired code-level values clear stale config.* diagnostics.
+    def prepare_for_configuration!
+      @numeric_errors.delete_if { |key, _| key.start_with?("config.") }
+      self
+    end
+
+    # Called after Lantern.configure yields and by lantern:doctor. Invalid
+    # values fall back to known-safe defaults and remain visible to doctor.
+    def validate!
+      validate_numeric_settings!(:configuration)
+      validate_sample_settings!(:configuration)
+      self
+    end
+
+    def numeric_errors
+      @numeric_errors.dup
     end
 
     def user(&block)
@@ -248,14 +306,94 @@ module Lantern
       %w[1 true yes on].include?(ENV[key].to_s.downcase)
     end
 
-    # String#to_f/#to_i turn a typo into 0.0/0 -- a zero buffer, timeout, or
-    # interval -- so parse strictly and keep the documented default instead.
     def env_float(key, default)
-      ENV.key?(key) ? Float(ENV[key], exception: false) || default : default
+      return default unless ENV.key?(key)
+
+      Float(ENV[key])
+    rescue ArgumentError, TypeError
+      invalid_numeric!(key, ENV[key], "must be a number", default)
+      default
     end
 
     def env_int(key, default)
-      ENV.key?(key) ? Integer(ENV[key], 10, exception: false) || default : default
+      return default unless ENV.key?(key)
+
+      Integer(ENV[key], 10)
+    rescue ArgumentError, TypeError
+      invalid_numeric!(key, ENV[key], "must be an integer", default)
+      default
+    end
+
+    def env_optional_float(key)
+      return nil unless ENV.key?(key)
+
+      Float(ENV[key])
+    rescue ArgumentError, TypeError
+      invalid_numeric!(key, ENV[key], "must be a number or unset", nil)
+      nil
+    end
+
+    def validate_numeric_settings!(source)
+      NUMERIC_SETTINGS.each do |attribute, rule|
+        value = public_send(attribute)
+        next if valid_numeric?(value, rule)
+
+        label = source == :environment && rule[:env] ? rule[:env] : "config.#{attribute}"
+        invalid_numeric!(label, value, numeric_requirement(rule), rule[:default])
+        public_send("#{attribute}=", rule[:default])
+      end
+    end
+
+    def validate_sample_settings!(source)
+      unless @sample.is_a?(Hash)
+        invalid_numeric!("config.sample", @sample, "must be a hash of finite rates", SAMPLE_DEFAULTS)
+        @sample = {}
+      end
+      @sample = @sample.dup if @sample.frozen?
+      SAMPLE_DEFAULTS.each do |kind, default|
+        unless @sample.key?(kind)
+          @sample[kind] = default
+          next
+        end
+        value = @sample.fetch(kind)
+        next if finite_numeric?(value) && value.between?(0, 1)
+
+        label = source == :environment ? SAMPLE_ENV_KEYS.fetch(kind) : "config.sample[:#{kind}]"
+        invalid_numeric!(label, value, "must be a finite number from 0 through 1", default)
+        @sample[kind] = default
+      end
+    end
+
+    def valid_numeric?(value, rule)
+      return true if value.nil? && rule[:allow_nil]
+      return false unless finite_numeric?(value)
+      return false if rule[:integer] && !value.is_a?(Integer)
+      return false if rule[:min] && (rule[:exclusive_min] ? value <= rule[:min] : value < rule[:min])
+      return false if rule[:max] && value > rule[:max]
+
+      true
+    end
+
+    def finite_numeric?(value)
+      value.is_a?(Numeric) && !value.is_a?(Complex) && value.respond_to?(:finite?) && value.finite? &&
+        !(value <=> 0).nil?
+    rescue StandardError
+      false
+    end
+
+    def numeric_requirement(rule)
+      type = rule[:integer] ? "an integer" : "a finite number"
+      lower = if rule[:min]
+        rule[:exclusive_min] ? " greater than #{rule[:min]}" : " at least #{rule[:min]}"
+      end
+      upper = " at most #{rule[:max]}" if rule[:max]
+      nullable = " or unset" if rule[:allow_nil]
+      "must be #{type}#{lower}#{upper}#{nullable}"
+    end
+
+    def invalid_numeric!(label, value, requirement, fallback)
+      rendered = value.inspect.to_s.byteslice(0, 100).scrub
+      @numeric_errors[label] = "#{label}=#{rendered} #{requirement}; using #{fallback.inspect}"
     end
   end
 end

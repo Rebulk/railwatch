@@ -79,6 +79,7 @@ namespace :lantern do
   desc "Check a Lantern install end to end: token, ingest, middleware, routes, deploy, hooks, test helpers"
   task doctor: :environment do
     config = Lantern.config
+    config.validate!
     blockers = []
     check = lambda do |ok, label, detail, fatal: false|
       puts "#{ok ? "✓" : "✗"} #{label}: #{detail}"
@@ -95,6 +96,11 @@ namespace :lantern do
     check.call(exposed_token_files.empty?, "token storage",
                exposed_token_files.empty? ? "no tracked plaintext Lantern token found" :
                  "plaintext token found in tracked file(s): #{exposed_token_files.join(', ')}",
+               fatal: true)
+
+    numeric_errors = config.numeric_errors
+    check.call(numeric_errors.empty?, "numeric configuration",
+               numeric_errors.empty? ? "all values are within their supported domains" : numeric_errors.values.join("; "),
                fatal: true)
 
     ingest = URI.parse(config.ingest_url) rescue nil

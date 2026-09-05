@@ -10,6 +10,8 @@ module Lantern
   # one per thread. An execution that starts while another one is being
   # profiled is simply not profiled, and is counted in `skipped`.
   module Profiler
+    class ForkSafetyError < StandardError; end
+
     # What `stop` hands back. `interval` and `duration` are microseconds;
     # `collapsed` is the folded-stack text described on `collapse`.
     Profile = Struct.new(:profiler, :mode, :interval, :duration, :samples, :collapsed)
@@ -94,8 +96,12 @@ module Lantern
 
       # Stops the running profile and folds it into a Profile, or nil when
       # nothing was running or anything at all went wrong on the way.
-      def stop
-        handle = @lock.synchronize { @running.tap { @running = nil } }
+      def stop(expected_handle = nil)
+        handle = @lock.synchronize do
+          next if expected_handle && @running != expected_handle
+
+          @running.tap { @running = nil }
+        end
         return nil unless handle
 
         duration = Clock.micros_since(handle.started)
@@ -128,14 +134,36 @@ module Lantern
         end
       end
 
-      # Process._fork hook. A child inherits @running still holding the
-      # Handle for a profile the parent was taking, and nothing in the child
-      # ever stops it: `start` then sees a profile already running and every
-      # execution in that worker is counted as skipped and never profiled
-      # again. Clear the process-global state without taking @lock -- the
-      # child is single-threaded here, and Ruby has already abandoned any
-      # mutex a parent thread held across the fork.
+      # Holds the profiler lock from native-backend shutdown through the real
+      # fork boundary. A waiting application thread therefore cannot reopen
+      # the process-global profiler slot in the gap between stop and fork.
+      #
+      # The child deliberately abandons this inherited mutex; ForkHook calls
+      # restart_after_fork! immediately after this method returns. The parent
+      # releases its original mutex after Process._fork has completed.
+      def fork_safely
+        lock = @lock
+        parent_pid = Process.pid
+        lock.lock
+        handle = @running
+        @running = nil
+        begin
+          stop_backend(handle) if handle
+        rescue StandardError => e
+          @running = handle
+          raise ForkSafetyError, "cannot fork while #{handle.backend} shutdown is uncertain: #{e.message}"
+        end
+
+        yield
+      ensure
+        lock&.unlock if Process.pid == parent_pid && lock&.owned?
+      end
+
+      # Process._fork child hook. Ruby locks and backend-load memoization are
+      # process-local; replace them without touching an inherited mutex that a
+      # vanished parent thread may have owned.
       def restart_after_fork!
+        @lock = Mutex.new
         @running = nil
         @loadable = {}
         @skipped = 0

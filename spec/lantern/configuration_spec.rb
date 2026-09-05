@@ -45,12 +45,27 @@ RSpec.describe Lantern::Configuration do
       end
     end
 
-    it "keeps the documented default when a numeric variable is not a number, instead of silently zeroing it" do
-      with_env("LANTERN_BUFFER_SIZE" => "12px", "LANTERN_FLUSH_INTERVAL" => "never",
-               "LANTERN_REQUEST_SAMPLE_RATE" => "half") do |config|
+    it "reports malformed, non-finite, zero, negative, and out-of-range environment values while using safe defaults" do
+      with_env("LANTERN_BUFFER_SIZE" => "-1", "LANTERN_FLUSH_INTERVAL" => "0",
+               "LANTERN_TIMEOUT" => "NaN", "LANTERN_CONNECT_TIMEOUT" => "Infinity",
+               "LANTERN_SESSION_TIMEOUT" => "never", "LANTERN_REQUEST_SAMPLE_RATE" => "1.1",
+               "LANTERN_PROFILE_SAMPLE_RATE" => "-0.1") do |config|
         expect(config.buffer_size).to eq(10_000)
         expect(config.flush_interval).to eq(2.0)
+        expect(config.timeout).to eq(3.0)
+        expect(config.connect_timeout).to eq(1.0)
+        expect(config.session_timeout).to eq(1800.0)
         expect(config.sample[:requests]).to eq(1.0)
+        expect(config.profile_sample).to eq(0.0)
+        expect(config.numeric_errors).to include(
+          "LANTERN_BUFFER_SIZE" => "LANTERN_BUFFER_SIZE=-1 must be an integer at least 1; using 10000",
+          "LANTERN_FLUSH_INTERVAL" => "LANTERN_FLUSH_INTERVAL=0.0 must be a finite number greater than 0; using 2.0",
+          "LANTERN_TIMEOUT" => 'LANTERN_TIMEOUT="NaN" must be a number; using 3.0',
+          "LANTERN_CONNECT_TIMEOUT" => 'LANTERN_CONNECT_TIMEOUT="Infinity" must be a number; using 1.0',
+          "LANTERN_SESSION_TIMEOUT" => 'LANTERN_SESSION_TIMEOUT="never" must be a number; using 1800.0',
+          "LANTERN_REQUEST_SAMPLE_RATE" => "LANTERN_REQUEST_SAMPLE_RATE=1.1 must be a finite number from 0 through 1; using 1.0",
+          "LANTERN_PROFILE_SAMPLE_RATE" => "LANTERN_PROFILE_SAMPLE_RATE=-0.1 must be a finite number at least 0 at most 1; using 0.0"
+        )
       end
     end
 
@@ -181,6 +196,82 @@ RSpec.describe Lantern::Configuration do
     it "defaults an unknown sample kind to 1.0" do
       config = described_class.new
       expect(config.sample_rate(:some_new_kind)).to eq(1.0)
+    end
+  end
+
+  describe "#validate!" do
+    it "sanitizes every numeric code setting at configuration finalization" do
+      described_class::NUMERIC_SETTINGS.each do |attribute, rule|
+        config = described_class.new
+        invalid = if rule[:max]
+          rule[:max] + 1
+        elsif rule[:exclusive_min]
+          rule[:min]
+        else
+          (rule[:min] || 0) - 1
+        end
+        config.public_send("#{attribute}=", invalid)
+
+        expect { config.validate! }.not_to raise_error
+        expect(config.public_send(attribute)).to eq(rule[:default])
+        expect(config.numeric_errors).to have_key("config.#{attribute}")
+      end
+    end
+
+    it "rejects non-finite, complex, non-integer, and invalid or frozen sample values without breaking the app" do
+      config = described_class.new
+      config.buffer_size = 1.5
+      config.timeout = Complex(1, 1)
+      config.flush_interval = Float::NAN
+      config.sample = { requests: Complex(1, 0), jobs: -0.1, commands: 1.1 }.freeze
+
+      expect { config.validate! }.not_to raise_error
+
+      expect(config.buffer_size).to eq(10_000)
+      expect(config.timeout).to eq(3.0)
+      expect(config.flush_interval).to eq(2.0)
+      expect(config.sample).to include(requests: 1.0, jobs: 1.0, commands: 1.0)
+      expect(config.numeric_errors.keys).to include(
+        "config.buffer_size", "config.timeout", "config.flush_interval",
+        "config.sample[:requests]", "config.sample[:jobs]", "config.sample[:commands]"
+      )
+
+      config.prepare_for_configuration!
+      config.sample = "all"
+      expect { config.validate! }.not_to raise_error
+      expect(config.sample).to eq(described_class::SAMPLE_DEFAULTS)
+      expect(config.numeric_errors).to have_key("config.sample")
+    end
+
+    it "retains invalid diagnostics for doctor and clears them after a later valid configure transaction" do
+      config = described_class.new
+      config.prepare_for_configuration!
+      config.buffer_size = 0
+      config.validate!
+      config.validate!
+
+      expect(config.numeric_errors).to have_key("config.buffer_size")
+
+      config.prepare_for_configuration!
+      config.buffer_size = 20_000
+      config.validate!
+      expect(config.numeric_errors).not_to have_key("config.buffer_size")
+    end
+
+    it "is automatically applied after Lantern.configure yields" do
+      previous = Lantern.instance_variable_get(:@config)
+      Lantern.instance_variable_set(:@config, described_class.new)
+
+      result = Lantern.configure do |config|
+        config.buffer_size = -4
+        config.profile_sample = Float::NAN
+      end
+
+      expect(result.buffer_size).to eq(10_000)
+      expect(result.profile_sample).to eq(0.0)
+      expect(result.numeric_errors.keys).to include("config.buffer_size", "config.profile_sample")
+    ensure
+      Lantern.instance_variable_set(:@config, previous)
     end
   end
 
