@@ -85,7 +85,8 @@ Who the user is comes from a resolver block you write
 (`c.user { |u| ... }`), so the fields on a `user` record are exactly the
 ones you chose to put there. Cache keys are truncated at 255 characters
 and can be dropped wholesale with `Lantern.reject_cache_keys`; outgoing
-request URLs have their query strings stripped; uploaded files are
+request URLs, inbound request URLs, and redirect targets have authority
+credentials, entire query strings, and fragments stripped; uploaded files are
 recorded as metadata (name, size, content type) and never contents.
 
 ## Does SQLite work?

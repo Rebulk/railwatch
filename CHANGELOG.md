@@ -2,6 +2,14 @@
 
 ## 0.1.0 (unreleased)
 
+- The request record's `url` and `redirect_to` URL fields now retain only
+  origin (without authority credentials) and path. Query strings and
+  fragments are always removed from these fields, preventing reset tokens,
+  OAuth codes, signed-URL credentials, and other parameter values from being
+  exported even when request-payload capture is disabled. The Net::HTTP and
+  Faraday patches sanitize an `outgoing_request` URL through the same
+  helper, so authority credentials and fragments are now dropped there too.
+
 - Exception deduplication is now scoped to the current execution and to the
   handled/unhandled disposition, and only marks an error after sampling and
   pause checks pass. A sampled-out or paused handled report can no longer

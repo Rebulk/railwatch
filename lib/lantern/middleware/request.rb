@@ -119,7 +119,7 @@ module Lantern
         {
           group: Record.group_hash(method, pattern),
           method: method,
-          url: req.original_url.to_s[0, 2048],
+          url: Record.url_without_sensitive_components(req.original_url, limit: 2048),
           path: req.path,
           route: pattern,
           route_methods: [ route[:verb] ].compact,

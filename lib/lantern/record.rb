@@ -42,5 +42,30 @@ module Lantern
     def group_hash(*parts)
       Digest::MD5.hexdigest(parts.join(","))
     end
+
+    # URLs are metadata, not request payloads. Keep the useful origin/path
+    # while dropping authority credentials, every query value, and fragments
+    # without relying on strict parsing of application-provided redirects.
+    def url_without_sensitive_components(value, limit:)
+      url = value.to_s
+      query = url.index("?")
+      fragment = url.index("#")
+      cutoff = query && fragment ? [ query, fragment ].min : query || fragment
+      url = url[0, cutoff] if cutoff
+
+      scheme_end = url.index("://")
+      authority_start = if url.start_with?("//")
+        2
+      elsif scheme_end && /\A[A-Za-z][A-Za-z0-9+.-]*\z/.match?(url[0, scheme_end])
+        scheme_end + 3
+      end
+      if authority_start
+        authority_end = url.index("/", authority_start) || url.length
+        userinfo_end = url.rindex("@", authority_end - 1)
+        url = url[0, authority_start] + url[(userinfo_end + 1)..] if userinfo_end && userinfo_end >= authority_start
+      end
+
+      url[0, limit]
+    end
   end
 end
