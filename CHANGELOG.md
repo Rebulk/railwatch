@@ -2,6 +2,16 @@
 
 ## 0.1.0 (unreleased)
 
+- A `user` entity is now cached (one per id per process-hour) only after the
+  execution that carried it was actually handed to the reporter. Previously
+  the first sighting wrote the cache entry unconditionally, so if that
+  sighting happened inside a sampled-out or `Lantern.pause`d execution -- or
+  an execution whose sampling flipped afterwards -- no `user` record was ever
+  written, and every sampled-in sighting for the next hour was suppressed:
+  the platform had records attributed to a user it had no name or email for.
+  Forked workers also reset the cache, since a child's reporter buffer starts
+  empty and has to emit its own entities.
+
 - Action Cable channel actions now open a real `channel_action` execution
   before application code runs, so the queries, logs, broadcasts, transmits,
   and unhandled exceptions inside an action share one execution and one trace.

@@ -35,6 +35,63 @@ RSpec.describe "user record", type: :request do
     expect(lantern_records(:user).size).to eq(1)
   end
 
+  it "does not cache a user whose first resolution is sampled out" do
+    details = { id: "sampled-user", name: "Ada", email: "ada@example.com" }
+    exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+    exe.sampled = false
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    expect(lantern_records(:user).map { |record| record[:id] }).to eq([ "sampled-user" ])
+  end
+
+  it "does not cache a buffered user when controller-level sampling later drops the execution" do
+    details = { id: "late-sampled-user", name: "Ada", email: "ada@example.com" }
+    exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    exe.sampled = false
+    finish!
+
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    expect(lantern_records(:user).map { |record| record[:id] }).to eq([ "late-sampled-user" ])
+  end
+
+  it "does not cache a user whose first resolution is paused" do
+    details = { id: "paused-user", name: "Ada", email: "ada@example.com" }
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern.pause
+    Lantern::Subscribers::Users.remember(details)
+    Lantern.resume
+    finish!
+
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    expect(lantern_records(:user).map { |record| record[:id] }).to eq([ "paused-user" ])
+  end
+
+  it "emits the same user again after fork state is reset" do
+    details = { id: "fork-user", name: "Ada", email: "ada@example.com" }
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    Lantern::Subscribers::Users.restart_after_fork!
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern::Subscribers::Users.remember(details)
+    finish!
+
+    expect(lantern_records(:user).map { |record| record[:id] }).to eq([ "fork-user", "fork-user" ])
+  end
+
   it "uses config.user's custom resolver block instead of the id/name/email default" do
     Lantern.config.user { |u| { id: "custom-#{u.id}", name: "Custom #{u.name}", email: nil } }
     User.create!(name: "Bob", email: "bob@example.com")

@@ -601,6 +601,10 @@ Standalone — emitted once per distinct user id per process-hour
 can show names/emails without every other record carrying them. Resolved
 via `config.user` block if set, else `Current.user` (authentication-zero
 / Rails 8 auth generator), else Warden (Devise).
+The process-hour cache entry is written only once the execution carrying
+the entity has been handed to the reporter, so a sighting that was sampled
+out or paused does not suppress the next sighting that would ship. Forked
+workers start with an empty cache.
 
 | Field | Meaning |
 |---|---|

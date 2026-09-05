@@ -80,6 +80,7 @@ module Lantern
     def restart_after_fork!
       Profiler.restart_after_fork!
       @reporter&.restart_after_fork!
+      Subscribers::Users.restart_after_fork!
       Subscribers::ProcessInfo.restart_after_fork!
     end
 
@@ -129,6 +130,7 @@ module Lantern
         exe.records.each { |r| reporter.write(r) }
         reporter.buffer.account_dropped(exe.dropped_records) if exe.dropped_records.positive?
         reporter.write(parent) if parent
+        Subscribers::Users.commit_execution!(exe) if exe.pending_users
       elsif parent && exe.exception_sampled
         reporter.write(parent)
       end

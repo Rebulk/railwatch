@@ -71,14 +71,63 @@ module Lantern
         details
       end
 
+      # One `user` entity per id per process-hour. The cache entry is written
+      # only once the entity has actually shipped, which is why the record is
+      # parked on the execution (Execution#pending_users) and committed from
+      # finish_execution instead of here: a first sighting inside a
+      # sampled-out or paused execution writes no record, and must not
+      # suppress the next sighting that would.
+      #
+      # @seen is a plain unsynchronized Hash, as it was before: in CRuby a
+      # Hash store runs to completion under the GVL, so concurrent web
+      # threads cannot corrupt it, and the worst a lost race costs is one
+      # duplicate `user` record -- which the platform upserts by id.
       def remember(details)
-        @seen ||= {}
+        seen = (@seen ||= {})
         key = details[:id]
         now = Clock.now
-        return if @seen[key] && now - @seen[key] < 3600
+        last = seen[key]
+        return if last && now - last < 3600
+
+        exe = execution
+        pending = exe&.pending_users
+        return if pending&.key?(key)
+
+        record = Lantern.record(:user, id: key, name: details[:name], email: details[:email],
+                                tenant: Context.current_tenant)
+        return unless record
+
+        exe ? (exe.pending_users ||= {})[key] = record : mark_seen(key, now)
+        record
+      end
+
+      # Called from Lantern.finish_execution for a tree that is being handed
+      # to the reporter.
+      def commit_execution!(exe)
+        pending = exe.pending_users
+        exe.pending_users = nil
+        now = Clock.now
+        pending.each { |key, record| mark_seen(key, now) if buffered?(exe, record) }
+      end
+
+      # A fork inherits this cache but not the reporter buffer the cached
+      # entities were written to, so the child has to emit its own.
+      def restart_after_fork!
+        @seen = {}
+        execution&.pending_users = nil
+      end
+
+      # An over-full execution buffer drops the record it was handed, and a
+      # failure-context ring can later shift it back out; either way the
+      # entity never shipped. Identity, not `==`: two `user` records for the
+      # same person are equal hashes.
+      def buffered?(exe, record)
+        exe.records.any? { |buffered| buffered.equal?(record) }
+      end
+
+      def mark_seen(key, now)
         @seen[key] = now
         @seen.delete(@seen.keys.first) if @seen.size > 10_000
-        Lantern.record(:user, id: details[:id], name: details[:name], email: details[:email], tenant: Context.current_tenant)
       end
     end
   end
