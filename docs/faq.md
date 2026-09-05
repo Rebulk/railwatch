@@ -51,8 +51,12 @@ backups, and the pruner are yours to run:
 Two things are redacted with no configuration:
 
 - **Headers**, by name: `Authorization`, `Cookie`, `Set-Cookie`,
-  `Proxy-Authorization`, `X-CSRF-Token`, `X-XSRF-TOKEN`. Values are
-  replaced with `[FILTERED]`. Extend with `c.redact_headers += [...]`.
+  `Proxy-Authorization`, `X-CSRF-Token`, `X-XSRF-TOKEN`, plus any
+  credential-shaped name segment such as `api-key`, `auth`, `token`,
+  `secret`, or `signature` (including vendor headers such as
+  `X-Hub-Signature-256`). Values are replaced with `[FILTERED]`. Extend the
+  exact denylist for application-specific names with
+  `c.redact_headers += [...]`.
 - **Parameters**, by name: `password`, `password_confirmation`,
   `authenticity_token`, `_token` — merged with your app's own
   `config.filter_parameters`, so anything already hidden from your logs
