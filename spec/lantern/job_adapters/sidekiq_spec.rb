@@ -54,6 +54,21 @@ RSpec.describe Lantern::JobAdapters::Sidekiq do
       queue: "critical", adapter: "Sidekiq", failed: false)
   end
 
+  it "propagates the effective sampled decision after keep! promotes a trace" do
+    Lantern.config.sample[:commands] = 0.0
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    expect(Lantern.execution).not_to be_sampled
+    Lantern.keep!
+    payload = direct_payload.dup
+
+    described_class::ClientMiddleware.new.call("Invoices::ChargeJob", payload, "critical") { :pushed }
+    finish_command
+
+    expect(payload.dig("_lantern", "sampled")).to be(true)
+    expect(lantern_records(:command)).to contain_exactly(include(trace_id: payload.dig("_lantern", "trace_id")))
+    expect(lantern_records(:enqueued_job)).to contain_exactly(include(job_id: "sidekiq-jid"))
+  end
+
   it "passes enqueue failures through unchanged and records one failed push" do
     Lantern.start_execution(source: :command, sample_kind: :commands)
     calls = 0

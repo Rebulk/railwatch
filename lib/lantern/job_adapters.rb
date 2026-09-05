@@ -57,7 +57,10 @@ module Lantern
       context = context.merge(
         "trace_id" => exe.trace_id,
         "parent_id" => exe.id,
-        "sampled" => exe.sampled?
+        # keep! promotes a head-sampled-out execution to the same durable
+        # trace-continuity contract as a head-sampled one. This is also how
+        # an upstream-sampled inbound trace is retained by the Rack hook.
+        "sampled" => exe.sampled? || exe.keep
       )
       context["user"] = user.to_s if user
       tenant = exe.tenant || Context.current_tenant
