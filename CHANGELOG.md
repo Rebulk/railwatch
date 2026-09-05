@@ -2,6 +2,11 @@
 
 ## 0.1.0 (unreleased)
 
+- `buffer_size` defaults to 10,000 (was 5,000), matching
+  `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost
+  its first records when the tree was written at the end of the execution;
+  on rebulk-system that was every outgoing HTTP request of a 30-second sync.
+
 - Active Job payloads now carry the enqueuing execution's user and tenant
   (`lantern_user`/`lantern_tenant`) next to the trace and parent ids, and
   the worker restores them before the attempt opens. A `job_attempt` and

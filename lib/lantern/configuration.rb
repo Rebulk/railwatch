@@ -101,7 +101,11 @@ module Lantern
       @capture_exception_locals = env_bool("LANTERN_CAPTURE_EXCEPTION_LOCALS", false)
       @redact_headers = ENV.fetch("LANTERN_REDACT_HEADERS", "Authorization,Cookie,Set-Cookie,Proxy-Authorization,X-CSRF-Token,X-XSRF-TOKEN").split(",").map(&:strip)
       @redact_params = ENV.fetch("LANTERN_REDACT_PARAMS", "password,password_confirmation,authenticity_token,_token").split(",").map(&:strip)
-      @buffer_size = env_int("LANTERN_BUFFER_SIZE", 5_000)
+      # At least Execution::MAX_RECORDS: finish_execution writes a kept
+      # execution's whole tree into this queue at once, and a queue smaller
+      # than the tree drops the tree's own oldest records -- the outgoing
+      # requests and first queries at the top of a long job.
+      @buffer_size = env_int("LANTERN_BUFFER_SIZE", 10_000)
       @flush_interval = env_float("LANTERN_FLUSH_INTERVAL", 2.0)
       @flush_threshold = env_int("LANTERN_FLUSH_THRESHOLD", 500)
       @connect_timeout = env_float("LANTERN_CONNECT_TIMEOUT", 1.0)
