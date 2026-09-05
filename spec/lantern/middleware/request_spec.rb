@@ -351,6 +351,26 @@ RSpec.describe Lantern::Middleware::Request do
     expect(Lantern.execution).to be_nil
   end
 
+  [ Errno::EPIPE, Errno::ECONNRESET ].each do |error_class|
+    it "propagates #{error_class} from body close without reporting an application exception" do
+      disconnect = error_class.new("client disconnected")
+      close_calls = 0
+      stream = Object.new
+      stream.define_singleton_method(:each) { |&block| block.call("chunk") }
+      stream.define_singleton_method(:close) do
+        close_calls += 1
+        raise disconnect
+      end
+      app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+      _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+      expect { body.each { |_| nil } }.to raise_error { |error| expect(error).to equal(disconnect) }
+      expect(close_calls).to eq(1)
+      expect(lantern_records(:request).size).to eq(1)
+      expect(lantern_records(:exception)).to be_empty
+    end
+  end
+
   it "keeps Array responses on the immediate allocation-free lifecycle" do
     response_body = [ "ready" ]
     status, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
@@ -383,6 +403,7 @@ RSpec.describe Lantern::Middleware::Request do
     stream = Object.new
     stream.define_singleton_method(:to_ary) do
       Lantern.record(:span, name: "coerced body")
+      close
       [ "coerced" ]
     end
     stream.define_singleton_method(:each) { |_| raise "each should not run" }
@@ -394,6 +415,36 @@ RSpec.describe Lantern::Middleware::Request do
     expect(close_calls).to eq(1)
     expect(lantern_records(:span).sole[:name]).to eq("coerced body")
     expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "does not double-close a coercible body wrapped in Rack::BodyProxy" do
+    proxy_class = Class.new(Rack::BodyProxy) do
+      attr_reader :close_calls
+
+      def close
+        @close_calls = close_calls.to_i + 1
+        raise "body proxy closed twice" if close_calls > 1
+
+        super
+      end
+    end
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:to_ary) { [ "coerced" ] }
+    stream.define_singleton_method(:each) { |_| raise "each should not run" }
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    proxied = proxy_class.new(stream) { nil }
+    app = ->(_) { [ 200, {}, proxied ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/coerced"))
+
+    expect(body.to_ary).to eq([ "coerced" ])
+    expect(close_calls).to eq(1)
+    expect(proxied.close_calls).to eq(1)
+    expect(lantern_records(:request).size).to eq(1)
+
+    body.close
+    expect(close_calls).to eq(1)
+    expect(proxied.close_calls).to eq(1)
   end
 
   it "preserves Rack 3 call-only streaming body semantics" do
@@ -558,6 +609,28 @@ RSpec.describe Lantern::Middleware::Request do
   ensure
     ActiveSupport::IsolatedExecutionState.clear
     ActiveSupport::IsolatedExecutionState.isolation_level = original_level if original_level
+  end
+
+  it "includes context added during body close after Rails clears its execution context" do
+    stream = Object.new
+    stream.define_singleton_method(:each) { |&block| block.call("chunk") }
+    stream.define_singleton_method(:close) do
+      Lantern.context(close_phase: "complete")
+      ActiveSupport::ExecutionContext.clear
+    end
+    app = lambda do |_|
+      Lantern.context(request_marker: "request-value")
+      [ 200, {}, stream ]
+    end
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+    body.each { |_| nil }
+
+    expect(JSON.parse(lantern_records(:request).sole[:context])).to include(
+      "request_marker" => "request-value", "close_phase" => "complete"
+    )
+  ensure
+    ActiveSupport::ExecutionContext.clear
   end
 
   it "does not report a downstream client disconnect as an application exception" do
@@ -742,6 +815,49 @@ RSpec.describe Lantern::Middleware::Request do
   ensure
     worker&.join
     Lantern.config.profile_sample = 0.0
+  end
+
+  it "discards an origin-thread profile before a deferred body can yield to another fiber" do
+    original_level = ActiveSupport::IsolatedExecutionState.isolation_level
+    original_profile_sample = Lantern.config.profile_sample
+    ActiveSupport::IsolatedExecutionState.isolation_level = :fiber
+    handle = Object.new
+    Lantern.config.profile_sample = 1.0
+    allow(Lantern::Profiler).to receive(:available?).and_return(true)
+    allow(Lantern::Profiler).to receive(:start).and_return(handle)
+    allow(Lantern::Profiler).to receive(:stop).with(handle).and_return(nil)
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      Fiber.yield(:stream_suspended)
+      Lantern.record(:span, name: "fiber body")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { nil }
+    request_middleware = described_class.new(->(_) { [ 200, {}, stream ] })
+
+    _, _, body = request_middleware.call(env_for("http://customer.test/fiber-stream"))
+
+    expect(Lantern::Profiler).to have_received(:stop).with(handle).once
+    expect(lantern_records(:profile)).to be_empty
+
+    consumer = Fiber.new { body.each { |_| nil } }
+    expect(consumer.resume).to eq(:stream_suspended)
+    Fiber.new do
+      ActiveSupport::ExecutionContext.set(unrelated_fiber: true)
+    ensure
+      ActiveSupport::ExecutionContext.clear
+    end.resume
+    consumer.resume
+
+    expect(Lantern::Profiler).to have_received(:stop).with(handle).once
+    expect(lantern_records(:profile)).to be_empty
+    expect(lantern_records(:span).sole[:name]).to eq("fiber body")
+    expect(lantern_records(:request).size).to eq(1)
+  ensure
+    consumer&.resume if consumer&.alive?
+    ActiveSupport::IsolatedExecutionState.clear
+    ActiveSupport::IsolatedExecutionState.isolation_level = original_level if original_level
+    Lantern.config.profile_sample = original_profile_sample
   end
 
   it "finishes the request execution when the app leaves an inner execution current" do

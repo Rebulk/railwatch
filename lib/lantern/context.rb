@@ -9,7 +9,7 @@ module Lantern
     EMPTY_JSON = "{}".freeze
     OVERRIDE_KEY = :lantern_context_snapshot
 
-    Snapshot = Struct.new(:values, :tenant, keyword_init: true)
+    Snapshot = Struct.new(:values, :tenant, :write_through, keyword_init: true)
 
     module_function
 
@@ -17,10 +17,10 @@ module Lantern
       if (snapshot = override)
         # A response body can be consumed on a thread that already belongs to
         # unrelated Rails work. Keep Lantern.context changes in the captured
-        # request snapshot rather than writing them into that thread's Rails
-        # stores. Lantern records produced by the body still see the update.
+        # request snapshot. Only mirror them into Rails' stores when this is
+        # the originating context; never contaminate another thread or fiber.
         snapshot.values.merge!(attrs)
-        return attrs
+        return attrs unless snapshot.write_through
       end
 
       ActiveSupport::ExecutionContext.set(**attrs)

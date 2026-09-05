@@ -12,10 +12,10 @@ module Lantern
       # different thread, so finalizing in #call loses everything emitted by
       # #each and reports only the time needed to construct the response.
       #
-      # Completion owns the wrapped body's close: this makes normal
+      # Completion normally owns the wrapped body's close: this makes normal
       # enumeration, a downstream disconnect, and an explicit close all take
-      # the same exactly-once path. Servers conventionally call close after
-      # each; that second call is harmless, just like Rack::BodyProxy.
+      # the same exactly-once path. The Rack #to_ary protocol is the exception:
+      # a coercible body owns its close, so completion only finalizes around it.
       class ResponseBody
         def initialize(body, middleware, env, execution, status, headers, context_snapshot)
           @body = body
@@ -32,9 +32,10 @@ module Lantern
           @close_started = false
           @close_finished = false
           @finalization_claimed = false
-          @cross_thread_profile_stopped = false
+          @deferred_profile_stopped = false
           @preserving = nil
           @finish_context = nil
+          stop_deferred_profile if ActiveSupport::IsolatedExecutionState.isolation_level == :fiber
         end
 
         def close
@@ -59,7 +60,7 @@ module Lantern
 
         private
 
-        def consume(capture_error: nil)
+        def consume(capture_error: nil, close_body: true)
           begin_consumption
           error = nil
           with_request_state do
@@ -70,7 +71,7 @@ module Lantern
               capture(e) unless capture_error && !capture_error.call(e)
               raise
             ensure
-              complete(preserving: error, consumption_finished: true)
+              complete(preserving: error, consumption_finished: true, close_body: close_body)
             end
           end
         end
@@ -84,7 +85,12 @@ module Lantern
         end
 
         def consume_to_ary(*args, &block)
-          consume { @body.__send__(:to_ary, *args, &block) }
+          # Rack requires a body that has both #to_ary and #close to close
+          # itself from #to_ary. Do not close it a second time here; the outer
+          # wrapper still marks itself closed and finalizes the request.
+          Context.with(close_context_snapshot) do
+            consume(close_body: false) { @body.__send__(:to_ary, *args, &block) }
+          end
         end
 
         def consume_stream(stream)
@@ -94,7 +100,7 @@ module Lantern
           consume(capture_error: capture_error) { yield proxy }
         end
 
-        def complete(preserving: nil, consumption_finished: false)
+        def complete(preserving: nil, consumption_finished: false, close_body: true)
           close_owner = false
           should_finalize = false
           @completion_mutex.synchronize do
@@ -110,19 +116,24 @@ module Lantern
           close_error = nil
           if close_owner
             with_request_state do
-              # ActionDispatch::Executor clears Rails' execution context from
-              # its inner BodyProxy#close. Retain it before delegating.
-              @finish_context = Context.serialized
-              begin
-                @body.close if @body.respond_to?(:close)
-              rescue Exception => e # rubocop:disable Lint/RescueException
-                close_error = e
-                capture(e) unless preserving
-              ensure
-                @completion_mutex.synchronize do
-                  @preserving ||= close_error
-                  @close_finished = true
-                  should_finalize = claim_finalization
+              close_snapshot = close_context_snapshot(refresh: close_body)
+              Context.with(close_snapshot) do
+                begin
+                  @body.close if close_body && @body.respond_to?(:close)
+                rescue Exception => e # rubocop:disable Lint/RescueException
+                  close_error = e
+                  Context.with(close_snapshot) { capture(e) } unless preserving || downstream_disconnect?(e)
+                ensure
+                  # ActionDispatch::Executor may clear Rails' execution state
+                  # from its inner BodyProxy#close. Serialize afterward while
+                  # the retained snapshot is still installed so context added
+                  # by close is included in the request parent.
+                  @finish_context = Context.with(close_snapshot) { Context.serialized }
+                  @completion_mutex.synchronize do
+                    @preserving ||= close_error
+                    @close_finished = true
+                    should_finalize = claim_finalization
+                  end
                 end
               end
             end
@@ -146,7 +157,7 @@ module Lantern
         end
 
         def with_request_state(&block)
-          stop_cross_thread_profile unless Thread.current.equal?(@origin_thread)
+          stop_deferred_profile unless Thread.current.equal?(@origin_thread)
           Current.with(@execution) do
             if ActiveSupport::IsolatedExecutionState.context.equal?(@origin_context)
               block.call
@@ -156,13 +167,24 @@ module Lantern
           end
         end
 
-        def stop_cross_thread_profile
+        def stop_deferred_profile
           should_stop = @completion_mutex.synchronize do
-            next false if @cross_thread_profile_stopped
+            next false if @deferred_profile_stopped
 
-            @cross_thread_profile_stopped = true
+            @deferred_profile_stopped = true
           end
           Lantern.discard_execution(@execution) if should_stop
+        end
+
+        def close_context_snapshot(refresh: true)
+          write_through = ActiveSupport::IsolatedExecutionState.context.equal?(@origin_context)
+          @context_snapshot.values.replace(Context.current) if refresh && write_through && !Context.override
+          Context::Snapshot.new(values: @context_snapshot.values, tenant: @context_snapshot.tenant,
+                                write_through: write_through)
+        end
+
+        def downstream_disconnect?(error)
+          Errno::EPIPE === error || Errno::ECONNRESET === error
         end
 
         def capture(error)
