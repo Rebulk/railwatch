@@ -25,6 +25,37 @@ RSpec.describe "redaction and rejection", type: :request do
         "X-Auth-Token" => "auth-secret",
         "X-Hub-Signature-256" => "github-secret",
         "Stripe-Signature" => "stripe-secret",
+        "X-Shopify-Hmac-Sha256" => "shopify-secret",
+        "X-Aws-Credential" => "aws-credential",
+        "X-Access-Key" => "access-key",
+        "X-Jwt-Assertion" => "jwt-secret",
+        "X-Bearer" => "bearer-secret",
+        "X-Private-Key" => "private-key",
+        "X-AuthToken" => "concatenated-auth-secret",
+        "X-AccessToken" => "concatenated-access-secret",
+        "X-BearerToken" => "concatenated-bearer-secret",
+        "X-HmacSignature" => "concatenated-hmac-secret",
+        "X-CSRFToken" => "concatenated-csrf-secret",
+        "X-XSRFToken" => "concatenated-xsrf-secret",
+        "X-ApiToken" => "concatenated-api-secret",
+        "X-ClientToken" => "concatenated-client-secret",
+        "X-SessionToken" => "concatenated-session-secret",
+        "X-RefreshToken" => "concatenated-refresh-secret",
+        "X-SecurityToken" => "concatenated-security-secret",
+        "X-ServiceToken" => "concatenated-service-secret",
+        "X-IdentityToken" => "concatenated-identity-secret",
+        "X-IdToken" => "concatenated-id-secret",
+        "X-SecretKey" => "concatenated-secret-key",
+        "X-SigningKey" => "concatenated-signing-key",
+        "X-EncryptionKey" => "concatenated-encryption-key",
+        "X-Authenticated-User" => "diagnostic-user",
+        "X-Tokenizer-Version" => "v2",
+        "X-ApiTokenizer" => "v3",
+        "X-ClientTokenization" => "enabled",
+        "X-SessionTokenizer" => "v4",
+        "X-RefreshTokenizer" => "v5",
+        "X-SecretKeyboard" => "diagnostic",
+        "X-Secretariat" => "office",
         "X-Custom" => "keep-me"
       }
       req = lantern_records(:request).sole
@@ -35,6 +66,37 @@ RSpec.describe "redaction and rejection", type: :request do
       expect(req[:headers]["X-Auth-Token"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Hub-Signature-256"]).to eq("[FILTERED]")
       expect(req[:headers]["Stripe-Signature"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Shopify-Hmac-Sha256"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Aws-Credential"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Access-Key"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Jwt-Assertion"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Bearer"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Private-Key"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Authtoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Accesstoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Bearertoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Hmacsignature"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Csrftoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Xsrftoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Apitoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Clienttoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Sessiontoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Refreshtoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Securitytoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Servicetoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Identitytoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Idtoken"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Secretkey"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Signingkey"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Encryptionkey"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Authenticated-User"]).to eq("diagnostic-user")
+      expect(req[:headers]["X-Tokenizer-Version"]).to eq("v2")
+      expect(req[:headers]["X-Apitokenizer"]).to eq("v3")
+      expect(req[:headers]["X-Clienttokenization"]).to eq("enabled")
+      expect(req[:headers]["X-Sessiontokenizer"]).to eq("v4")
+      expect(req[:headers]["X-Refreshtokenizer"]).to eq("v5")
+      expect(req[:headers]["X-Secretkeyboard"]).to eq("diagnostic")
+      expect(req[:headers]["X-Secretariat"]).to eq("office")
       expect(req[:headers]["X-Custom"]).to eq("keep-me")
     end
   end
