@@ -2,6 +2,20 @@
 
 ## 0.1.0 (unreleased)
 
+- User references survive a tenant that binds after the user is resolved.
+  An app that resolves its user in one `before_action` and its tenant in the
+  next used to emit a bare `"1"` for every tenant's user 1 -- two tenants
+  collapsed onto one person on the platform. The execution now keeps the raw
+  id and requalifies it (plus the records already buffered, and the pending
+  `user` entity) the moment the tenant binds, so the final reference is
+  `"acme:1"` and the entity is deduplicated against that final reference
+  rather than the provisional one. Jobs enqueued from such a request carry
+  the raw id and the tenant, and the worker qualifies it on restore.
+- `Lantern.context(tenant: ...)` now actually sets the tenant on records, as
+  documented. It binds onto the running execution at `Lantern.context` time;
+  `Context.current_tenant` reads that before falling back to `TenantRecord` /
+  `ActiveRecord::Tenanted`, so nothing on the per-record path pays for it.
+
 - A `user` entity is now cached (one per id per process-hour) only after the
   execution that carried it was actually handed to the reporter. Previously
   the first sighting wrote the cache entry unconditionally, so if that
@@ -11,6 +25,8 @@
   the platform had records attributed to a user it had no name or email for.
   Forked workers also reset the cache, since a child's reporter buffer starts
   empty and has to emit its own entities.
+
+
 
 - Action Cable channel actions now open a real `channel_action` execution
   before application code runs, so the queries, logs, broadcasts, transmits,

@@ -128,7 +128,9 @@ worth knowing:
 
 - **Identifiers only.** Two strings — the same tenant-prefixed id the
   `user` record carries, and the tenant name. No user or tenant model is
-  serialized, hydrated, or looked up, on either side.
+  serialized, hydrated, or looked up, on either side. When the enqueuing
+  request had not bound its tenant yet, the raw id travels and the worker
+  qualifies it with the propagated tenant on restore.
 - **Jobs enqueuing jobs.** A job serializes the values it was given, so a
   chain of jobs keeps the identity of the request that started it.
 - **Retries and scheduled jobs.** A retry re-enqueues the same job object,
@@ -608,7 +610,7 @@ workers start with an empty cache.
 
 | Field | Meaning |
 |---|---|
-| `id` | Resolved user id, tenant-prefixed (`"tenant:id"`) if `Lantern.context(tenant:)` is set. |
+| `id` | Resolved user id, tenant-prefixed (`"tenant:id"`) when a tenant is bound — including when it binds *after* the user was resolved. |
 | `name` | Truncated to 255 chars. |
 | `email` | Truncated to 255 chars. |
 | `tenant` | Current tenant context, if any. |

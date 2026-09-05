@@ -67,7 +67,14 @@ module Lantern
         end
         return nil unless details.is_a?(Hash) && details[:id]
         details = details.transform_values { |v| v&.to_s&.[](0, 255) }
-        details[:id] = [ Context.current_tenant, details[:id] ].compact.join(":") if Context.current_tenant
+        # Binding a known tenant onto the execution now (rather than leaving
+        # it to Execution#envelope's lazy bind) is what makes the reference
+        # below final, which is what lets `remember` trust its cache.
+        if (tenant = Context.current_tenant)
+          exe = execution
+          exe.tenant = tenant if exe && exe.tenant.nil?
+          details[:id] = Execution.qualified_user(details[:id], tenant)
+        end
         details
       end
 
@@ -83,11 +90,10 @@ module Lantern
       # threads cannot corrupt it, and the worst a lost race costs is one
       # duplicate `user` record -- which the platform upserts by id.
       def remember(details)
-        seen = (@seen ||= {})
+        @seen ||= {}
         key = details[:id]
         now = Clock.now
-        last = seen[key]
-        return if last && now - last < 3600
+        return if recently_seen?(key, now)
 
         exe = execution
         pending = exe&.pending_users
@@ -101,13 +107,35 @@ module Lantern
         record
       end
 
-      # Called from Lantern.finish_execution for a tree that is being handed
-      # to the reporter.
+      # Called from Lantern.finish_execution, for a tree that is being handed
+      # to the reporter, just before its records are written.
       def commit_execution!(exe)
         pending = exe.pending_users
         exe.pending_users = nil
         now = Clock.now
-        pending.each { |key, record| mark_seen(key, now) if buffered?(exe, record) }
+        pending.each do |key, record|
+          # An over-full execution buffer drops the record it was handed, and
+          # a failure-context ring can later shift it back out; either way the
+          # entity never shipped. Identity, not `==`: two `user` records for
+          # the same person are equal hashes.
+          index = exe.records.index { |buffered| buffered.equal?(record) } or next
+
+          # A tenant bound after the entity was resolved changes its
+          # reference ("1" becomes "acme:1"), so this -- not the provisional
+          # key `remember` checked -- is what the cache is keyed on. Such an
+          # app therefore rebuilds the entity each request and discards the
+          # duplicate here; that is one small hash, and the alternative
+          # (trusting the provisional key) is what suppressed a second
+          # tenant's user 1 entirely.
+          reference = Execution.qualified_user(key, exe.tenant)
+          if recently_seen?(reference, now)
+            exe.records.delete_at(index)
+          else
+            record[:id] = reference
+            record[:tenant] = exe.tenant if record[:tenant].nil?
+            mark_seen(reference, now)
+          end
+        end
       end
 
       # A fork inherits this cache but not the reporter buffer the cached
@@ -117,12 +145,9 @@ module Lantern
         execution&.pending_users = nil
       end
 
-      # An over-full execution buffer drops the record it was handed, and a
-      # failure-context ring can later shift it back out; either way the
-      # entity never shipped. Identity, not `==`: two `user` records for the
-      # same person are equal hashes.
-      def buffered?(exe, record)
-        exe.records.any? { |buffered| buffered.equal?(record) }
+      def recently_seen?(key, now)
+        last = @seen[key]
+        last && now - last < 3600
       end
 
       def mark_seen(key, now)
