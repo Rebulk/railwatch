@@ -203,11 +203,24 @@ RSpec.describe "lantern rake tasks" do
 
     before { stub_request(:get, "http://lantern.test/ingest/ping").to_return(status: 200, body: "ok") }
 
+    it "aborts and names tracked plaintext token files without printing the token" do
+      allow(Lantern::SecretSafety).to receive(:tracked_plaintext_token_files)
+        .and_return([ ".env.production", "config/initializers/lantern.rb" ])
+
+      output, aborted = run_doctor
+
+      expect(aborted).to be(true)
+      expect(output).to include("✗ token storage: plaintext token found in tracked file(s): " \
+                                ".env.production, config/initializers/lantern.rb")
+      expect(output).not_to include(Lantern.config.token)
+    end
+
     it "passes every fatal check and does not abort on a healthy install" do
       output, aborted = run_doctor
 
       expect(aborted).to be(false)
       expect(output).to include("✓ token: test-t... (10 chars)")
+      expect(output).to include("✓ token storage: no tracked plaintext Lantern token found")
       expect(output).to include("✓ ingest url: http://lantern.test")
       expect(output).to include("✓ ingest reachable: GET http://lantern.test/ingest/ping")
       expect(output).to include("Lantern is wired up.")

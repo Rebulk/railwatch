@@ -16,19 +16,24 @@ bundle add lantern
 bin/rails generate lantern:install
 ```
 
-With the token already in hand you can hand it to the generator instead
-of editing files afterwards:
+With the token already in hand, let the generator read it without placing the
+secret in shell history or process arguments:
 
 ```sh
 bin/rails generate lantern:install \
-  --token=lt_... \
+  --prompt-token \
   --url=https://lantern.rebulk.com \
   --kamal-secrets
 ```
 
-- `--token=` writes `LANTERN_TOKEN` to `.env` when the app already has
-  one or bundles `dotenv`. When it doesn't, the generator prints exactly
-  where to put the token instead of inventing a file for it.
+- `--prompt-token` reads without echo. `--token-stdin` is available for a
+  secret-manager pipe; an already exported `LANTERN_TOKEN` is also detected.
+  The legacy `--token=` flag warns because command arguments can be visible in
+  shell history and process listings.
+- A token is written to `.env` only when Git confirms that `.env` is ignored.
+  A tracked or non-ignored dotenv file is refused; use Rails credentials, a
+  deployment secret manager, or add `.env` to `.gitignore first. Token values
+  are never printed by the generator.
 - `--url=` sets `LANTERN_INGEST_URL`, for a self-hosted platform. Leave
   it off to use the default, `https://lantern.rebulk.com`.
 - `--kamal-secrets` appends `LANTERN_TOKEN=$LANTERN_TOKEN` to

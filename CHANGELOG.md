@@ -2,6 +2,12 @@
 
 ## 0.1.0 (unreleased)
 
+- The installer now prefers a hidden prompt, stdin, or `LANTERN_TOKEN`, never
+  prints token values, and refuses to put a token in a tracked or non-ignored
+  `.env`. `lantern:doctor` also fails when it finds a plaintext `lt_...` token
+  in likely secret-bearing files tracked by Git. The legacy `--token=` option
+  remains compatible but warns about shell-history and process-list exposure.
+
 - A forked worker profiles again. `Process._fork` now resets the profiler's
   process-global state in the child: it used to inherit `@running` holding
   the handle of a profile the parent was taking, which nothing in the child

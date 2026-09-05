@@ -251,21 +251,95 @@ RSpec.describe Lantern::Generators::InstallGenerator do
       expect(File.read(env_file)).to eq("LANTERN_TOKEN=lt_existing\nLANTERN_INGEST_URL=https://lantern.example.com\n")
     end
 
-    it "prints the exact lines to paste, and writes no file, when the app has no dotenv" do
+    it "prints only a token prefix, and writes no file, when the app has no dotenv" do
       output = install
 
       expect(File).not_to exist(env_file)
-      expect(output).to include("LANTERN_TOKEN=lt_abc123")
+      expect(output).to include("LANTERN_TOKEN=lt_abc... (9 chars) (value hidden)")
+      expect(output).not_to include("LANTERN_TOKEN=lt_abc123")
       expect(output).to include("LANTERN_INGEST_URL=https://lantern.example.com")
       expect(output).to include(".kamal/secrets")
     end
 
-    it "touches .env only when a value was passed" do
+    it "touches .env only when neither an option nor environment token was supplied" do
       File.write(env_file, "FOO=bar\n")
+      token = ENV.delete("LANTERN_TOKEN")
 
       Dir.chdir(destination_root) { run_generator }
 
       expect(File.read(env_file)).to eq("FOO=bar\n")
+    ensure
+      ENV["LANTERN_TOKEN"] = token if token
+    end
+
+    it "reads an exported token without putting it in command arguments" do
+      File.write(env_file, "")
+      previous_token = ENV["LANTERN_TOKEN"]
+      ENV["LANTERN_TOKEN"] = "lt_from_environment"
+
+      Dir.chdir(destination_root) { run_generator }
+
+      expect(File.read(env_file)).to eq("LANTERN_TOKEN=lt_from_environment\n")
+    ensure
+      previous_token.nil? ? ENV.delete("LANTERN_TOKEN") : ENV["LANTERN_TOKEN"] = previous_token
+    end
+
+    it "warns about the legacy command-line token without printing it" do
+      output = install
+
+      expect(output).to include("--token exposes lt_abc... (9 chars) in process arguments")
+      expect(output).not_to include("--token exposes lt_abc123")
+    end
+
+    it "refuses a token when .env is tracked, while still writing the non-secret URL" do
+      Dir.chdir(destination_root) do
+        system("git", "init", "-q")
+        File.write(".env", "FOO=bar\n")
+        system("git", "add", "-f", ".env")
+      end
+
+      output = install
+
+      expect(output).to include("Refusing to write lt_abc... (9 chars) to .env")
+      expect(File.read(env_file)).to eq("FOO=bar\nLANTERN_INGEST_URL=https://lantern.example.com\n")
+      expect(File.read(env_file)).not_to include("lt_abc123")
+    end
+
+    it "refuses a token when .env is not ignored" do
+      Dir.chdir(destination_root) { system("git", "init", "-q") }
+      File.write(File.join(destination_root, "Gemfile"), %(gem "dotenv-rails"\n))
+
+      output = install
+
+      expect(output).to include("Git does not confirm that .env is ignored")
+      expect(File.read(env_file)).to eq("LANTERN_INGEST_URL=https://lantern.example.com\n")
+    end
+
+    it "writes a token when the repository explicitly ignores .env" do
+      Dir.chdir(destination_root) do
+        system("git", "init", "-q")
+        File.write(".gitignore", ".env\n")
+        File.write(".env", "")
+      end
+
+      install
+
+      expect(File.read(env_file)).to include("LANTERN_TOKEN=lt_abc123\n")
+    end
+
+    it "reads a token from stdin without echoing it" do
+      File.write(env_file, "")
+      previous_stdin = $stdin
+      $stdin = StringIO.new("lt_from_stdin\n")
+
+      output = Dir.chdir(destination_root) do
+        run_generator %w[--no-doctor --token-stdin --url=https://lantern.example.com]
+      end
+
+      expect(File.read(env_file)).to include("LANTERN_TOKEN=lt_from_stdin\n")
+      expect(output).not_to include("lt_from_stdin")
+    ensure
+      $stdin = previous_stdin if previous_stdin
     end
   end
 
