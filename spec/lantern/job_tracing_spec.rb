@@ -147,6 +147,29 @@ RSpec.describe Lantern::JobTracing, type: :request do
       expect(attempt[:tenant]).to eq("acme")
     end
 
+    it "qualifies a propagated user on the worker when the tenant bound after resolution" do
+      User.create!(name: "Ada", email: "ada@example.com")
+      tenant = stub_tenant(nil)
+      Current.user = User.first
+
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+      exe.user_id = Lantern::Subscribers::Users.resolve_from_current
+      expect(exe.user_id).to eq("1")
+
+      tenant.current_tenant = "acme"
+      WidgetJob.perform_later("hello")
+      Lantern.finish_execution
+
+      forget_local_identity!(tenant)
+      perform_enqueued_jobs
+
+      attempt = lantern_records(:job_attempt).sole
+      expect(attempt[:user]).to eq("acme:1")
+      expect(attempt[:tenant]).to eq("acme")
+    ensure
+      Current.user = nil
+    end
+
     it "falls back to local resolution for a payload enqueued before these keys existed" do
       User.create!(name: "Ada", email: "ada@example.com")
       get "/enqueue"

@@ -98,6 +98,17 @@ RSpec.describe Lantern::Context do
       expect(described_class.current_tenant).to eq("acme")
     end
 
+    it "binds a tenant set through Lantern.context onto the running execution" do
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+
+      Lantern.context(tenant: "custom-acme")
+
+      expect(exe.tenant).to eq("custom-acme")
+      expect(described_class.current_tenant).to eq("custom-acme")
+    ensure
+      Lantern.finish_execution
+    end
+
     it "returns nil instead of raising when the tenant provider errors" do
       tenant_record = Class.new do
         def self.current_tenant = raise("no tenant in this context")

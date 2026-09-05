@@ -119,4 +119,53 @@ RSpec.describe "user record", type: :request do
     expect(user[:id]).to eq("acme:1")
     expect(user[:tenant]).to eq("acme")
   end
+  it "keeps the same numeric raw id distinct across two tenants that bind late" do
+    tenant_record = Class.new do
+      class << self
+        attr_accessor :current_tenant
+      end
+    end
+    stub_const("TenantRecord", tenant_record)
+    Current.user = User.create!(name: "Ada", email: "ada@example.com")
+
+    %w[acme beta].each do |tenant|
+      tenant_record.current_tenant = nil
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+      exe.user_id = Lantern::Subscribers::Users.resolve_from_current
+      expect(exe.user_id).to eq("1")
+
+      tenant_record.current_tenant = tenant
+      finish!
+    end
+
+    expect(lantern_records(:user).map { |record| [ record[:id], record[:tenant] ] })
+      .to contain_exactly([ "acme:1", "acme" ], [ "beta:1", "beta" ])
+    expect(lantern_records(:command).map { |record| record[:user] })
+      .to contain_exactly("acme:1", "beta:1")
+  ensure
+    Current.user = nil
+  end
+
+  it "ships one entity, not one per request, when the same tenant binds late twice" do
+    tenant_record = Class.new do
+      class << self
+        attr_accessor :current_tenant
+      end
+    end
+    stub_const("TenantRecord", tenant_record)
+    Current.user = User.create!(name: "Ada", email: "ada@example.com")
+
+    2.times do
+      tenant_record.current_tenant = nil
+      exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+      exe.user_id = Lantern::Subscribers::Users.resolve_from_current
+      tenant_record.current_tenant = "acme"
+      finish!
+    end
+
+    expect(lantern_records(:user).map { |record| record[:id] }).to eq([ "acme:1" ])
+    expect(lantern_records(:command).map { |record| record[:user] }).to eq([ "acme:1", "acme:1" ])
+  ensure
+    Current.user = nil
+  end
 end

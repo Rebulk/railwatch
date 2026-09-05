@@ -127,10 +127,13 @@ module Lantern
       fields[:profiled] = true if exe.profiler_handle && ship_profile(exe, exe.sampled? || tail)
       parent = parent_type && build_parent(parent_type, exe, group: group, **fields)
       if exe.sampled? || tail
+        # Before the records are written: it settles each pending `user`
+        # entity's final reference, which a tenant bound after the entity was
+        # resolved will have changed.
+        Subscribers::Users.commit_execution!(exe) if exe.pending_users
         exe.records.each { |r| reporter.write(r) }
         reporter.buffer.account_dropped(exe.dropped_records) if exe.dropped_records.positive?
         reporter.write(parent) if parent
-        Subscribers::Users.commit_execution!(exe) if exe.pending_users
       elsif parent && exe.exception_sampled
         reporter.write(parent)
       end

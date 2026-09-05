@@ -73,8 +73,32 @@ RSpec.describe Lantern::Execution do
 
       record = Lantern::Record.build(:query, exe, sql: "select 1")
 
-      expect(record[:user]).to eq("user-42")
+      expect(record[:user]).to eq("acme:user-42")
       expect(record[:tenant]).to eq("acme")
+    end
+
+    it "requalifies the user and the records already buffered when the tenant binds late" do
+      exe = new_execution
+      exe.user_id = "1"
+      buffered = { user: "1", tenant: nil }
+      exe.buffer(buffered)
+
+      expect(exe.user_id).to eq("1")
+
+      exe.tenant = "acme"
+
+      expect(exe.user_raw_id).to eq("1")
+      expect(exe.user_id).to eq("acme:1")
+      expect(exe.envelope).to include(user: "acme:1", tenant: "acme")
+      expect(buffered).to include(user: "acme:1", tenant: "acme")
+    end
+
+    it "does not prefix a reference that already carries the tenant" do
+      exe = new_execution
+      exe.user_id = "acme:1"
+      exe.tenant = "acme"
+
+      expect(exe.user_id).to eq("acme:1")
     end
 
     it "carries execution_source, execution_id, and trace_id from the execution" do

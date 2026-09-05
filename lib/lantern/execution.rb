@@ -50,20 +50,36 @@ module Lantern
     # above -- the common case (a user already seen this hour, or none at
     # all) must not pay an ivar write.
     attr_accessor :pending_users
-    attr_reader :preview, :user_id, :tenant
+    attr_reader :preview, :user_id, :user_raw_id, :tenant
+
+    # One rule for turning a resolved user id into the reference that goes on
+    # a record. Already-qualified references (a job payload's, or one built
+    # while the tenant was known) pass through unchanged.
+    def self.qualified_user(raw_id, tenant)
+      return raw_id if raw_id.nil? || tenant.nil? || raw_id.start_with?("#{tenant}:")
+
+      "#{tenant}:#{raw_id}"
+    end
 
     def preview=(value)
       @preview = value
       @envelope = nil
     end
 
+    # The raw id is kept because the tenant may not be bound yet: an app that
+    # resolves its user in a before_action and its tenant in the next one
+    # would otherwise emit "1" for every tenant's user 1.
     def user_id=(value)
-      @user_id = value
+      @user_raw_id = value&.to_s
+      @user_id = Execution.qualified_user(@user_raw_id, @tenant)
       @envelope = nil
     end
 
     def tenant=(value)
+      previous_user = @user_id
       @tenant = value
+      @user_id = Execution.qualified_user(@user_raw_id, @tenant)
+      requalify_buffered_records(previous_user) if value && @user_id != previous_user
       @envelope = nil
     end
 
@@ -87,6 +103,7 @@ module Lantern
       @paused_depth = 0
       @exception_preview = nil
       @user_id = nil
+      @user_raw_id = nil
       @tenant = nil
       @records = []
       @dropped_records = 0
@@ -144,6 +161,18 @@ module Lantern
     # by an unhandled exception) rather than a full tail-sampling buffer.
     def failure_context?
       @failure_context
+    end
+
+    # A tenant that binds after records were already buffered leaves them
+    # attributed to an unqualified user and to no tenant at all. Rewriting
+    # them here is a single pass over a buffer that is usually a handful of
+    # records, and it happens at most once per execution -- the guard in
+    # #tenant= only fires when the reference actually changed.
+    def requalify_buffered_records(previous_user)
+      @records.each do |record|
+        record[:user] = @user_id if record[:user] == previous_user
+        record[:tenant] = @tenant if record[:tenant].nil?
+      end
     end
 
     def stage
@@ -264,8 +293,7 @@ module Lantern
     # carries the tenant.
     def envelope
       if @tenant.nil? && (bound = Context.current_tenant)
-        @tenant = bound
-        @envelope = nil
+        self.tenant = bound
       end
       @envelope ||= {
         trace_id: @trace_id,

@@ -17,6 +17,14 @@ module Lantern
       ActiveSupport::ExecutionContext.set(**attrs)
       Rails.error.set_context(**attrs) if defined?(Rails) && Rails.respond_to?(:error)
       Rails.event.set_context(**attrs) if defined?(Rails) && Rails.respond_to?(:event)
+      # An explicit tenant is bound to the running execution here rather than
+      # read back out of ActiveSupport::ExecutionContext on demand: reading it
+      # there means ExecutionContext.to_h, which dups the whole store, and
+      # current_tenant is called once per record from Execution#envelope.
+      # Binding it also requalifies the records already buffered for this
+      # execution (Execution#tenant=).
+      tenant = attrs[:tenant]
+      Current.execution&.tenant = tenant.to_s if tenant
       attrs
     end
 
@@ -89,6 +97,9 @@ module Lantern
     end
 
     def current_tenant
+      exe = Current.execution
+      return exe.tenant if exe&.tenant
+
       if defined?(::TenantRecord) && ::TenantRecord.respond_to?(:current_tenant)
         ::TenantRecord.current_tenant&.to_s
       elsif defined?(::ActiveRecord::Tenanted) && ::ActiveRecord::Base.respond_to?(:current_tenant)

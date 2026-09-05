@@ -546,6 +546,13 @@ Rails 8 auth generator convention) if defined, else Warden's `env["warden"].user
 `user` record ships once, not once per request (`Lantern::Subscribers::Users`,
 `docs/records.md`'s `user` section).
 
+Ids are tenant-scoped: with a tenant bound, `1` is recorded as `acme:1`. It
+does not matter whether the tenant binds before or after the user is
+resolved — an app that resolves the user in one `before_action` and the
+tenant in the next still gets `acme:1`, on the records already buffered as
+well as the ones after. Return an already-scoped value from the block (an
+external id, or `"#{org.slug}:#{user.id}"`) and it is left alone.
+
 A request resolves its user at the end, but a job enqueued mid-action needs
 one immediately, so `JobTracing#serialize` resolves the enqueuing
 execution's user and tenant and puts those two identifier strings into the
