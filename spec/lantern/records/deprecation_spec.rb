@@ -24,7 +24,10 @@ RSpec.describe "deprecation record" do
       Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
 
       dep = lantern_records(:deprecation).sole
-      expect(dep[:source]).to eq("app/controllers/widgets_controller.rb:88:in 'WidgetsController#deprecated_action'")
+      # Ruby 3.4 added the owner to backtrace labels and changed the opening
+      # delimiter from a backtick to a quote. The app file, line, and method
+      # are the stable information Lantern receives on every supported Ruby.
+      expect(dep[:source]).to match(%r{\Aapp/controllers/widgets_controller\.rb:88:in [`'](?:WidgetsController#)?deprecated_action'\z})
     end
   end
 

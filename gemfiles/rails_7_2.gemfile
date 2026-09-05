@@ -1,0 +1,2 @@
+ENV["LANTERN_RAILS_REQUIREMENT"] = "~> 7.2.0"
+eval_gemfile File.expand_path("../Gemfile", __dir__)

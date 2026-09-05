@@ -5,7 +5,7 @@ require "spec_helper"
 RSpec.describe Lantern::Context do
   after do
     ActiveSupport::ExecutionContext.clear
-    Rails.event.clear_context
+    Rails.event.clear_context if Rails.respond_to?(:event)
   end
 
   describe ".set / .current" do

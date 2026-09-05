@@ -1,7 +1,7 @@
 # Getting started
 
 Five minutes from `bundle add` to a request on the dashboard, on a
-Rails 8 app. Everything below is the gem's own generator and rake tasks;
+supported Rails 7.2 or Rails 8 app. Everything below is the gem's own generator and rake tasks;
 nothing else has to be wired by hand.
 
 ## 1. Add the gem

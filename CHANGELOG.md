@@ -2,6 +2,10 @@
 
 ## 0.1.0 (unreleased)
 
+- Lantern now supports Ruby 3.2–3.5 across Rails 7.2, 8.0, and 8.1. CI
+  exercises every Ruby/Rails combination, including generic Active Job test
+  and inline adapters; Solid Queue-only telemetry is documented separately.
+
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost
   its first records when the tree was written at the end of the execution;

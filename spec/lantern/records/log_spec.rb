@@ -54,6 +54,8 @@ RSpec.describe "log record" do
   end
 
   it "captures a Rails.event structured event with level event, JSON context, and a source location" do
+    skip "Rails.event was introduced in Rails 8.1" unless Rails.respond_to?(:event)
+
     Lantern.start_execution(source: :command, sample_kind: :commands)
     Rails.event.notify("widget.custom", foo: "bar")
     finish!
@@ -65,6 +67,8 @@ RSpec.describe "log record" do
   end
 
   it "drops framework structured events (active_record., action_controller., etc.) unless capture_framework_events is enabled" do
+    skip "Rails.event was introduced in Rails 8.1" unless Rails.respond_to?(:event)
+
     Lantern.start_execution(source: :command, sample_kind: :commands)
     Rails.event.notify("active_record.sql", sql: "SELECT 1")
     finish!

@@ -9,6 +9,8 @@ require "spec_helper"
 # report_rescued_exceptions.
 RSpec.describe "rescued exceptions", type: :request do
   it "captures a rescue_from-handled exception as a handled warning" do
+    skip "Rails instruments rescue_from callbacks starting in Rails 8.1" if Rails.gem_version < Gem::Version.new("8.1")
+
     get "/rescued"
     expect(response).to have_http_status(:unprocessable_content)
 

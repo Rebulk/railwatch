@@ -2,6 +2,11 @@ source "https://rubygems.org"
 
 gemspec
 
+# Compatibility gemfiles set this to one maintained Rails minor. Keeping the
+# constraint here means they exercise the exact same development/test bundle
+# as the default lockfile instead of a reduced synthetic dependency set.
+gem "rails", ENV.fetch("LANTERN_RAILS_REQUIREMENT") if ENV.key?("LANTERN_RAILS_REQUIREMENT")
+
 gem "puma"
 gem "sqlite3", ">= 2.1"
 gem "solid_queue"

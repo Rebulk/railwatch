@@ -61,6 +61,19 @@ RSpec.describe "job_attempt record" do
     expect(attempt[:concurrency_key]).to eq("ConcurrentJob/widget")
   end
 
+  it "captures an Active Job Inline adapter attempt without Solid Queue" do
+    previous_adapter = ActiveJob::Base.queue_adapter
+    ActiveJob::Base.queue_adapter = :inline
+
+    WidgetJob.perform_later("inline")
+
+    attempt = lantern_records(:job_attempt).sole
+    expect(attempt).to include(status: "processed", name: "WidgetJob", adapter: "Inline", connection: "Inline")
+    expect(attempt[:counters][:queries]).to eq(1)
+  ensure
+    ActiveJob::Base.queue_adapter = previous_adapter
+  end
+
   describe "arguments (capture_job_arguments)" do
     around do |example|
       Lantern.config.capture_job_arguments = true

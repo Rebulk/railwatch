@@ -66,7 +66,13 @@ RSpec.describe "request record", type: :request do
     reqs = lantern_records(:request)
     expect(reqs.first[:rate_limited]).to be_nil
     expect(reqs.first[:status_code]).to eq(200)
-    expect(reqs.last[:rate_limited]).to include(count: 2, to: 1)
+    if Rails.gem_version >= Gem::Version.new("8.1")
+      expect(reqs.last[:rate_limited]).to include(count: 2, to: 1)
+    else
+      # Rails 7.2/8.0 emit only the request in this notification. Lantern can
+      # still flag the limited request; Rails does not expose count/to/name.
+      expect(reqs.last[:rate_limited]).to eq(name: "", count: nil, to: nil)
+    end
     expect(reqs.last[:status_code]).to eq(429)
   end
 

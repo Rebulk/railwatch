@@ -17,7 +17,7 @@ require "lantern"
 
 module Dummy
   class Application < Rails::Application
-    config.load_defaults 8.1
+    config.load_defaults "#{Rails::VERSION::MAJOR}.#{Rails::VERSION::MINOR}"
     config.eager_load = false
     config.active_job.queue_adapter = :test
     config.cache_store = :memory_store

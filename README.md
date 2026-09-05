@@ -39,6 +39,9 @@ prints ready-to-paste MCP client configuration.
   attribute on it, sourced from the code that builds it.
 - [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
   performance gate.
+- [Compatibility](docs/compatibility.md) — maintained Ruby/Rails versions,
+  the CI matrix, and which job features are generic Active Job versus
+  Solid Queue-specific.
 - [AI assistants and MCP](docs/ai-and-mcp.md) — connecting Claude Code,
   Cursor, VS Code, or Zed to your production data.
 - [Replacing Sentry](docs/replacing-sentry.md) — a step-by-step migration,

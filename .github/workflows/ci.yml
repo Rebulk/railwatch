@@ -7,7 +7,15 @@ on:
 
 jobs:
   test:
+    name: Test Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.2", "3.3", "3.4", "3.5"]
+        rails: [rails_7_2, rails_8_0, rails_8_1]
     runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: gemfiles/${{ matrix.rails }}.gemfile
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -15,7 +23,7 @@ jobs:
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.4"
+          ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
 
       - name: Run specs

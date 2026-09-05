@@ -3,3 +3,4 @@ spec/dummy/log/
 spec/dummy/storage/
 spec/dummy/tmp/
 spec/dummy/config/master.key
+gemfiles/*.lock
