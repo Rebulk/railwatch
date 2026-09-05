@@ -50,7 +50,8 @@
   `auth`/`authentication`/`authorization`, `bearer`, `credential`, `hmac`,
   `jwt`, `token`, `secret`, `signature`) is masked as `[FILTERED]` on top of
   the exact `redact_headers` denylist. Concatenated Rack aliases such as
-  `X-AuthToken`, `X-AccessToken`, `X-BearerToken`, `X-HmacSignature`, and
+  `X-AuthToken`, `X-ApiToken`, `X-AccessToken`, `X-ClientToken`,
+  `X-SessionToken`, `X-RefreshToken`, `X-SecretKey`, `X-HmacSignature`, and
   `X-CSRFToken` are covered alongside `X-Api-Key`, `Stripe-Signature`, and
   `X-Hub-Signature-256`. Ordinary diagnostic headers are untouched.
 
