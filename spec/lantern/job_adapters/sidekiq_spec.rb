@@ -139,6 +139,17 @@ RSpec.describe Lantern::JobAdapters::Sidekiq do
     expect(lantern_records(:job_attempt).sole[:queue_latency]).to be_between(0, 2_500_000)
   end
 
+  it "keeps Sidekiq 8 timestamp units when malformed optional metadata uses the fallback" do
+    payload = direct_payload.merge(
+      "retry_count" => "not-an-integer",
+      "enqueued_at" => sidekiq_timestamp(Lantern::Clock.now - 1, major: 8))
+
+    server.call(Object.new, payload, "critical") { :done }
+
+    expect(lantern_records(:job_attempt).sole).to include(attempt: nil)
+      .and include(queue_latency: be_between(500_000, 2_500_000))
+  end
+
   it "honours an enqueuing trace's sampled decision when the local job rate is zero" do
     Lantern.config.sample[:jobs] = 0.0
     payload = direct_payload.merge("_lantern" => { "trace_id" => SecureRandom.uuid, "sampled" => true })
@@ -196,23 +207,62 @@ RSpec.describe Lantern::JobAdapters::Sidekiq do
         [ "expired-v7", "failed", 2 ], [ "expired-v8", "failed", 2 ])
   end
 
-  it "lets retry_for continue past the ordinary attempt ceiling in Sidekiq 7 and 8" do
+  it "lets retry_for continue past the ordinary attempt ceiling in Sidekiq 8" do
+    stub_const("Sidekiq::MAJOR", 8)
     now = Lantern::Clock.now
+    payload = direct_payload.merge(
+      "jid" => "duration-sidekiq-8",
+      "retry_for" => 86_400,
+      "failed_at" => sidekiq_timestamp(now, major: 8),
+      "retry_count" => described_class::DEFAULT_RETRIES - 1)
 
-    [ 7, 8 ].each do |major|
-      payload = direct_payload.merge(
-        "jid" => "duration-sidekiq-#{major}",
-        "retry_for" => 86_400,
-        "failed_at" => sidekiq_timestamp(now, major: major),
-        "retry_count" => described_class::DEFAULT_RETRIES - 1)
-
-      expect { server.call(Object.new, payload, "critical") { raise "retry-for-#{major}" } }
-        .to raise_error("retry-for-#{major}")
-    end
+    expect { server.call(Object.new, payload, "critical") { raise "retry-for-8" } }
+      .to raise_error("retry-for-8")
 
     expect(lantern_records(:job_attempt).map { |attempt| [ attempt[:job_id], attempt[:status] ] })
-      .to contain_exactly(
-        [ "duration-sidekiq-7", "released" ], [ "duration-sidekiq-8", "released" ])
+      .to contain_exactly([ "duration-sidekiq-8", "released" ])
+  end
+
+  it "still enforces the ordinary attempt ceiling with retry_for in Sidekiq 7" do
+    stub_const("Sidekiq::MAJOR", 7)
+    payload = direct_payload.merge(
+      "jid" => "duration-sidekiq-7",
+      "retry_for" => 86_400,
+      "failed_at" => sidekiq_timestamp(Lantern::Clock.now, major: 7),
+      "retry_count" => described_class::DEFAULT_RETRIES - 1)
+
+    expect { server.call(Object.new, payload, "critical") { raise "retry-for-7" } }
+      .to raise_error("retry-for-7")
+
+    expect(lantern_records(:job_attempt).sole).to include(
+      job_id: "duration-sidekiq-7", status: "failed")
+  end
+
+  it "reports a hard shutdown as requeued without creating an application exception" do
+    payload = direct_payload.merge("retry" => false)
+
+    expect { server.call(Object.new, payload, "critical") { raise Sidekiq::Shutdown } }
+      .to raise_error(Sidekiq::Shutdown)
+
+    expect(lantern_records(:job_attempt).sole).to include(
+      job_id: "sidekiq-jid", status: "released", exception_preview: nil)
+    expect(lantern_records(:exception)).to be_empty
+  end
+
+  it "recognizes a hard shutdown wrapped as another exception cause" do
+    payload = direct_payload.merge("retry" => false)
+
+    expect do
+      server.call(Object.new, payload, "critical") do
+        raise Sidekiq::Shutdown
+      rescue Sidekiq::Shutdown
+        raise "cleanup failed"
+      end
+    end.to raise_error("cleanup failed")
+
+    expect(lantern_records(:job_attempt).sole).to include(
+      job_id: "sidekiq-jid", status: "released", exception_preview: nil)
+    expect(lantern_records(:exception)).to be_empty
   end
 
   it "turns sidekiq-cron payloads into scheduled task executions with drift" do

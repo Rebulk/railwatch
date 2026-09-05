@@ -654,8 +654,13 @@ the task and re-raised after the task is marked failed. `run_at` is optional;
 when supplied it produces scheduler drift.
 
 Direct Sidekiq retry status follows Sidekiq's built-in `retry: false`, attempt
-limit, and `retry_for` rules. A worker's `sidekiq_retry_in` callback runs only
-after every server middleware has unwound, so a callback that returns
+limit, and `retry_for` rules, including their version difference: Sidekiq 7
+still applies the attempt ceiling when `retry_for` is present, while Sidekiq 8
+uses only the duration. A forced Sidekiq shutdown is reported as released and
+does not create an application exception because Sidekiq requeues that
+unacknowledged work regardless of its retry settings. A worker's
+`sidekiq_retry_in` callback runs only after every server middleware has unwound,
+so a callback that returns
 `:discard` or `:kill` cannot be observed reliably at attempt-record time; that
 attempt may appear as `"released"` even though Sidekiq subsequently discards
 or kills it. The exception and attempt are still captured.

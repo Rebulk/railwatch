@@ -110,7 +110,7 @@ originated it (see `scheduled_task` below).
 | `adapter` / `connection` | Queue adapter class, demodulized, `Adapter` suffix stripped (both fields carry the same value). |
 | `concurrency_key` | If the job responds to `concurrency_key` (e.g. `good_job`/custom concurrency controls). |
 | `priority` | Job priority. |
-| `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = Active Job `retry_on` or a direct Sidekiq failure that still has a retry; exhausted/dead and retry-disabled attempts are failed). Sidekiq invokes a custom `sidekiq_retry_in` callback only after server middleware unwinds, so `:discard`/`:kill` returned there may leave that attempt reported as released. |
+| `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = Active Job `retry_on`, a direct Sidekiq failure that still has a retry, or work requeued after a forced Sidekiq shutdown; exhausted/dead and retry-disabled attempts are failed). Sidekiq invokes a custom `sidekiq_retry_in` callback only after server middleware unwinds, so `:discard`/`:kill` returned there may leave that attempt reported as released. |
 | `queue_latency` | Microseconds between `scheduled_at`/`enqueued_at` and this attempt starting. |
 | `db_runtime` | Milliseconds of DB time during the attempt, from Active Job's own payload. |
 | `arguments_preview` | Up to 10 arguments — GlobalID string for AR objects/GlobalID-capable arguments, class name otherwise (never raw argument values). Always on. |

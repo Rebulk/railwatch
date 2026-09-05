@@ -235,7 +235,10 @@ module Lantern
     def finish_attempt(exe, metadata, schedule, error)
       Current.execution = exe
       exe.finish_stages
-      Subscribers::Exceptions.capture(error, handled: false, severity: :error, source: "application.#{metadata[:adapter]}") if error
+      if error && !metadata[:requeued]
+        Subscribers::Exceptions.capture(error, handled: false, severity: :error,
+          source: "application.#{metadata[:adapter]}")
+      end
       fields = metadata.slice(:job_id, :provider_job_id, :name, :queue, :priority, :arguments_preview)
       fields.merge!(metadata.slice(:arguments, :arguments_truncated))
       fields.merge!(
@@ -258,6 +261,7 @@ module Lantern
 
     def attempt_status(metadata, error)
       return "processed" unless error
+      return "released" if metadata[:requeued]
       metadata[:will_retry] ? "released" : "failed"
     end
 

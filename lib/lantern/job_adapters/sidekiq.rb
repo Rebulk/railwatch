@@ -38,9 +38,18 @@ module Lantern
           return block.call unless Sidekiq.direct?(payload)
 
           Sidekiq.activate!
+          metadata = Sidekiq.perform_metadata(payload, queue)
           JobAdapters.instrument_perform(
             adapter: :sidekiq, payload: payload,
-            metadata: Sidekiq.perform_metadata(payload, queue), &block)
+            metadata: metadata) do
+            block.call
+          rescue Exception => error # Sidekiq also recognizes Shutdown in a cause chain
+            # Sidekiq does not acknowledge a hard-interrupted unit of work;
+            # the fetcher restores it to the queue regardless of retry options.
+            # This is an infrastructure interruption, not an application error.
+            metadata[:requeued] = true if Sidekiq.shutdown_caused?(error)
+            raise
+          end
         end
       end
 
@@ -121,7 +130,7 @@ module Lantern
         {
           adapter: "Sidekiq", job_id: payload["jid"], provider_job_id: payload["jid"],
           name: job_name(payload["class"], payload), queue: queue.to_s,
-          attempt: nil, enqueued_at: payload["enqueued_at"], will_retry: false,
+          attempt: nil, enqueued_at: timestamp_seconds(payload["enqueued_at"]), will_retry: false,
           arguments_preview: []
         }
       end
@@ -139,6 +148,10 @@ module Lantern
         retry_for = payload["retry_for"]
         failed_at = payload["failed_at"]
         if retry_for
+          # Sidekiq 7 applies the ordinary attempt ceiling before retry_for.
+          # Sidekiq 8 made retry_for duration-exclusive and ignores the count.
+          return false if !duration_only_retries? && (retry_count + 1) >= retry_limit
+
           duration = Float(retry_for)
           return false unless duration.positive?
           return true unless failed_at
@@ -151,6 +164,27 @@ module Lantern
         end
 
         (retry_count + 1) < retry_limit
+      rescue StandardError
+        false
+      end
+
+      def duration_only_retries?
+        major = ::Sidekiq.const_defined?(:MAJOR) ? ::Sidekiq::MAJOR : ::Sidekiq::VERSION.to_i
+        major >= 8
+      rescue StandardError
+        false
+      end
+
+      def shutdown_caused?(error)
+        seen = {}
+        while error
+          return true if error.is_a?(::Sidekiq::Shutdown)
+          return false if seen[error.object_id]
+
+          seen[error.object_id] = true
+          error = error.cause
+        end
+        false
       rescue StandardError
         false
       end
