@@ -6,6 +6,9 @@ outgoing HTTP, storage, views, and logs, links them into one trace per
 execution, and ships them to Lantern Cloud with under a millisecond of
 overhead per request and zero writes to your database.
 
+Active Job works through every adapter, and direct Sidekiq workers are
+instrumented by optional middleware with no Sidekiq runtime dependency.
+
 ## Install
 
 ```sh

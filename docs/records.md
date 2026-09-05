@@ -94,22 +94,23 @@ stage boundaries (the `action`/`render` boundaries come from
 ### `job_attempt`
 
 One per Active Job `perform` (`perform.active_job`,
-`lib/lantern/subscribers/jobs.rb`), for jobs Solid Queue's own recurring
-scheduler didn't originate (see `scheduled_task` below for the ones it did).
+`lib/lantern/subscribers/jobs.rb`) or direct Sidekiq worker attempt
+(`lib/lantern/job_adapters/sidekiq.rb`), unless a recurring scheduler
+originated it (see `scheduled_task` below).
 
 | Field | Meaning |
 |---|---|
 | `group` | Hash of the job class name. |
-| `job_id` | Active Job's `job_id`. |
-| `provider_job_id` | Queue adapter's own id (e.g. Solid Queue job row id). |
+| `job_id` | Active Job's `job_id`; the Sidekiq JID for a direct worker. |
+| `provider_job_id` | Queue adapter's own id (e.g. Solid Queue job row id or Sidekiq JID). |
 | `attempt_id` | This execution's id (same as `execution_id`). |
-| `attempt` | `job.executions` — the retry count. |
+| `attempt` | `job.executions` for Active Job; Sidekiq's zero-based `retry_count` converted to a one-based attempt. |
 | `name` | Job class name. |
 | `queue` | Queue name. |
 | `adapter` / `connection` | Queue adapter class, demodulized, `Adapter` suffix stripped (both fields carry the same value). |
 | `concurrency_key` | If the job responds to `concurrency_key` (e.g. `good_job`/custom concurrency controls). |
 | `priority` | Job priority. |
-| `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = a `retry_on` caught the error internally — see `enqueue_retry.active_job` below). |
+| `status` | `"processed"`, `"failed"`, `"aborted"`, or `"released"` (released = Active Job `retry_on` or a direct Sidekiq failure that still has a retry; exhausted/dead and retry-disabled attempts are failed). |
 | `queue_latency` | Microseconds between `scheduled_at`/`enqueued_at` and this attempt starting. |
 | `db_runtime` | Milliseconds of DB time during the attempt, from Active Job's own payload. |
 | `arguments_preview` | Up to 10 arguments — GlobalID string for AR objects/GlobalID-capable arguments, class name otherwise (never raw argument values). Always on. |
@@ -161,17 +162,16 @@ pruning error, truncated to 255 chars.
 
 ### `scheduled_task`
 
-Same `perform.active_job` subscriber as `job_attempt`, but for a job
-Solid Queue's `RecurringExecution` table shows was triggered by
-`config/recurring.yml` rather than an ad hoc enqueue (`recurring_task_key`,
-`lib/lantern/subscribers/jobs.rb`). Carries every `job_attempt` field
+Same shape as `job_attempt`, but for work attributed to Solid Queue's
+`RecurringExecution`, sidekiq-cron, a registered scheduler adapter, or an
+explicit `Lantern.scheduled_task` check-in. Carries every `job_attempt` field
 above, plus:
 
 | Field | Meaning |
 |---|---|
-| `task_key` | The `config/recurring.yml` key. |
+| `task_key` | Stable recurring task key (Solid Queue config key, namespaced sidekiq-cron name, or the explicit check-in key). |
 | `group` | Hash of the task key (not the class name). |
-| `schedule` | The task's configured schedule string (e.g. `"every day at 3am"`), looked up from `SolidQueue::RecurringTask`, refreshed at most once per 60s. |
+| `schedule` | Configured schedule string (e.g. `"every day at 3am"` or a cron expression), when the scheduler exposes one. |
 | `drift` | Microseconds between the task's scheduled `run_at` and when this attempt actually started. |
 
 ### `command`
@@ -717,12 +717,12 @@ the record still ships with whatever it did manage to read.
 | `pool_size` | Active Record connection pool size (`connection_pool.stat[:size]`). |
 | `pool_busy` | Connections checked out. |
 | `pool_waiting` | Threads blocked waiting for a connection — sustained non-zero means the pool is undersized for the thread count. |
-| `queue_depth` | `SolidQueue::ReadyExecution.count` — jobs ready to run right now. |
-| `queue_latency` | Microseconds since the oldest ready job was created, i.e. the backlog's head-of-line wait. nil when the queue is empty. |
-| `detail` | JSON string: `queues` (ready count per queue name), `workers` (`SolidQueue::Process` rows of kind `Worker`), `requests_count` (Puma's lifetime request count for this process), `running` (threads Puma has spawned), `max_threads_reached` (true when Puma's `pool_capacity` was 0 at sample time, i.e. no spare thread). |
+| `queue_depth` | Ready jobs across active Solid Queue and Sidekiq integrations. |
+| `queue_latency` | Microseconds of head-of-line wait for the oldest ready job. nil when every queue is empty. |
+| `detail` | JSON string: `queues` (ready count per queue; adapter-qualified when more than one reports), `workers`, `queue_adapters`, `requests_count` (Puma lifetime requests), `running`, and `max_threads_reached`. |
 
 Every Puma field is nil when no `Puma::Server` exists in the process, and
-every Solid Queue field is nil when `SolidQueue` isn't loaded.
+every queue field is nil when no registered queue integration is active.
 
 The sampler re-arms itself after `fork` (a `Process._fork` hook), so
 clustered Puma workers and forked Solid Queue workers each report without

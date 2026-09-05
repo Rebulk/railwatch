@@ -35,7 +35,11 @@ module Lantern
 
         subscribe("perform_start.active_job") do |event|
           job = event.payload[:job]
-          key, run_at = recurring_task_key(job)
+          key, run_at = if job.respond_to?(:lantern_task_key) && job.lantern_task_key
+            [ job.lantern_task_key, job.lantern_scheduled_at ]
+          else
+            recurring_task_key(job)
+          end
           exe = Lantern.start_execution(
             source: key ? :scheduled_task : :job,
             sample_kind: key ? :scheduled_tasks : :jobs,
@@ -59,6 +63,7 @@ module Lantern
           exe.drift = drift_micros(run_at) if key
           job.instance_variable_set(:@__lantern_execution, exe)
           job.instance_variable_set(:@__lantern_recurring_key, key)
+          job.instance_variable_set(:@__lantern_schedule, job.lantern_schedule) if key && job.respond_to?(:lantern_schedule)
         end
 
         subscribe("perform.active_job") do |event|
@@ -97,7 +102,7 @@ module Lantern
           }
           if key
             Lantern.finish_execution(:scheduled_task, group: Record.group_hash(key), task_key: key,
-                                     schedule: schedule_for(key), drift: exe.drift, **fields)
+                                     schedule: job.instance_variable_get(:@__lantern_schedule) || schedule_for(key), drift: exe.drift, **fields)
           else
             Lantern.finish_execution(:job_attempt, group: Record.group_hash(job.class.name), **fields)
           end

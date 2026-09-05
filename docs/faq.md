@@ -127,10 +127,17 @@ instrumented at the Active Job level (`perform_start.active_job` /
 than an integration to write. `job_attempt` records carry the adapter's
 own id (`provider_job_id`) alongside Active Job's `job_id`.
 
-Two features are Solid Queue-specific, because they read its tables:
-`scheduled_task` records (recurring tasks from `config/recurring.yml`,
-with `task_key`, `schedule`, and `drift`) and the queue depth and
-oldest-job age on `health` records.
+Direct `Sidekiq::Job`/`Sidekiq::Worker` classes are covered too. Lantern's
+optional client and server middleware propagates trace/user/tenant context,
+records pushes and attempts, distinguishes retries from exhausted/dead jobs,
+recognizes sidekiq-cron runs, and reports Sidekiq queue health. Active Job's
+Sidekiq wrapper is deliberately skipped by that middleware, so it is never
+double-counted.
+
+Solid Queue and Sidekiq both provide recurring-task and queue-health data.
+For GoodJob cron, another scheduler, or a system crontab, wrap the entrypoint
+with `Lantern.scheduled_task("name", schedule: "0 2 * * *") { ... }`, or
+register a queue integration through `Lantern::JobAdapters`.
 
 ## What happens when the platform is unreachable?
 

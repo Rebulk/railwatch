@@ -31,6 +31,7 @@ module Lantern
 
       Lantern::Subscribers.install!(app)
       Lantern::Patches.install!
+      Lantern::JobAdapters.install!
     end
 
     # Runs unconditionally (not gated on Lantern.enabled?) so `Lantern::Faraday`

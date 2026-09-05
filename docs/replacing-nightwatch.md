@@ -189,10 +189,12 @@ stamps `tenant` on every record, and gives you a Tenants page.
 `Lantern.context(tenant: org.slug)` sets it explicitly for apps that
 roll their own.
 
-**Jobs are instrumented at Active Job**, not per adapter, so Solid Queue,
-Sidekiq, and anything else with an Active Job adapter all report the same
-`job_attempt` fields. Scheduled tasks are Solid Queue recurring tasks,
-so cron monitoring needs no check-in calls.
+**Jobs are instrumented at Active Job**, so any Active Job adapter reports
+the same fields. Direct `Sidekiq::Job`/`Sidekiq::Worker` classes use optional
+Sidekiq client/server middleware and report the same execution tree without
+double-counting Active Job wrappers. Solid Queue recurring tasks and
+sidekiq-cron runs are automatic; another scheduler can implement the small
+`Lantern::JobAdapters` SPI or use `Lantern.scheduled_task` as its check-in.
 
 **Your test suite is a performance gate.** The same instrumentation runs
 under RSpec and Minitest, so a query budget can be checked in and CI can

@@ -623,6 +623,44 @@ SSR timing needs no configuration: `Lantern::Patches::Inertia` prepends
 enabled, and the resulting `ssr_ms` lands on the `request` record's
 `inertia` field automatically.
 
+## Direct queues and schedulers
+
+Active Job is automatic for every queue adapter. If an application uses
+`Sidekiq::Job`/`Sidekiq::Worker` directly, Lantern installs Sidekiq client
+and server middleware only when Sidekiq is already loaded; Sidekiq is not a
+runtime dependency of the gem. The middleware skips Active Job's wrapper.
+
+| Capability | Active Job | Direct Sidekiq | Another direct adapter |
+|---|---|---|---|
+| Enqueue + attempt records | Automatic | Automatic | Call the SPI lifecycle |
+| Trace, user, tenant propagation | Automatic | Automatic | Use `inject_context!` / `extract_context` |
+| Retry/outcome | `retry_on`, discard, abort | Retry remaining vs exhausted/dead/retry-disabled | Supply `will_retry` metadata |
+| Recurring task key/schedule/drift | Solid Queue automatic; sidekiq-cron marker survives Active Job serialization | sidekiq-cron automatic | Implement `schedule_metadata` |
+| Queue depth/latency/workers | Solid Queue automatic | Sidekiq API automatic once active | Implement `queue_health` |
+
+For system cron, GoodJob cron without an adapter, or any scheduler where a
+single explicit check-in is preferable:
+
+```ruby
+Lantern.scheduled_task("billing.nightly", schedule: "0 2 * * *",
+                       run_at: scheduled_time, adapter: "cron") do
+  Billing::Rollup.call
+end
+```
+
+The block's value and exception are untouched. A successful run emits a
+`scheduled_task` with `status: "processed"`; a raised exception is linked to
+the task and re-raised after the task is marked failed. `run_at` is optional;
+when supplied it produces scheduler drift.
+
+Custom integrations register an object with `Lantern::JobAdapters.register`.
+The optional methods are `available?`, `install!`,
+`schedule_metadata(payload)`, and `queue_health`. Middleware uses
+`instrument_enqueue` and `instrument_perform`; a scheduler wraps its enqueue
+with `JobAdapters.with_schedule(task_key:, schedule:, run_at:)` so direct and
+Active Job clients serialize the same marker. See the built-in Sidekiq adapter
+for the complete, dependency-safe contract.
+
 ## Manual reporting and instrumentation
 
 ```ruby
@@ -736,7 +774,8 @@ Mirrors Laravel Nightwatch's facade shape. All on the `Lantern` module
 (`lib/lantern.rb`) unless noted:
 
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
-`keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
+`keep!`, `sampling?`, `span(name, **attributes) { }`,
+`scheduled_task(task_key, schedule:, run_at:, adapter:) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
 are the ignore block's building blocks — nestable), `record(type, **fields)`,
 `report(error, ..., attachments: {}, fingerprint: [])`, `attach(name, data, ...)`, `context(**attrs)`, `user(&block)`,
 `fingerprint(&block)`, `redact_*`,

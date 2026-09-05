@@ -3,7 +3,8 @@
 module Lantern
   # One background thread per web/worker process, shipping a single `health`
   # record every config.health_interval seconds: Puma's thread pool, the
-  # Active Record connection pool, and Solid Queue's backlog. Started from the
+  # Active Record connection pool, and registered queue-adapter backlogs.
+  # Solid Queue and Sidekiq ship built-in providers. Started from the
   # engine's "lantern.health" initializer.
   #
   # A sample must never be visible to the app: the whole thing runs inside
@@ -89,7 +90,7 @@ module Lantern
       Lantern.ignore do
         puma = puma_stats
         pool = pool_stats
-        queue = solid_queue_stats
+        queue = JobAdapters.queue_health
         Lantern.record(:health,
           pid: Process.pid,
           role: Subscribers::ProcessInfo.role,
@@ -105,6 +106,7 @@ module Lantern
           detail: JSON.generate(
             queues: queue[:queues],
             workers: queue[:workers],
+            queue_adapters: queue[:adapters],
             requests_count: puma[:requests_count],
             running: puma[:running],
             max_threads_reached: puma[:max_threads_reached]))
@@ -151,23 +153,6 @@ module Lantern
 
     def pool_stats
       ActiveRecord::Base.connection_pool.stat
-    rescue StandardError
-      EMPTY
-    end
-
-    # Read-only counts against the queue database. Solid Queue keeps one row
-    # per ready job, so `queue_latency` (the age of the oldest ready job) is
-    # the backlog's head-of-line wait, in microseconds.
-    def solid_queue_stats
-      return EMPTY unless defined?(::SolidQueue)
-
-      oldest = ::SolidQueue::ReadyExecution.minimum(:created_at)
-      {
-        queue_depth: ::SolidQueue::ReadyExecution.count,
-        queue_latency: oldest && ((Clock.now - oldest.to_time.utc.to_f) * 1_000_000).round,
-        queues: ::SolidQueue::ReadyExecution.group(:queue_name).count,
-        workers: ::SolidQueue::Process.where(kind: "Worker").count
-      }
     rescue StandardError
       EMPTY
     end

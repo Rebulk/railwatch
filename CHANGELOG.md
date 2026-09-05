@@ -2,6 +2,14 @@
 
 ## 0.1.0 (unreleased)
 
+- Direct `Sidekiq::Job`/`Sidekiq::Worker` executions now have optional client
+  and server middleware: trace/user/tenant propagation, enqueue and attempt
+  records, retry/dead semantics, sidekiq-cron scheduled-task attribution,
+  nested telemetry, and Sidekiq queue health. Active Job wrappers are skipped
+  to prevent duplicates. `Lantern::JobAdapters` is the small SPI for other
+  queues and schedulers, and `Lantern.scheduled_task` is a table-independent
+  check-in for system cron and custom schedulers. Sidekiq remains optional.
+
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost
   its first records when the tree was written at the end of the execution;

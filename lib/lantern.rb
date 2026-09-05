@@ -27,6 +27,9 @@ require "lantern/backtrace"
 require "lantern/context"
 require "lantern/profiler"
 require "lantern/attachments"
+require "lantern/job_adapters"
+require "lantern/job_adapters/solid_queue"
+require "lantern/job_adapters/sidekiq"
 # Lantern::Faraday subclasses ::Faraday::Middleware at load time, so it can't
 # be required here: `gemspec` puts this gem in the Gemfile's :default group,
 # and Bundler.require(*Rails.groups) requires gems in Gemfile declaration
@@ -241,6 +244,14 @@ module Lantern
 
     def context(**attrs)
       Context.set(**attrs)
+    end
+
+    # Check-in path for system cron and schedulers without an adapter table.
+    def scheduled_task(task_key, schedule: nil, run_at: nil, adapter: "Manual", &block)
+      return block.call unless enabled?
+
+      JobAdapters.instrument_scheduled_task(task_key, schedule: schedule,
+        run_at: run_at, adapter: adapter, &block)
     end
 
     def user(&block)

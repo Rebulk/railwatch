@@ -45,6 +45,7 @@ Lantern.user { |user| {id: user.id, name: user.name, email: user.email} }
 Lantern.fingerprint { |error, default| error.is_a?(Timeout::Error) ? ["timeout"] : default }
 
 Lantern.span("pdf.render", template: "invoice", pages: 12) { renderer.call }  # returns the block's value
+Lantern.scheduled_task("billing.nightly", schedule: "0 2 * * *") { Billing.rollup }
 Lantern.instrument_outgoing(:get, url) { client.get(url) }                    # clients with no built-in patch
 Faraday.new(url) { |f| f.use Lantern::Faraday }                               # Net::HTTP needs nothing
 
@@ -59,6 +60,12 @@ Lantern.reject_cache_keys %w[session: rack::attack*]
 Lantern.before_ingest { |batch| batch.reject { |r| r[:t] == "log" } }
 Lantern.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 ```
+
+Active Job is automatic for every adapter. Direct Sidekiq workers are automatic
+too (client/server propagation and lifecycle middleware, sidekiq-cron metadata,
+retry/dead status, and queue health) without making Sidekiq a gem dependency.
+Use `Lantern.scheduled_task` for system cron or register another direct adapter
+through `Lantern::JobAdapters`.
 
 `redact_*`: requests, queries, exceptions, cache_events, commands, mail,
 outgoing_requests, logs. `reject_*`: queries, cache_events, mail,

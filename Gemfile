@@ -18,6 +18,9 @@ group :development, :test do
   gem "debug", require: "debug/prelude"
   gem "inertia_rails", "~> 3.21"
   gem "faraday"
+  # Optional at runtime; present here to prove the direct-worker middleware
+  # against Sidekiq's real configuration and middleware APIs.
+  gem "sidekiq"
 end
 
 group :bench do

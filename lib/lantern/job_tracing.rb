@@ -9,7 +9,8 @@ module Lantern
     extend ActiveSupport::Concern
 
     included do
-      attr_accessor :lantern_trace_id, :lantern_parent_id, :lantern_user, :lantern_tenant
+      attr_accessor :lantern_trace_id, :lantern_parent_id, :lantern_user, :lantern_tenant,
+                    :lantern_task_key, :lantern_schedule, :lantern_scheduled_at
     end
 
     def serialize
@@ -33,8 +34,13 @@ module Lantern
       # nothing to attribute (and Lantern disabled), so nothing is resolved.
       user = lantern_user || (exe && (exe.user_id ||= Subscribers::Users.resolve_from_current))
       tenant = lantern_tenant || exe&.tenant || Context.current_tenant
-      data["lantern_user"] = user if user
-      data["lantern_tenant"] = tenant if tenant
+      data["lantern_user"] = user.to_s if user
+      data["lantern_tenant"] = tenant.to_s if tenant
+      schedule = Lantern::JobAdapters.current_schedule
+      data["lantern_task_key"] = (lantern_task_key || schedule&.dig(:task_key)).to_s if lantern_task_key || schedule
+      data["lantern_schedule"] = (lantern_schedule || schedule&.dig(:schedule))&.to_s if lantern_schedule || schedule
+      scheduled_at = lantern_scheduled_at || schedule&.dig(:run_at)
+      data["lantern_scheduled_at"] = scheduled_at.to_f if scheduled_at
       data
     end
 
@@ -44,6 +50,9 @@ module Lantern
       self.lantern_parent_id = job_data["lantern_parent_id"]
       self.lantern_user = job_data["lantern_user"]
       self.lantern_tenant = job_data["lantern_tenant"]
+      self.lantern_task_key = job_data["lantern_task_key"]
+      self.lantern_schedule = job_data["lantern_schedule"]
+      self.lantern_scheduled_at = job_data["lantern_scheduled_at"]
     end
   end
 end
