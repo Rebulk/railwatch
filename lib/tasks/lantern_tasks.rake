@@ -79,7 +79,13 @@ namespace :lantern do
 
     token = config.token.to_s
     check.call(!token.empty?, "token",
-               token.empty? ? "LANTERN_TOKEN is not set" : "#{token[0, 6]}... (#{token.length} chars)",
+               token.empty? ? "LANTERN_TOKEN is not set" : Lantern::SecretSafety.token_preview(token),
+               fatal: true)
+
+    exposed_token_files = Lantern::SecretSafety.tracked_plaintext_token_files(root: Rails.root)
+    check.call(exposed_token_files.empty?, "token storage",
+               exposed_token_files.empty? ? "no tracked plaintext Lantern token found" :
+                 "plaintext token found in tracked file(s): #{exposed_token_files.join(', ')}",
                fatal: true)
 
     ingest = URI.parse(config.ingest_url) rescue nil
@@ -164,7 +170,7 @@ namespace :lantern do
 
         LANTERN_TOKEN=lt_...#{"\n  LANTERN_INGEST_URL=#{base.host_url}" if base.self_hosted?}
 
-      With Kamal:  bin/rails generate lantern:install --token=lt_... --kamal-secrets
+      With Kamal:  bin/rails generate lantern:install --prompt-token --kamal-secrets
       Verify:      bin/rails lantern:doctor
 
       An existing environment's token can be rotated from its Settings page;

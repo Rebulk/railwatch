@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "rails/generators"
+require "lantern/secret_safety"
 
 module Lantern
   module Generators
@@ -10,7 +11,11 @@ module Lantern
       desc "Creates config/initializers/lantern.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers."
 
       class_option :token, type: :string,
-                           desc: "Ingest token for this environment (lt_...). Written to .env, or printed with where to put it."
+                           desc: "Deprecated: token in process arguments. Prefer --prompt-token, --token-stdin, or LANTERN_TOKEN."
+      class_option :prompt_token, type: :boolean, default: false,
+                                  desc: "Prompt for the ingest token without echoing it."
+      class_option :token_stdin, type: :boolean, default: false,
+                                 desc: "Read the ingest token from one line on standard input."
       class_option :url, type: :string,
                          desc: "Ingest URL, for a self-hosted Lantern Cloud. Defaults to https://lantern.rebulk.com."
       class_option :kamal_secrets, type: :boolean, default: false,
@@ -84,14 +89,23 @@ module Lantern
         route 'mount Lantern::Engine, at: "/lantern"'
       end
 
-      # --token/--url land in .env when the app already keeps its environment
-      # there (a .env file, or dotenv in the Gemfile). Anywhere else -- Kamal
-      # secrets, credentials, a PaaS config UI -- there is no file to edit
-      # safely, so the values are printed with the exact lines to paste.
+      # A token lands in .env only when Git confirms the file is ignored.
+      # URLs are not secret and can still be written to a tracked dotenv file.
       def write_env
-        vars = { TOKEN_VAR => options[:token], URL_VAR => options[:url] }.compact
+        token = resolved_token
+        if options[:token]
+          say("--token exposes #{Lantern::SecretSafety.token_preview(options[:token])} in process arguments; " \
+              "use --prompt-token or --token-stdin next time.", :yellow)
+        end
+        vars = { TOKEN_VAR => token, URL_VAR => options[:url] }.compact
         return if vars.empty?
         return say(env_instructions(vars), :yellow) unless dotenv_app?
+
+        if token && !safe_dotenv_for_token?
+          say("Refusing to write #{Lantern::SecretSafety.token_preview(token)} to .env because Git does not confirm that .env is ignored. Use Rails credentials, a secret manager, or add .env to .gitignore first.", :red)
+          vars.delete(TOKEN_VAR)
+          return if vars.empty?
+        end
 
         existing = File.exist?(".env") ? File.read(".env") : ""
         missing = vars.reject { |name, _| existing.match?(/^#{name}=/) }
@@ -208,6 +222,26 @@ module Lantern
 
       private
 
+      def resolved_token
+        @resolved_token ||= begin
+          value = if options[:prompt_token]
+            ask("Lantern ingest token (input hidden):", echo: false)
+          elsif options[:token_stdin]
+            $stdin.gets
+          elsif options[:token]
+            options[:token]
+          elsif !ENV[TOKEN_VAR].to_s.empty?
+            ENV[TOKEN_VAR]
+          end
+          value = value.to_s.strip
+          value unless value.empty?
+        end
+      end
+
+      def safe_dotenv_for_token?
+        !Lantern::SecretSafety.git_tracked?(".env") && Lantern::SecretSafety.git_ignored?(".env")
+      end
+
       # dotenv is the only place the generator will write a token: an app
       # that keeps its environment anywhere else gets told what to paste.
       def dotenv_app?
@@ -215,8 +249,15 @@ module Lantern
       end
 
       def env_instructions(vars)
-        "Set these where this app reads its environment (.kamal/secrets, credentials, or your PaaS config):\n" +
-          vars.map { |name, value| "  #{name}=#{value}" }.join("\n")
+        lines = vars.map do |name, value|
+          if name == TOKEN_VAR
+            "  #{name}=#{Lantern::SecretSafety.token_preview(value)} (value hidden)"
+          else
+            "  #{name}=#{value}"
+          end
+        end
+        "Set these where this app reads its environment (.kamal/secrets, credentials, or your PaaS config). " \
+          "The token value is never printed:\n#{lines.join("\n")}"
       end
 
       def browser_client_instructions(path)

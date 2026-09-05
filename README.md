@@ -10,8 +10,8 @@ overhead per request and zero writes to your database.
 
 ```sh
 bundle add lantern                          # 1. add the gem
-bin/rails generate lantern:install          # 2. initializer, routes, Kamal hook, browser client, test matchers
-LANTERN_TOKEN=lt_... bin/rails lantern:doctor   # 3. check every piece is wired up
+bin/rails generate lantern:install --prompt-token  # 2. hidden token input plus app wiring
+bin/rails lantern:doctor                    # 3. check every piece is wired up after restart
 ```
 
 The generator writes `config/initializers/lantern.rb`, mounts the beacon
@@ -21,9 +21,11 @@ hook, the Inertia browser client with its `startLantern()` call, and
 a ✓/✗ checklist of all of it and exits non-zero if the token is missing or
 the ingest host is unreachable.
 
-Pass `--token=lt_...` (and `--url=` when self-hosting) to have the generator
-write them into `.env`, or print exactly where to put them; add
-`--kamal-secrets` and it wires `LANTERN_TOKEN` through `.kamal/secrets` and
+Pass `--prompt-token` (and `--url=` when self-hosting) to read the token
+without echo or process-argument exposure. The generator writes it to `.env`
+only when Git confirms that file is ignored; otherwise it points you to Rails
+credentials or your deployment secret manager without printing the value. Add
+`--kamal-secrets` to wire `LANTERN_TOKEN` through `.kamal/secrets` and
 `config/deploy.yml`. It finishes by running `lantern:doctor` for you.
 `bin/rails lantern:token` says where to get a token; `bin/rails lantern:mcp`
 prints ready-to-paste MCP client configuration.

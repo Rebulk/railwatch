@@ -13,14 +13,15 @@ render, exception, and span is a child of one, linked by
 
 ```sh
 bundle add lantern
-bin/rails generate lantern:install --token=lt_... --kamal-secrets
+bin/rails generate lantern:install --prompt-token --kamal-secrets
 ```
 
 The generator writes `config/initializers/lantern.rb`, mounts `Lantern::Engine`
 at `/lantern`, adds the Kamal `post-deploy` hook and the Inertia browser client
 where the app has them, requires `lantern/rspec` (or `lantern/minitest`) in the
-test helper, and then runs `lantern:doctor`. `--token=`/`--url=` go into `.env`
-if the app uses dotenv, else are printed. Configuration lives only in that
+test helper, and then runs `lantern:doctor`. A prompted/stdin/environment token
+goes into `.env` only when Git confirms that file is ignored; token values are
+never printed. Configuration lives only in that
 initializer; every option also has a `LANTERN_*` environment variable.
 
 ## Rake tasks
