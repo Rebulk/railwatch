@@ -239,6 +239,18 @@ module Lantern
       @records.each_with_index { |record, index| yield record, @record_bytes[index] }
     end
 
+    # Remove one buffered record without reporting it as dropped. Used when a
+    # concurrent execution already handed the same user entity to the
+    # reporter; keep the parallel byte accounting arrays aligned.
+    def delete_buffered_record(record)
+      index = @records.index { |buffered| buffered.equal?(record) }
+      return false unless index
+
+      @records.delete_at(index)
+      @buffered_bytes -= @record_bytes.delete_at(index)
+      true
+    end
+
     def drop_oldest
       @records.shift
       bytes = @record_bytes.shift

@@ -130,14 +130,22 @@ module Lantern
         # Before the records are written: it settles each pending `user`
         # entity's final reference, which a tenant bound after the entity was
         # resolved will have changed.
-        Subscribers::Users.commit_execution!(exe) if exe.pending_users
-        exe.each_record { |record, bytes| reporter.write(record, bytes) }
-        if exe.dropped_records.positive?
-          reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
+        user_claims = Subscribers::Users.prepare_execution!(exe) if exe.pending_users
+        begin
+          exe.each_record { |record, bytes| reporter.write(record, bytes) }
+          if exe.dropped_records.positive?
+            reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
+          end
+          reporter.write(parent) if parent
+          Subscribers::Users.commit_execution!(user_claims)
+        ensure
+          Subscribers::Users.release_execution!(user_claims)
         end
-        reporter.write(parent) if parent
       elsif parent && exe.exception_sampled
         reporter.write(parent)
+        Subscribers::Users.discard_execution!(exe) if exe.pending_users
+      elsif exe.pending_users
+        Subscribers::Users.discard_execution!(exe)
       end
       parent
     ensure
