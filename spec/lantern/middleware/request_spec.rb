@@ -447,6 +447,31 @@ RSpec.describe Lantern::Middleware::Request do
     expect(lantern_records(:request).sole[:path]).to eq("/rails-lazy")
   end
 
+  it "wraps a coercible Rails RackBody whose to_ary work is deferred" do
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:each) { |&block| block.call("chunk") }
+    stream.define_singleton_method(:to_ary) do
+      Lantern.record(:span, name: "lazy Rails coercion")
+      close
+      [ "chunk" ]
+    end
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    response = ActionDispatch::Response.new(200, { "Content-Type" => "text/plain" }, stream)
+    response_body = Rack::BodyProxy.new(Rack::BodyProxy.new(response.to_a.last) { nil }) { nil }
+
+    _, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/rails-lazy-coercion")
+    )
+
+    expect(body).to be_a(described_class::EnumerableResponseBody)
+    expect(lantern_records).to be_empty
+    expect(body.to_ary).to eq([ "chunk" ])
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:span).sole[:name]).to eq("lazy Rails coercion")
+    expect(lantern_records(:request).sole[:path]).to eq("/rails-lazy-coercion")
+  end
+
   it "wraps an Array subclass because its enumeration can still be lazy" do
     body_class = Class.new(Array) do
       def each

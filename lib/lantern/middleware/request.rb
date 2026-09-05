@@ -400,8 +400,14 @@ module Lantern
         while candidate.instance_of?(Rack::BodyProxy)
           candidate = candidate.instance_variable_get(:@body)
         end
-        candidate.instance_of?(Array) ||
-          (candidate.instance_of?(ActionDispatch::Response::RackBody) && candidate.respond_to?(:to_ary))
+        return true if candidate.instance_of?(Array)
+        return false unless candidate.instance_of?(ActionDispatch::Response::RackBody)
+
+        stream = candidate.response.stream
+        return false unless stream.instance_of?(ActionDispatch::Response::Buffer)
+
+        stream.instance_variable_get(:@buf).instance_of?(Array) ||
+          stream.instance_variable_get(:@str_body).instance_of?(String)
       end
 
       def streaming_context(env, exe)
