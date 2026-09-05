@@ -74,7 +74,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `route_domain` | `request.host`. |
 | `controller` | Controller name, `Controller` suffix stripped, underscored. |
 | `action` | Action name. |
-| `format` | Negotiated response format (`"html"`, `"json"`, ...). |
+| `format` | Negotiated response format (`"html"`, `"json"`, ...). Empty when the request never reached a controller, since resolving it would mean parsing the request body at teardown. |
 | `ip` | `request.remote_ip`. |
 | `status_code` | Response status. |
 | `request_size` / `response_size` | Bytes, from `Content-Length`. |
@@ -88,7 +88,7 @@ stage boundaries (the `action`/`render` boundaries come from
 | `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/lantern/redactor.rb`). |
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
-| `files` | Array of `{name, size, content_type, error}` for each uploaded file (metadata only, never contents). |
+| `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). A non-multipart request body is never parsed to fill this in. |
 | `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |
 
 ### `job_attempt`

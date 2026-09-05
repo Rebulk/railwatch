@@ -2,6 +2,17 @@
 
 ## 0.1.0 (unreleased)
 
+- Request teardown no longer parses a non-multipart request body. Emitting
+  the `request` record read `request.params` (for `files`) and
+  `request.format`, and Rack parses the body the first time either is asked
+  for. When a controller ran, that parse had already happened and was
+  memoized; when nothing ran -- a routing 404, a rack-attack block, an
+  upstream rejection -- Lantern was the only component that ever read the
+  body, at teardown, after the response was decided. Both reads are now
+  guarded: `files` falls back to walking params only for a multipart request
+  (nothing else can carry an upload), and `format` is reported only when it
+  is already resolved or the request is multipart, otherwise `""`.
+
 - Ingest acknowledgements are validated before a batch is considered
   delivered: a 2xx whose body is not a JSON object, is malformed JSON, omits
   `accepted`/`rejected`, or reports counts that do not cover the submitted
