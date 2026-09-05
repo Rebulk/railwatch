@@ -4,11 +4,11 @@ require "securerandom"
 
 module Lantern
   # The parent of every child record: one HTTP request, one job attempt, one
-  # scheduled task run, or one command. Holds the sampling decision, the trace
-  # id, the current lifecycle stage, and the counters that end up on the parent
-  # record. Never touches the database.
+  # scheduled task run, one command, or one Action Cable channel action. Holds
+  # the sampling decision, the trace id, the current lifecycle stage, and the
+  # counters that end up on the parent record. Never touches the database.
   class Execution
-    SOURCES = %i[request job scheduled_task command].freeze
+    SOURCES = %i[request job scheduled_task command channel_action].freeze
     MAX_RECORDS = 10_000
     COUNTERS = %i[queries cached_queries exceptions logs cache_events jobs_enqueued mail
                   broadcasts notifications outgoing_requests storage_ops view_renders

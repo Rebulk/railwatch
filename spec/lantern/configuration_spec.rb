@@ -54,19 +54,22 @@ RSpec.describe Lantern::Configuration do
       end
     end
 
-    it "maps LANTERN_REQUEST/JOB/COMMAND/SCHEDULED_TASK/EXCEPTION_SAMPLE_RATE into config.sample, defaulting every kind to 1.0" do
+    it "maps every execution sample-rate env var into config.sample, defaulting each kind to 1.0" do
       with_env(
         "LANTERN_REQUEST_SAMPLE_RATE" => "0.2", "LANTERN_JOB_SAMPLE_RATE" => "0.3",
         "LANTERN_COMMAND_SAMPLE_RATE" => "0.4", "LANTERN_SCHEDULED_TASK_SAMPLE_RATE" => "0.5",
-        "LANTERN_EXCEPTION_SAMPLE_RATE" => "0.6"
+        "LANTERN_CHANNEL_SAMPLE_RATE" => "0.6", "LANTERN_EXCEPTION_SAMPLE_RATE" => "0.7"
       ) do |config|
-        expect(config.sample).to eq(requests: 0.2, jobs: 0.3, commands: 0.4, scheduled_tasks: 0.5, exceptions: 0.6)
+        expect(config.sample).to eq(requests: 0.2, jobs: 0.3, commands: 0.4, scheduled_tasks: 0.5,
+                                    channels: 0.6, exceptions: 0.7)
       end
       with_env(
         "LANTERN_REQUEST_SAMPLE_RATE" => nil, "LANTERN_JOB_SAMPLE_RATE" => nil, "LANTERN_COMMAND_SAMPLE_RATE" => nil,
-        "LANTERN_SCHEDULED_TASK_SAMPLE_RATE" => nil, "LANTERN_EXCEPTION_SAMPLE_RATE" => nil
+        "LANTERN_SCHEDULED_TASK_SAMPLE_RATE" => nil, "LANTERN_CHANNEL_SAMPLE_RATE" => nil,
+        "LANTERN_EXCEPTION_SAMPLE_RATE" => nil
       ) do |config|
-        expect(config.sample).to eq(requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, exceptions: 1.0)
+        expect(config.sample).to eq(requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0,
+                                    channels: 1.0, exceptions: 1.0)
       end
     end
 

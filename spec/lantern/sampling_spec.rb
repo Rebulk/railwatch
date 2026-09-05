@@ -69,8 +69,8 @@ RSpec.describe "sampling", type: :request do
     expect(lantern_records(:request)).not_to be_empty
   end
 
-  describe "jobs, scheduled tasks, and commands honour their own sample rate" do
-    { job: :jobs, scheduled_task: :scheduled_tasks, command: :commands }.each do |source, kind|
+  describe "jobs, scheduled tasks, commands, and channels honour their own sample rate" do
+    { job: :jobs, scheduled_task: :scheduled_tasks, command: :commands, channel_action: :channels }.each do |source, kind|
       it "samples a #{source} execution by config.sample[:#{kind}], independent of the request rate" do
         Lantern.config.sample[:requests] = 0.0
         Lantern.config.sample[kind] = 1.0

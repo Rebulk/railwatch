@@ -2,6 +2,16 @@
 
 ## 0.1.0 (unreleased)
 
+- Action Cable channel actions now open a real `channel_action` execution
+  before application code runs, so the queries, logs, broadcasts, transmits,
+  and unhandled exceptions inside an action share one execution and one trace.
+  A channel action has no HTTP request and no Rack middleware around it, so
+  until now those records had no parent at all. Head sampling is its own knob,
+  `sample[:channels]` / `LANTERN_CHANNEL_SAMPLE_RATE`; an unhandled channel
+  exception still ships with its parent when the channel rate is zero.
+  **lantern-cloud must accept the `channel_action` record type before this
+  ships** — that is being handled separately.
+
 - `Lantern.context` is now redacted with the same `ActiveSupport::ParameterFilter`
   that redacts request params. Context is application data and gets copied
   onto every record built while it is set, so an app that put an API token or

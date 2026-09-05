@@ -34,6 +34,7 @@ Nightwatch's types, and what they're called here:
 | `command` | `command` | Rake tasks and `bin/rails runner`, not Artisan — Rails has no command bus. Task prerequisites nest inside the top-level command rather than opening their own. |
 | `job-attempt` | `job_attempt` | Active Job level, so the adapter (Solid Queue, Sidekiq, ...) doesn't matter. Adds `attempt`, `queue_latency`, `concurrency_key`, `priority`, and a `"released"` status for a `retry_on` that caught internally. |
 | `scheduled-task` | `scheduled_task` | Solid Queue recurring tasks from `config/recurring.yml`, detected from `SolidQueue::RecurringExecution`. Carries `task_key`, `schedule`, and `drift`. |
+| — | `channel_action` | One Action Cable action parent with its SQL, logs, broadcasts/transmits, and exception in the same trace. |
 | `query` | `query` | Normalized per adapter, with source `file:line`. Cached queries are counted, not stored. |
 | — | `n_plus_one` | Derived in-process: the same query group repeating `n_plus_one_threshold` times (default 5) in one execution. |
 | — | `transaction` | Duration, outcome, statement count. |
@@ -84,7 +85,7 @@ is the same hash with `jobs` added:
 
 ```ruby
 c.sample = { requests: 0.1, jobs: 1.0, commands: 1.0,
-             scheduled_tasks: 1.0, exceptions: 1.0 }
+             scheduled_tasks: 1.0, channels: 1.0, exceptions: 1.0 }
 ```
 
 Same semantics: sampled in means the whole tree ships, sampled out means

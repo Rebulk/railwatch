@@ -116,7 +116,7 @@ Lantern.configure do |c|
 
   # was traces_sample_rate: 0.1
   c.sample = { requests: 0.1, jobs: 1.0, commands: 1.0,
-               scheduled_tasks: 1.0, exceptions: 1.0 }
+               scheduled_tasks: 1.0, channels: 1.0, exceptions: 1.0 }
   # ...but keep every slow or failing request regardless
   c.tail_sample_slow_ms = 500
   # ...or, for failures only and a fraction of the memory: the last 200

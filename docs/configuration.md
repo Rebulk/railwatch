@@ -43,6 +43,7 @@ execution — see `docs/records.md`'s `exception` section).
 | `jobs` | `LANTERN_JOB_SAMPLE_RATE` | `1.0` |
 | `commands` | `LANTERN_COMMAND_SAMPLE_RATE` | `1.0` |
 | `scheduled_tasks` | `LANTERN_SCHEDULED_TASK_SAMPLE_RATE` | `1.0` |
+| `channels` | `LANTERN_CHANNEL_SAMPLE_RATE` | `1.0` |
 | `exceptions` | `LANTERN_EXCEPTION_SAMPLE_RATE` | `1.0` |
 
 Set as a whole hash: `c.sample = { requests: 0.1, jobs: 1.0 }` — keys you
