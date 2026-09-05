@@ -27,7 +27,13 @@ RSpec.describe "query record", type: :request do
 
     insert = lantern_records(:query).find { |r| r[:sql].start_with?("INSERT") }
     expect(insert[:name]).to eq("Widget Create")
-    expect(insert[:affected_rows]).to eq(1)
+    if Rails.gem_version >= Gem::Version.new("8.1")
+      expect(insert[:affected_rows]).to eq(1)
+    else
+      # Pre-8.1 row_count is not a portable substitute: PostgreSQL and MySQL
+      # may report zero here even when the statement affected rows.
+      expect(insert[:affected_rows]).to be_nil
+    end
     expect(insert[:in_transaction]).to be(true)
     expect(exe.id).to be_a(String)
   end

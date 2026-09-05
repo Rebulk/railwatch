@@ -2,7 +2,7 @@
 
 ## 0.1.0 (unreleased)
 
-- Lantern now supports Ruby 3.2–3.5 across Rails 7.2, 8.0, and 8.1. CI
+- Lantern now supports Ruby 3.2–3.4 and 4.0 across Rails 7.2, 8.0, and 8.1. CI
   exercises every Ruby/Rails combination, including generic Active Job test
   and inline adapters; Solid Queue-only telemetry is documented separately.
 

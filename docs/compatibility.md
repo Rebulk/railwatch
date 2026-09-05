@@ -1,21 +1,29 @@
 # Compatibility
 
-Lantern supports Ruby 3.2, 3.3, 3.4, and 3.5 on Rails 7.2, 8.0, and 8.1.
-The gemspec enforces those boundaries (`ruby >= 3.2`, `rails >= 7.2` and
-`rails < 8.2`), and CI runs the complete matrix of all twelve combinations.
+Lantern supports Ruby 3.2, 3.3, 3.4, and 4.0 on Rails 7.2, 8.0, and 8.1.
+The gemspec enforces the family boundaries (`ruby >= 3.2` and `< 4.1`,
+`rails >= 7.2` and `< 8.2`), and CI runs the complete matrix of all twelve
+maintained minor combinations.
 
 | | Rails 7.2 | Rails 8.0 | Rails 8.1 |
 |---|---:|---:|---:|
 | Ruby 3.2 | CI | CI | CI |
 | Ruby 3.3 | CI | CI | CI |
 | Ruby 3.4 | CI | CI | CI |
-| Ruby 3.5 | CI | CI | CI |
+| Ruby 4.0 | CI | CI | CI |
 
 Each Rails entry means the latest compatible patch release in that minor
 series. A new Ruby or Rails minor is unsupported until it has a green matrix
 entry. Removing a previously supported pair requires a Lantern release note
 and a corresponding gemspec boundary change; a transient CI failure does not
 silently redefine support.
+
+RubyGems requirements describe contiguous install ranges, so the gemspec alone
+cannot express the gap between Ruby 3.4 and 4.0. The table is authoritative for
+maintained versions; an intermediate preview or a future minor inside the
+install range is not supported until it receives its own green matrix entry.
+Likewise, the matrix tracks the latest security and bug-fix patch in each Rails
+minor rather than promising every historical patch release.
 
 The default `Gemfile.lock` remains the development baseline. The files under
 `gemfiles/` constrain that same development and test bundle to each supported
@@ -57,3 +65,6 @@ framework signals when the installed Rails version provides them:
 - Rails 7.2 and 8.0 identify a rate-limited request but do not expose the
   limiter's name, count, or threshold in the notification. Rails 8.1 adds
   those details.
+- Rails 8.1 adds affected-row counts to SQL notifications. On Rails 7.2 and
+  8.0, `affected_rows` remains absent because adapter `row_count` values do not
+  portably represent affected rows.

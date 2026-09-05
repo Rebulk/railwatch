@@ -11,14 +11,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ruby: ["3.2", "3.3", "3.4", "3.5"]
+        ruby: ["3.2", "3.3", "3.4", "4.0"]
         rails: [rails_7_2, rails_8_0, rails_8_1]
     runs-on: ubuntu-latest
     env:
       BUNDLE_GEMFILE: gemfiles/${{ matrix.rails }}.gemfile
-      # ruby/setup-ruby currently resolves 3.5 to a preview build. Native gem
-      # packages do not carry that preview ABI, so compile them for Ruby.
-      BUNDLE_FORCE_RUBY_PLATFORM: ${{ matrix.ruby == '3.5' }}
+      # Native gem packages can lag a new Ruby ABI, so compile them for Ruby
+      # on the newest maintained release.
+      BUNDLE_FORCE_RUBY_PLATFORM: ${{ matrix.ruby == '4.0' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

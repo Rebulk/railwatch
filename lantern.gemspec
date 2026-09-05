@@ -16,7 +16,7 @@ Gem::Specification.new do |spec|
   spec.metadata["documentation_uri"] = "#{spec.homepage}/blob/main/README.md"
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  spec.required_ruby_version = ">= 3.2"
+  spec.required_ruby_version = ">= 3.2", "< 4.1"
 
   spec.files = Dir.chdir(File.expand_path(__dir__)) do
     # docs/, llms.txt and AGENTS.md ship with the gem: `bundle open lantern`

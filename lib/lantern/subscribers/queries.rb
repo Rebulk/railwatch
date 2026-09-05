@@ -123,10 +123,7 @@ module Lantern
             role: role,
             async: p[:async] ? true : false,
             row_count: p[:row_count],
-            # Rails 8 exposes affected_rows directly. Rails 7.2/8.0 expose
-            # row_count for writes instead; SELECT row counts must not be
-            # mislabeled as affected rows.
-            affected_rows: p.key?(:affected_rows) ? p[:affected_rows] : (!SELECT.match?(sql) && p[:row_count]),
+            affected_rows: p[:affected_rows],
             in_transaction: p[:transaction] ? true : false,
             source: source_for(group, slow),
             allocations: event.allocations,
