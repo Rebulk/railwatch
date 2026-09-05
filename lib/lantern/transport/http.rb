@@ -57,8 +57,8 @@ module Lantern
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: records.size)
-          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: records.size) if attempt < 2 && (500..599).cover?(result.status)
+          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: sent)
+          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: sent) if attempt < 2 && (500..599).cover?(result.status)
           apply_status_policy(result)
           result
         rescue StandardError => e

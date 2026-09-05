@@ -63,7 +63,9 @@ RSpec.describe Lantern::Transport::Http do
       captured = nil
       stub_request(:post, "http://lantern.test/ingest").to_return do |request|
         captured = request
-        { status: 200, body: '{"accepted":1}' }
+        # The acknowledgement covers the records actually posted (one), not
+        # the two handed to deliver: the over-cap record never left the box.
+        { status: 200, body: '{"accepted":1,"rejected":0}' }
       end
 
       result = bounded.deliver([ { t: "log", message: "a" }, { t: "log", message: "x" * 200 } ])
