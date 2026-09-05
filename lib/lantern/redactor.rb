@@ -10,7 +10,15 @@ module Lantern
     # cannot enumerate ahead of time (X-Api-Key, Stripe-Signature,
     # X-Auth-Token, and similar). Match credential-shaped name segments in
     # addition to the exact configurable denylist.
-    SENSITIVE_HEADER_NAME = /(?:\A|-)(?:api-?key|auth(?:entication|orization)?|token|secret|signature)(?:-|\z)/i
+    SENSITIVE_HEADER_NAME = %r{
+      (?:\A|-)
+      (?:
+        api-?key|access-?key|private-?key|
+        auth(?:entication|orization)?|bearer|credential|
+        hmac|jwt|token|secret|signature
+      )
+      (?:-|\z)
+    }ix
 
     def initialize(config)
       @config = config

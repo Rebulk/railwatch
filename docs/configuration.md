@@ -277,9 +277,10 @@ config. Request params are only captured at all when
 `capture_request_payload` is on, and even then only for a request that
 raised an exception (see `request` in `docs/records.md`).
 
-Header names containing a credential-shaped segment (`api-key`, `auth`,
-`token`, `secret`, or `signature`) are always masked as a safe default, even
-when they are not listed explicitly. Add application-specific aliases to
+Header names containing a credential-shaped segment (`api-key`, `access-key`,
+`private-key`, `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`,
+`secret`, or `signature`) are always masked as a safe default, even when they
+are not listed explicitly. Add application-specific aliases to
 `redact_headers`; ordinary diagnostic headers remain available.
 
 **Per-field redaction blocks** run after a record is built, before it's

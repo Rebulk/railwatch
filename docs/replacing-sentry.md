@@ -140,10 +140,10 @@ Lantern.configure do |c|
 end
 ```
 
-Lantern also masks credential-shaped header names (`api-key`, `auth`,
-`token`, `secret`, and `signature`) automatically. During migration, add any
-application-specific aliases that do not use those names to
-`c.redact_headers`.
+Lantern also masks credential-shaped header names (`api-key`, `access-key`,
+`private-key`, `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`,
+`secret`, and `signature`) automatically. During migration, add any
+application-specific aliases that do not use those names to `c.redact_headers`.
 
 `Rails.error` needs no wiring: Lantern subscribes to it on install, so
 every `Rails.error.report` / `Rails.error.handle` call already in the app

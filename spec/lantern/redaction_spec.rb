@@ -25,6 +25,12 @@ RSpec.describe "redaction and rejection", type: :request do
         "X-Auth-Token" => "auth-secret",
         "X-Hub-Signature-256" => "github-secret",
         "Stripe-Signature" => "stripe-secret",
+        "X-Shopify-Hmac-Sha256" => "shopify-secret",
+        "X-Aws-Credential" => "aws-credential",
+        "X-Access-Key" => "access-key",
+        "X-Jwt-Assertion" => "jwt-secret",
+        "X-Bearer" => "bearer-secret",
+        "X-Private-Key" => "private-key",
         "X-Custom" => "keep-me"
       }
       req = lantern_records(:request).sole
@@ -35,6 +41,12 @@ RSpec.describe "redaction and rejection", type: :request do
       expect(req[:headers]["X-Auth-Token"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Hub-Signature-256"]).to eq("[FILTERED]")
       expect(req[:headers]["Stripe-Signature"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Shopify-Hmac-Sha256"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Aws-Credential"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Access-Key"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Jwt-Assertion"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Bearer"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Private-Key"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Custom"]).to eq("keep-me")
     end
   end
