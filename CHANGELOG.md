@@ -12,6 +12,8 @@
   Forked workers also reset the cache, since a child's reporter buffer starts
   empty and has to emit its own entities.
 
+
+
 - Action Cable channel actions now open a real `channel_action` execution
   before application code runs, so the queries, logs, broadcasts, transmits,
   and unhandled exceptions inside an action share one execution and one trace.
