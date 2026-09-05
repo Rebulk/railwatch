@@ -103,15 +103,17 @@ module Lantern
           record
         else
           token = Object.new
-          return unless claim!(key, token)
+          claims = { token: token, keys: [ key ] }
 
           begin
+            return unless claim!(key, token)
+
             record = Lantern.record(:user, id: key, name: details[:name], email: details[:email],
                                     tenant: Context.current_tenant)
             commit_standalone!(key, token, record, now)
             record
           ensure
-            release_execution!(token: token, keys: [ key ])
+            release_execution!(claims)
           end
         end
       end
@@ -124,26 +126,29 @@ module Lantern
         pending = exe.pending_users
         exe.pending_users = nil
         token = Object.new
-        claims = []
+        claims = { token: token, keys: [] }
 
-        # Claim in a stable order so two executions that observed several
-        # users in opposite orders cannot wait on one another.
-        entries = pending.filter_map do |key, record|
-          next unless buffered?(exe, record)
+        begin
+          # Claim in a stable order so two executions that observed several
+          # users in opposite orders cannot wait on one another.
+          entries = pending.filter_map do |key, record|
+            next unless buffered?(exe, record)
 
-          [ Execution.qualified_user(key, exe.tenant), record ]
-        end
-        entries.sort_by { |reference, _record| reference }.each do |reference, record|
-          if claim!(reference, token)
-            record[:id] = reference
-            record[:tenant] = exe.tenant if record[:tenant].nil?
-            claims << reference
-          else
-            exe.delete_buffered_record(record)
+            [ Execution.qualified_user(key, exe.tenant), record ]
           end
-        end
+          entries.sort_by { |reference, _record| reference }.each do |reference, record|
+            if claim!(reference, token, claimed_keys: claims[:keys])
+              record[:id] = reference
+              record[:tenant] = exe.tenant if record[:tenant].nil?
+            else
+              exe.delete_buffered_record(record)
+            end
+          end
 
-        { token: token, keys: claims }
+          yield claims
+        ensure
+          release_execution!(claims)
+        end
       end
 
       # Commit only after reporter.write accepted the complete execution tree.
@@ -203,7 +208,7 @@ module Lantern
         last && now - last < 3600
       end
 
-      def claim!(key, token)
+      def claim!(key, token, claimed_keys: nil)
         state_mutex.synchronize do
           while (owner = inflight[key]) && !owner.equal?(token)
             state_condition.wait(state_mutex)
@@ -211,6 +216,10 @@ module Lantern
           return false if owner&.equal?(token)
           return false if seen_recently_locked?(key, Clock.now)
 
+          # Track ownership before publishing it. If an asynchronous
+          # exception lands between these statements, release_execution!
+          # either finds no matching claim or has the key needed to remove it.
+          claimed_keys << key if claimed_keys
           inflight[key] = token
           true
         end

@@ -131,16 +131,14 @@ RSpec.describe "user record", type: :request do
     Lantern::Subscribers::Users.remember(details)
     second.tenant = "acme"
     log = Lantern.record(:log, level: "info", message: "kept")
-    claims = Lantern::Subscribers::Users.prepare_execution!(second)
-    buffered = []
-    second.each_record { |record, bytes| buffered << [ record, bytes ] }
+    Lantern::Subscribers::Users.prepare_execution!(second) do
+      buffered = []
+      second.each_record { |record, bytes| buffered << [ record, bytes ] }
 
-    expect(buffered).to eq([ [ log, Lantern::Record.buffered_bytes(log, limit: Lantern.config.execution_buffer_bytes) ] ])
-    Lantern::Subscribers::Users.release_execution!(claims)
-    claims = nil
+      bytes = Lantern::Record.buffered_bytes(log, limit: Lantern.config.execution_buffer_bytes)
+      expect(buffered).to eq([ [ log, bytes ] ])
+    end
     finish!
-  ensure
-    Lantern::Subscribers::Users.release_execution!(claims)
   end
 
   it "does not deduplicate the same raw id across different late-bound tenants" do
@@ -191,6 +189,48 @@ RSpec.describe "user record", type: :request do
     expect(lantern_records(:user).map { |record| record[:id] }.sort).to eq(%w[first-user second-user])
   ensure
     threads&.each(&:kill)
+  end
+
+  it "releases earlier user claims when a finishing thread is killed while waiting for another claim" do
+    first = { id: "cancel-a", name: "Ada", email: "ada@example.com" }
+    second = { id: "cancel-b", name: "Grace", email: "grace@example.com" }
+    blocker_token = Object.new
+    waiter_token = Object.new
+    waiting = Queue.new
+    completed = Queue.new
+
+    expect(Lantern::Subscribers::Users.claim!(second[:id], blocker_token)).to be(true)
+    allow(Lantern::Subscribers::Users).to receive(:claim!).and_wrap_original do |method, key, token, **kwargs|
+      waiting << true if key == second[:id] && !token.equal?(blocker_token)
+      method.call(key, token, **kwargs)
+    end
+
+    worker = Thread.new do
+      Lantern.start_execution(source: :command, sample_kind: :commands)
+      Lantern::Subscribers::Users.remember(first)
+      Lantern::Subscribers::Users.remember(second)
+      finish!
+    end
+
+    waiting.pop
+    worker.kill
+    expect(worker.join(2)).to equal(worker)
+    Lantern::Subscribers::Users.release_execution!(token: blocker_token, keys: [ second[:id] ])
+
+    waiter = Thread.new do
+      claimed = Lantern::Subscribers::Users.claim!(first[:id], waiter_token)
+      completed << claimed
+    ensure
+      Lantern::Subscribers::Users.release_execution!(token: waiter_token, keys: [ first[:id] ])
+    end
+
+    expect(waiter.join(2)).to equal(waiter)
+    expect(completed.pop).to be(true)
+  ensure
+    worker&.kill&.join
+    waiter&.kill&.join
+    Lantern::Subscribers::Users.release_execution!(token: blocker_token, keys: [ second[:id] ]) if blocker_token
+    Lantern::Subscribers::Users.restart_after_fork!
   end
 
   it "releases a shared user after every overlapping execution is discarded" do

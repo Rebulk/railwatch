@@ -129,17 +129,15 @@ module Lantern
       if exe.sampled? || tail
         # Before the records are written: it settles each pending `user`
         # entity's final reference, which a tenant bound after the entity was
-        # resolved will have changed.
-        user_claims = Subscribers::Users.prepare_execution!(exe) if exe.pending_users
-        begin
-          exe.each_record { |record, bytes| reporter.write(record, bytes) }
-          if exe.dropped_records.positive?
-            reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
+        # resolved will have changed. Claim acquisition and reporter handoff
+        # share one block-scoped ensure so asynchronous cancellation cannot
+        # strand a claim between those phases.
+        if exe.pending_users
+          Subscribers::Users.prepare_execution!(exe) do |user_claims|
+            ship_execution_tree(exe, parent, user_claims)
           end
-          reporter.write(parent) if parent
-          Subscribers::Users.commit_execution!(user_claims)
-        ensure
-          Subscribers::Users.release_execution!(user_claims)
+        else
+          ship_execution_tree(exe, parent)
         end
       elsif parent && exe.exception_sampled
         reporter.write(parent)
@@ -390,6 +388,15 @@ module Lantern
     end
 
     private
+
+    def ship_execution_tree(exe, parent, user_claims = nil)
+      exe.each_record { |record, bytes| reporter.write(record, bytes) }
+      if exe.dropped_records.positive?
+        reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
+      end
+      reporter.write(parent) if parent
+      Subscribers::Users.commit_execution!(user_claims)
+    end
 
     # Tail decision for a head-sampled-out execution. Only executions that
     # were buffering for the tail can be rescued -- with tail sampling off
