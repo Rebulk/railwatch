@@ -49,7 +49,7 @@ addition to its own fields below, always carries (`Lantern.build_parent`,
 | `allocations` | Objects allocated during the execution (`GC.stat(:total_allocated_objects)` delta). |
 | `gc_time` | GC time in the execution's window, when the Ruby build exposes `GC.stat(:time)`. |
 | `exception_preview` | First unhandled exception's `"Class: message"`, truncated to 255 chars, or nil. |
-| `context` | Serialized `Lantern.context(...)` key/values active for this execution. |
+| `context` | Serialized `Lantern.context(...)` key/values active for this execution, parameter-filtered like request params. `"_lantern_truncated": true` when it did not fit in 64KB. |
 
 A sampled-out execution still ships its parent record if it raised an
 unhandled exception (`Lantern.finish_execution`) — sampling controls

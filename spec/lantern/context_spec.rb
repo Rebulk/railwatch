@@ -25,10 +25,53 @@ RSpec.describe Lantern::Context do
       expect(JSON.parse(described_class.serialized)).to eq("section" => "checkout")
     end
 
-    it "truncates to 64KB instead of shipping an unbounded payload" do
-      Lantern.context(blob: "x" * 100_000)
+    it "recursively applies the same Lantern and Rails parameter filters as request params" do
+      Lantern.context(
+        account: {
+          password: "hunter2",
+          profile: [ { secret_code: "rails-secret", display_name: "Ada" } ]
+        }
+      )
+
+      context = JSON.parse(described_class.serialized)
+
+      expect(context.dig("account", "password")).to eq("[FILTERED]")
+      expect(context.dig("account", "profile", 0, "secret_code")).to eq("[FILTERED]")
+      expect(context.dig("account", "profile", 0, "display_name")).to eq("Ada")
+    end
+
+    it "stays inside 64KB and stays parseable when one value is oversized" do
+      Lantern.context(section: "checkout", blob: "x" * 100_000)
+
       json = described_class.serialized
-      expect(json.bytesize).to eq(described_class::LIMIT)
+
+      expect(json.bytesize).to be <= described_class::LIMIT
+      context = JSON.parse(json)
+      expect(context["_lantern_truncated"]).to be(true)
+      expect(context["section"]).to eq("checkout")
+      expect(context["blob"]).to end_with("[TRUNCATED]")
+    end
+
+    it "stays parseable when the context is oversized because of the number of keys" do
+      Lantern.context(**2_000.times.to_h { |i| [ :"key_#{i}", "v" * 100 ] })
+
+      json = described_class.serialized
+
+      expect(json.bytesize).to be <= described_class::LIMIT
+      context = JSON.parse(json)
+      expect(context["_lantern_truncated"]).to be(true)
+      expect(context.size).to be_between(2, 2_000)
+      expect(context["key_0"]).to eq("v" * 100)
+    end
+
+    it "redacts before measuring, so a filtered secret cannot be the reason a context truncates" do
+      Lantern.context(password: "x" * 100_000, section: "checkout")
+
+      context = JSON.parse(described_class.serialized)
+
+      expect(context["password"]).to eq("[FILTERED]")
+      expect(context["section"]).to eq("checkout")
+      expect(context).not_to have_key("_lantern_truncated")
     end
   end
 

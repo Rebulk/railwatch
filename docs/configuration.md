@@ -581,7 +581,16 @@ Writes through to `ActiveSupport::ExecutionContext`, `Rails.error.set_context`,
 and `Rails.event.set_context` in one call (`Lantern::Context.set`,
 `lib/lantern/context.rb`) — so context set for Lantern also shows up
 anywhere else Rails' own context stores are read. Serialized onto every
-record's `context` field (truncated at 64KB). `tenant` specifically is
+record's `context` field, through the same `ActiveSupport::ParameterFilter`
+that redacts request params (`c.redact_params` plus Rails'
+`config.filter_parameters`) — so a token or password put in context is
+`[FILTERED]` on the wire, not written verbatim onto every record made while
+it was set. A context over 64KB is rebuilt smaller rather than cut: whole
+values are kept while they fit, an oversized string value ends with
+`[TRUNCATED]`, anything that still does not fit is dropped, and the result
+carries `"_lantern_truncated": true`. It is always parseable JSON — the
+previous behaviour sliced the encoded string at 64KB, which produced a
+fragment the platform could not read at all. `tenant` specifically is
 auto-detected with no explicit `Lantern.context` call needed when the app
 uses `activerecord-tenanted` (`ActiveRecord::Base.current_tenant`) or
 `TenantRecord` (`TenantRecord.current_tenant`) — `Context.current_tenant`
