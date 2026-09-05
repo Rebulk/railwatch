@@ -4,7 +4,7 @@
 
 - Direct `Sidekiq::Job`/`Sidekiq::Worker` executions now have optional client
   and server middleware: trace/user/tenant propagation, enqueue and attempt
-  records, retry/dead semantics, sidekiq-cron scheduled-task attribution,
+  records, built-in retry/dead semantics, sidekiq-cron scheduled-task attribution,
   nested telemetry, and Sidekiq queue health. Active Job wrappers are skipped
   to prevent duplicates. `Lantern::JobAdapters` is the small SPI for other
   queues and schedulers, and `Lantern.scheduled_task` is a table-independent

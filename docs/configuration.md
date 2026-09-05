@@ -653,6 +653,13 @@ The block's value and exception are untouched. A successful run emits a
 the task and re-raised after the task is marked failed. `run_at` is optional;
 when supplied it produces scheduler drift.
 
+Direct Sidekiq retry status follows Sidekiq's built-in `retry: false`, attempt
+limit, and `retry_for` rules. A worker's `sidekiq_retry_in` callback runs only
+after every server middleware has unwound, so a callback that returns
+`:discard` or `:kill` cannot be observed reliably at attempt-record time; that
+attempt may appear as `"released"` even though Sidekiq subsequently discards
+or kills it. The exception and attempt are still captured.
+
 Custom integrations register an object with `Lantern::JobAdapters.register`.
 The optional methods are `available?`, `install!`,
 `schedule_metadata(payload)`, and `queue_health`. Middleware uses

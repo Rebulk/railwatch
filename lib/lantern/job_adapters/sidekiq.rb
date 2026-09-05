@@ -110,7 +110,7 @@ module Lantern
           name: job_name(payload["class"], payload),
           queue: queue.to_s,
           attempt: retry_count + 2,
-          enqueued_at: payload["enqueued_at"],
+          enqueued_at: timestamp_seconds(payload["enqueued_at"]),
           # Sidekiq increments retry_count after server middleware unwinds,
           # then exhausts when that new count reaches the configured limit.
           will_retry: retry_remaining?(payload, retries, retry_count, retry_limit),
@@ -134,15 +134,34 @@ module Lantern
       end
 
       def retry_remaining?(payload, retries, retry_count, retry_limit)
-        return false if retries == false || (retry_count + 1) >= retry_limit
+        return false if retries == false
 
         retry_for = payload["retry_for"]
         failed_at = payload["failed_at"]
-        return true unless retry_for && failed_at
+        if retry_for
+          duration = Float(retry_for)
+          return false unless duration.positive?
+          return true unless failed_at
 
-        Clock.now - Float(failed_at) < Float(retry_for)
+          # Sidekiq treats retry_for as duration-exclusive: unlike ordinary
+          # retries it ignores the configured attempt ceiling. Sidekiq 8
+          # stores failed_at as integer milliseconds; Sidekiq 7 and legacy
+          # payloads use floating-point seconds.
+          return timestamp_seconds(failed_at) + duration >= Clock.now
+        end
+
+        (retry_count + 1) < retry_limit
       rescue StandardError
         false
+      end
+
+      def timestamp_seconds(value)
+        return if value.nil?
+        return value.to_time.to_f if value.respond_to?(:to_time)
+
+        value.is_a?(Integer) ? value / 1_000.0 : Float(value)
+      rescue StandardError
+        nil
       end
 
       # The sidekiq-cron enqueue hook writes these identifiers into the job
@@ -157,13 +176,15 @@ module Lantern
           job = ::Sidekiq::Cron::Job.find(key, namespace)
           schedule = job&.cron
         end
+        run_at = payload.dig(CONTEXT_KEY, "run_at") || payload["at"] || payload["enqueued_at"]
         {
           task_key: key.to_s,
           schedule: schedule,
-          run_at: payload.dig(CONTEXT_KEY, "run_at") || payload["at"] || payload["enqueued_at"]
+          run_at: timestamp_seconds(run_at)
         }
       rescue StandardError
-        { task_key: key.to_s, schedule: nil, run_at: payload["at"] || payload["enqueued_at"] }
+        { task_key: key.to_s, schedule: nil,
+          run_at: timestamp_seconds(payload["at"] || payload["enqueued_at"]) }
       end
 
       def queue_health
