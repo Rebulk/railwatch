@@ -195,22 +195,45 @@ RSpec.describe Lantern::Profiler do
     it "runs in the child from the Process._fork hook, leaving no parent profile behind" do
       skip "fork not supported on this platform" unless Process.respond_to?(:fork)
 
+      # Exercise our real fork hook with a parent Handle, without forking an
+      # active native sampler: Vernier can deadlock in the child before this
+      # block runs. Native profiling is covered by the start/stop examples.
+      allow(described_class).to receive(:start_backend).and_return(true)
+      allow(described_class).to receive(:stop_backend).and_return(nil)
       described_class.start(mode: :wall)
+      parent_handle = described_class.instance_variable_get(:@running)
       reader, writer = IO.pipe
       pid = fork do
         reader.close
-        writer.write(described_class.instance_variable_get(:@running).inspect)
+        cleared = described_class.instance_variable_get(:@running).nil?
+        restarted = described_class.start(mode: :wall).is_a?(described_class::Handle)
+        writer.write(cleared && restarted ? "ok" : "no")
         writer.close
         exit!(0)
       end
       writer.close
-      result = reader.read
-      Process.wait(pid)
+      expect(IO.select([ reader ], nil, nil, 5)).not_to be_nil, "forked profiler did not respond within 5 seconds"
+      result = reader.read_nonblock(2)
+      Timeout.timeout(5) { Process.wait(pid) }
+      reaped = true
 
-      expect(result).to eq("nil")
-      expect(described_class.instance_variable_get(:@running)).to be_a(described_class::Handle)
+      expect(result).to eq("ok")
+      expect(described_class.instance_variable_get(:@running)).to equal(parent_handle)
     ensure
       reader&.close unless reader&.closed?
+      writer&.close unless writer&.closed?
+      if pid && !reaped
+        begin
+          Process.kill("KILL", pid)
+        rescue Errno::ESRCH
+          # The child may already have exited.
+        end
+        begin
+          Process.wait(pid)
+        rescue Errno::ECHILD
+          # A completed wait already reaped it.
+        end
+      end
       described_class.stop
     end
   end
