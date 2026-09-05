@@ -48,10 +48,19 @@ module Lantern
         begin
           status, headers, body = @app.call(env)
         rescue Exception => e # rubocop:disable Lint/RescueException
-          Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
+          begin
+            Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
+          rescue StandardError, SystemStackError => capture_error
+            # Observability must never replace the application's exception.
+            debug_failure("request exception capture failed", capture_error)
+          end
           raise
         ensure
-          exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
+          begin
+            exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
+          rescue StandardError, SystemStackError => stage_error
+            debug_failure("request stage cleanup failed", stage_error)
+          end
           finish(env, exe, status, headers)
         end
         [ status, headers, body ]
@@ -99,7 +108,7 @@ module Lantern
         # returns without writing anything.
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions
       rescue StandardError, SystemStackError => e
-        Lantern.debug { "request finish failed: #{e.class}: #{e.message}" }
+        debug_failure("request finish failed", e)
         # finish_execution always restores the execution's parent, even when
         # building or buffering the request record raised. Only retry cleanup
         # while this request is still current: otherwise this call would
@@ -108,7 +117,7 @@ module Lantern
           begin
             Lantern.finish_execution
           rescue StandardError, SystemStackError => cleanup_error
-            Lantern.debug { "request execution cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}" }
+            debug_failure("request execution cleanup failed", cleanup_error)
           end
         end
       ensure
@@ -126,7 +135,7 @@ module Lantern
         exe.user_id ||= Subscribers::Users.resolve_id(env)
 
         inertia = inertia_fields(env, headers)
-        payload = request_payload(env, req, exe)
+        payload, payload_truncated = request_payload(env, exe)
 
         {
           group: Record.group_hash(method, pattern),
@@ -152,6 +161,7 @@ module Lantern
           inertia: inertia,
           headers: request_headers(env),
           payload: payload,
+          payload_truncated: payload_truncated || nil,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
           files: request_files(env)
@@ -163,7 +173,7 @@ module Lantern
       # tempfiles are live; Rack endpoints and middleware can still contribute
       # metadata when they populated ActionDispatch's parameter cache first.
       def request_files(env)
-        return env["lantern.files"] if env.key?("lantern.files")
+        return UploadedFiles.normalize(env["lantern.files"]) if env.key?("lantern.files")
         return [] unless RequestMediaType.multipart_form_data?(env["CONTENT_TYPE"])
 
         parameters = env["action_dispatch.request.parameters"] ||
@@ -180,14 +190,35 @@ module Lantern
       # Payload capture is explicitly opt-in and exception-only. It uses
       # ActionDispatch parameters only after an upstream component populated
       # one of its caches, so request teardown never initiates body parsing.
-      def request_payload(env, request, exe)
-        return nil unless Lantern.config.capture_request_payload && exe.counters[:exceptions].positive?
-        return nil unless env["action_dispatch.request.parameters"] ||
-                          env["action_dispatch.request.request_parameters"]
+      def request_payload(env, exe)
+        return [ nil, false ] unless Lantern.config.capture_request_payload && exe.counters[:exceptions].positive?
 
-        Lantern.redactor.params(request.filtered_parameters.except("controller", "action"))
+        cached = env["action_dispatch.request.parameters"] ||
+                 env["action_dispatch.request.request_parameters"]
+        return [ nil, false ] unless cached
+
+        normalized = RequestPayload.normalize(cached)
+        return [ nil, true ] if normalized.failed
+
+        without_routing = normalized.value.except("controller", "action")
+        filtered =
+          if (filters = env["action_dispatch.parameter_filter"])
+            ActiveSupport::ParameterFilter.new(Array(filters), mask: Redactor::FILTERED).filter(without_routing)
+          else
+            without_routing
+          end
+        filtered = Lantern.redactor.params(filtered)
+        redaction_failed = !without_routing.empty? && filtered.empty?
+        filtered = RequestPayload.normalize(filtered)
+        [ filtered.failed ? nil : filtered.value, normalized.truncated || redaction_failed || filtered.truncated ]
       rescue StandardError, SystemStackError => e
         Lantern.debug { "request payload inspection failed: #{e.class}: #{e.message}" }
+        [ nil, true ]
+      end
+
+      def debug_failure(message, error)
+        Lantern.debug { "#{message}: #{error.class}: #{error.message}" }
+      rescue StandardError, SystemStackError
         nil
       end
 

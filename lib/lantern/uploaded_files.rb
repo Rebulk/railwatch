@@ -11,7 +11,10 @@ module Lantern
     MAX_FILES = 100
     MAX_NAME_BYTES = 256
     MAX_CONTENT_TYPE_BYTES = 256
+    MAX_ERROR_BYTES = 256
     MAX_FILE_BYTES = (2**63) - 1
+    STRING_BYTESIZE = String.instance_method(:bytesize)
+    STRING_BYTESLICE = String.instance_method(:byteslice)
 
     module_function
 
@@ -41,6 +44,26 @@ module Lantern
       end
 
       files
+    rescue StandardError, SystemStackError
+      []
+    end
+
+    # The controller subscriber owns this Rack env key, but application
+    # middleware can write it too. Treat it as an untrusted cache so malformed
+    # metadata cannot bypass the same bounds applied by #extract.
+    def normalize(value)
+      return [] unless value.is_a?(Array)
+
+      value.first(MAX_FILES).filter_map do |entry|
+        next unless entry.is_a?(Hash)
+
+        {
+          name: safe_string(rack_value(entry, :name), MAX_NAME_BYTES),
+          size: safe_emitted_size(rack_value(entry, :size)),
+          content_type: safe_string(rack_value(entry, :content_type), MAX_CONTENT_TYPE_BYTES),
+          error: safe_string(rack_value(entry, :error), MAX_ERROR_BYTES)
+        }
+      end
     rescue StandardError, SystemStackError
       []
     end
@@ -100,10 +123,19 @@ module Lantern
       nil
     end
 
+    def safe_emitted_size(size)
+      return nil unless size.is_a?(Integer) && size >= 0
+
+      [ size, MAX_FILE_BYTES ].min
+    end
+
     def safe_string(value, max_bytes)
       return nil if value.nil?
 
-      text = value.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
+      raw = value.is_a?(String) ? value : value.to_s
+      source_limit = max_bytes + 4
+      raw = STRING_BYTESLICE.bind_call(raw, 0, source_limit) if STRING_BYTESIZE.bind_call(raw) > source_limit
+      text = String.new(raw).encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
       return text if text.bytesize <= max_bytes
 
       # byteslice can cut a multi-byte character; dropping only that partial

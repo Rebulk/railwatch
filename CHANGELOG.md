@@ -7,12 +7,14 @@
   its first records when the tree was written at the end of the execution;
   on rebulk-system that was every outgoing HTTP request of a 30-second sync.
 
-- Request finalization never initiates request-body parsing. Upload inspection
-  and opt-in exception payload capture only use parameters already cached
+- Upload and opt-in exception-payload inspection during request finalization
+  never initiate request-body parsing. They only use parameters already cached
   upstream. JSON and urlencoded bodies rejected by middleware remain unread,
   while nested and array multipart uploads retain filename-independent size,
   field-name, and content-type metadata. That metadata is bounded and normalized
   to valid UTF-8 so a malformed upload cannot poison an NDJSON delivery batch.
+  Opt-in payloads are normalized to a JSON-safe tree and capped at 64 KiB,
+  10,000 nodes, and 50 levels; `payload_truncated` reports any loss.
 
 - Active Job payloads now carry the enqueuing execution's user and tenant
   (`lantern_user`/`lantern_tenant`) next to the trace and parent ids, and

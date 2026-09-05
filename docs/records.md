@@ -86,7 +86,8 @@ stage boundaries (the `action`/`render` boundaries come from
 | `rate_limited` | `{name:, count:, to:}` if `ActionController::RateLimiting` fired, else nil. |
 | `inertia` | Present only on an Inertia request (`X-Inertia` header or an Inertia render happened): `{component, version, partial_component, partial_only, partial_except, props_bytes, ssr_ms}`. `ssr_ms` is only set when `inertia_rails` SSR actually rendered this request (`lib/lantern/patches/inertia.rb`). |
 | `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/lantern/redactor.rb`). |
-| `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
+| `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). Cached params are normalized to JSON-safe values and capped at 64 KiB, 10,000 nodes, and 50 levels. |
+| `payload_truncated` | `true` when an opt-in payload exceeded a byte, node, string, or depth bound. Also true when a cyclic or malformed cached parameter tree was omitted. |
 | `user_agent` | Truncated to 256 chars. |
 | `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). Request finalization only uses parameters already parsed upstream; Lantern never initiates body parsing to populate this field. Field names and content types are valid UTF-8 capped at 256 bytes, and sizes are non-negative 64-bit integers or nil. |
 | `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |

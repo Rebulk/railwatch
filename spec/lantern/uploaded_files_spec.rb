@@ -105,4 +105,21 @@ RSpec.describe Lantern::UploadedFiles do
     io.define_singleton_method(:size) { "5" }
     expect(described_class.extract(invalid_size).sole[:size]).to be_nil
   end
+
+  it "normalizes cached metadata without trusting its shape or encoding" do
+    cycle = []
+    cycle << cycle
+    expect(described_class.normalize(cycle)).to eq([])
+
+    invalid = "\xFF".b
+    rows = Array.new(described_class::MAX_FILES + 1) do
+      { "name" => invalid, "size" => -1, "content_type" => invalid, "error" => invalid }
+    end
+    normalized = described_class.normalize(rows)
+
+    expect(normalized.size).to eq(described_class::MAX_FILES)
+    expect(normalized.first[:size]).to be_nil
+    expect(normalized.first.values_at(:name, :content_type, :error)).to all(be_valid_encoding)
+    expect { JSON.generate(normalized) }.not_to raise_error
+  end
 end

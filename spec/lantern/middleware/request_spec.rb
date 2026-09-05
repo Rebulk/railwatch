@@ -56,6 +56,7 @@ RSpec.describe Lantern::Middleware::Request do
   end
 
   it "does not finish a nested parent when session tracking fails after request finalization" do
+    previous_track_sessions = Lantern.config.track_sessions
     Lantern.config.track_sessions = true
     parent = Lantern.start_execution(source: :job)
     allow(Lantern::Sessions).to receive(:touch).and_raise("session tracking failed")
@@ -67,7 +68,26 @@ RSpec.describe Lantern::Middleware::Request do
     Lantern.finish_execution
     expect(Lantern.execution).to be_nil
   ensure
-    Lantern.config.track_sessions = false
+    Lantern.config.track_sessions = previous_track_sessions
+    Lantern::Current.clear
+  end
+
+  it "never replaces an application error when exception reporting fails" do
+    parent = Lantern.start_execution(source: :job)
+    original = Class.new(StandardError)
+    allow(Lantern.reporter).to receive(:write_now).and_raise("reporter write failed")
+
+    expect do
+      described_class.new(->(_) { raise original, "original app error" }).call(
+        env_for("http://customer.test/boom")
+      )
+    end.to raise_error(original, "original app error")
+
+    expect(Lantern.execution).to equal(parent)
+    Lantern.record(:span, name: "parent survived exception reporting")
+    Lantern.finish_execution
+    expect(lantern_records(:span).sole[:name]).to eq("parent survived exception reporting")
+  ensure
     Lantern::Current.clear
   end
 
@@ -355,10 +375,79 @@ RSpec.describe Lantern::Middleware::Request do
     status, = described_class.new(app).call(env)
 
     expect(status).to eq(422)
-    expect(lantern_records(:request).sole).to include(status_code: 422, payload: nil)
+    expect(lantern_records(:request).sole).to include(status_code: 422, payload: nil, payload_truncated: true)
     expect(Lantern::Current.execution).to be_nil
   ensure
     Lantern.config.capture_request_payload = false
+  end
+
+  it "bounds huge cached opt-in payloads and reports the truncation" do
+    Lantern.config.capture_request_payload = true
+    params = { "items" => Array.new(Lantern::RequestPayload::MAX_NODES + 100) { "x" * 100 } }
+    env = env_for("http://customer.test/api", method: "POST", headers: {
+      "CONTENT_TYPE" => "application/json",
+      "action_dispatch.request.request_parameters" => params
+    })
+    app = lambda do |_request_env|
+      Lantern.report(RuntimeError.new("handled"))
+      [ 422, { "Content-Type" => "application/json" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env)
+
+    expect(status).to eq(422)
+    request = lantern_records(:request).sole
+    expect(request[:payload_truncated]).to be(true)
+    expect(JSON.generate(request[:payload]).bytesize).to be <= Lantern::RequestPayload::MAX_BYTES
+    expect(request.dig(:payload, "items").size).to be < params["items"].size
+  ensure
+    Lantern.config.capture_request_payload = false
+  end
+
+  it "honors request-specific parameter filters after bounding cached params" do
+    Lantern.config.capture_request_payload = true
+    env = env_for("http://customer.test/api", method: "POST", headers: {
+      "CONTENT_TYPE" => "application/json",
+      "action_dispatch.parameter_filter" => [ :private_code ],
+      "action_dispatch.request.request_parameters" => { "private_code" => "secret", "safe" => "shown" }
+    })
+    app = lambda do |_request_env|
+      Lantern.report(RuntimeError.new("handled"))
+      [ 422, { "Content-Type" => "application/json" }, [] ]
+    end
+
+    described_class.new(app).call(env)
+
+    request = lantern_records(:request).sole
+    expect(request[:payload]).to eq({ "private_code" => "[FILTERED]", "safe" => "shown" })
+    expect(request[:payload_truncated]).to be_nil
+  ensure
+    Lantern.config.capture_request_payload = false
+  end
+
+  it "normalizes and bounds a prepopulated upload metadata cache" do
+    invalid = "\xFF".b
+    oversized = {
+      name: invalid + ("n" * Lantern::UploadedFiles::MAX_NAME_BYTES),
+      size: 2**100,
+      content_type: invalid,
+      error: invalid
+    }
+    env = env_for("http://customer.test/upload", method: "POST")
+    app = lambda do |request_env|
+      request_env["lantern.files"] = Array.new(Lantern::UploadedFiles::MAX_FILES + 10, oversized)
+      [ 201, { "Content-Type" => "text/plain" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env)
+
+    expect(status).to eq(201)
+    request = lantern_records(:request).sole
+    expect(request[:files].size).to eq(Lantern::UploadedFiles::MAX_FILES)
+    expect(request[:files].first).to include(size: Lantern::UploadedFiles::MAX_FILE_BYTES)
+    expect(request[:files].first.values_at(:name, :content_type, :error)).to all(be_valid_encoding)
+    expect { JSON.generate(request) }.not_to raise_error
+    expect { Lantern::Transport::Http.new(Lantern.config).send(:encode, [ request ]) }.not_to raise_error
   end
 
   it "uses Rack-native multipart parameters only after Rack cached them" do
