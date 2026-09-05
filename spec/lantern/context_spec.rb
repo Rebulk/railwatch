@@ -32,6 +32,47 @@ RSpec.describe Lantern::Context do
     end
   end
 
+  describe ".snapshot / .with" do
+    it "uses the captured request context without mutating the consumer thread" do
+      tenant_record = Class.new do
+        def self.current_tenant
+          Thread.current[:lantern_context_spec_tenant]
+        end
+      end
+      stub_const("TenantRecord", tenant_record)
+      Thread.current[:lantern_context_spec_tenant] = "request-tenant"
+      Lantern.context(request_id: "request-value")
+      snapshot = described_class.snapshot
+      seen = Queue.new
+
+      worker = Thread.new do
+        Thread.current[:lantern_context_spec_tenant] = "worker-tenant"
+        ActiveSupport::ExecutionContext.set(worker_secret: "preserved")
+        described_class.with(snapshot) do
+          Lantern.context(stream_phase: "body")
+          seen << [ described_class.current, described_class.current_tenant,
+                    ActiveSupport::ExecutionContext.to_h ]
+        end
+        seen << [ described_class.current, described_class.current_tenant,
+                  ActiveSupport::ExecutionContext.to_h ]
+      ensure
+        ActiveSupport::ExecutionContext.clear
+        Thread.current[:lantern_context_spec_tenant] = nil
+      end
+      worker.join
+
+      inside, outside = 2.times.map { seen.pop }
+      expect(inside[0]).to include(request_id: "request-value", stream_phase: "body")
+      expect(inside[0]).not_to include(:worker_secret)
+      expect(inside[1]).to eq("request-tenant")
+      expect(inside[2]).to include(worker_secret: "preserved")
+      expect(outside[0]).to include(worker_secret: "preserved")
+      expect(outside[1]).to eq("worker-tenant")
+    ensure
+      Thread.current[:lantern_context_spec_tenant] = nil
+    end
+  end
+
   describe "flowing into a parent record's context field" do
     it "attaches the current context to the execution's parent record" do
       Lantern.start_execution(source: :command, sample_kind: :commands)

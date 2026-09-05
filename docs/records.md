@@ -61,12 +61,14 @@ Built by the outermost Rack middleware (`lib/lantern/middleware/request.rb`),
 which also owns the `middleware_before`/`action`/`render`/`middleware_after`
 stage boundaries (the `action`/`render` boundaries come from
 `start_processing.action_controller` and `render_template.action_view` in
-`lib/lantern/subscribers/requests.rb`). A lazy or streaming Rack response stays
-inside this execution through body enumeration and close, including when the
-server consumes it on another thread. Its chunk-producing queries, logs,
-spans, and failures therefore belong to this request, and `duration` includes
-that work. A literal, already-materialized Array response still finalizes as
-soon as the Rack application returns it.
+`lib/lantern/subscribers/requests.rb`). A lazy enumerable body, Rack 3
+call-style streaming body, or partial-hijack callback stays inside this
+execution through consumption and close, including when the server consumes
+it on another thread. Its chunk-producing queries, logs, spans, and failures
+therefore belong to this request, and `duration` includes that work without
+borrowing the consumer thread's tenant or context. A literal,
+already-materialized Array response without a partial hijack still finalizes
+as soon as the Rack application returns it.
 
 | Field | Meaning |
 |---|---|

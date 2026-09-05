@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "rack/lint"
 require "rack/tempfile_reaper"
 
 RSpec.describe Lantern::Middleware::Request do
@@ -393,6 +394,183 @@ RSpec.describe Lantern::Middleware::Request do
     expect(close_calls).to eq(1)
     expect(lantern_records(:span).sole[:name]).to eq("coerced body")
     expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "preserves Rack 3 call-only streaming body semantics" do
+    writes = []
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:call) do |io|
+      Lantern.record(:span, name: "call body")
+      io << "hello"
+      :streamed
+    end
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/call-stream"))
+
+    expect(body).to respond_to(:call)
+    expect(body).not_to respond_to(:each)
+    expect(body.call(writes)).to eq(:streamed)
+    expect(writes).to eq([ "hello" ])
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:span).sole[:execution_id]).to eq(lantern_records(:request).sole[:execution_id])
+
+    body.close
+    expect(close_calls).to eq(1)
+  end
+
+  it "passes a Rack::Lint round trip with a call-only streaming body" do
+    stream = Object.new
+    stream.define_singleton_method(:call) { |io| io << "linted" }
+    stream.define_singleton_method(:close) { nil }
+    app = ->(_) { [ 200, { "content-type" => "text/plain" }, stream ] }
+    linted = Rack::Lint.new(described_class.new(app))
+
+    status, _, body = linted.call(env_for("http://customer.test/call-stream"))
+    io = StringIO.new
+    io.define_singleton_method(:close_read) { nil }
+    io.define_singleton_method(:close_write) { nil }
+    body.call(io)
+    body.close
+
+    expect(status).to eq(200)
+    expect(io.string).to eq("linted")
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "isolates a cross-thread request tenant and context from the consumer thread" do
+    tenant_record = Class.new do
+      def self.current_tenant
+        Thread.current[:lantern_request_spec_tenant]
+      end
+    end
+    stub_const("TenantRecord", tenant_record)
+    stream_error = Class.new(StandardError)
+    stream = Object.new
+    stream.define_singleton_method(:each) do
+      Lantern.context(stream_phase: "enumeration")
+      raise stream_error, "stream failed"
+    end
+    stream.define_singleton_method(:close) { nil }
+    app = lambda do |_|
+      Thread.current[:lantern_request_spec_tenant] = "request-tenant"
+      ActiveSupport::ExecutionContext.set(request_marker: "request-value")
+      [ 200, {}, stream ]
+    end
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+    failure = Queue.new
+    worker_context = Queue.new
+    worker = Thread.new do
+      Thread.current[:lantern_request_spec_tenant] = "worker-tenant"
+      ActiveSupport::ExecutionContext.set(worker_secret: "must-not-leak")
+      begin
+        body.each { |_| nil }
+      rescue StandardError => error
+        failure << error
+      ensure
+        worker_context << ActiveSupport::ExecutionContext.to_h
+        ActiveSupport::ExecutionContext.clear
+        Thread.current[:lantern_request_spec_tenant] = nil
+      end
+    end
+    worker.join
+
+    expect(failure.pop).to be_a(stream_error)
+    request = lantern_records(:request).sole
+    exception = lantern_records(:exception).sole
+    expect(request).to include(tenant: "request-tenant")
+    expect(exception).to include(tenant: "request-tenant")
+    expect(JSON.parse(request[:context])).to include(
+      "request_marker" => "request-value", "stream_phase" => "enumeration"
+    )
+    expect(JSON.parse(exception[:context])).to include(
+      "request_marker" => "request-value", "stream_phase" => "enumeration"
+    )
+    expect(exception[:context]).not_to include("worker_secret")
+    expect(worker_context.pop).to include(worker_secret: "must-not-leak")
+  ensure
+    Thread.current[:lantern_request_spec_tenant] = nil
+    ActiveSupport::ExecutionContext.clear
+  end
+
+  it "does not report a downstream client disconnect as an application exception" do
+    disconnect = Errno::EPIPE.new("client disconnected")
+    stream = Object.new
+    stream.define_singleton_method(:each) { |&block| block.call("chunk") }
+    stream.define_singleton_method(:close) { nil }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+    expect { body.each { raise disconnect } }.to raise_error { |error| expect(error).to equal(disconnect) }
+    expect(lantern_records(:request).size).to eq(1)
+    expect(lantern_records(:exception)).to be_empty
+  end
+
+  it "keeps Rack partial-hijack callback work inside the request lifecycle" do
+    callback_execution = nil
+    callback_stream = nil
+    response_body = []
+    hijack = proc do |stream|
+      callback_execution = Lantern.execution
+      callback_stream = stream
+      Lantern.record(:span, name: "partial hijack")
+      :attached
+    end
+    headers = { "rack.hijack" => hijack, "X-Stream" => "yes" }
+    app = ->(_) { [ 200, headers, response_body ] }
+
+    status, returned_headers, body = described_class.new(app).call(env_for("http://customer.test/hijack"))
+
+    expect(status).to eq(200)
+    expect(body).to equal(response_body)
+    expect(returned_headers["X-Stream"]).to eq("yes")
+    expect(lantern_records).to be_empty
+    io = Object.new
+    expect(returned_headers["rack.hijack"].call(io)).to eq(:attached)
+
+    request = lantern_records(:request).sole
+    expect(callback_execution).to be_a(Lantern::Execution)
+    expect(callback_stream).to equal(io)
+    expect(lantern_records(:span).sole).to include(name: "partial hijack", execution_id: request[:execution_id])
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "waits to finalize until active enumeration ends when another thread closes" do
+    entered = Queue.new
+    release = Queue.new
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      entered << true
+      release.pop
+      Lantern.record(:span, name: "after concurrent close")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+    consumer = Thread.new { body.each { |_| nil } }
+    entered.pop
+    closer = Thread.new { body.close }
+    closer.join
+    expect(lantern_records(:request)).to be_empty
+    release << true
+    consumer.join
+
+    expect(lantern_records(:span).sole[:name]).to eq("after concurrent close")
+    expect(lantern_records(:request).size).to eq(1)
+    expect(close_calls).to eq(1)
+    body.close
+    expect(close_calls).to eq(1)
+    expect(Lantern.execution).to be_nil
+  ensure
+    release << true if consumer&.alive?
+    consumer&.join
+    closer&.join
   end
 
   it "defers profiler cleanup until a streaming body finishes" do
