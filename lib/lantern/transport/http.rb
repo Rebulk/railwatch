@@ -41,15 +41,24 @@ module Lantern
         self
       end
 
-      def deliver(records, dropped: 0, batch_id: SecureRandom.uuid)
+      def deliver(records, dropped: 0, dropped_bytes: 0, batch_id: SecureRandom.uuid)
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 
-        body = encode(records)
+        body, sent, over_cap, over_cap_bytes = encode(records)
+        if over_cap.positive?
+          # Not a delivery failure: a batch this large will be exactly as
+          # large on every retry, so raising a retryable error here would burn
+          # the whole ladder and drop the records at the end anyway. Drop them
+          # now, and count them onto this batch so the loss is visible.
+          Lantern.debug { "dropped #{over_cap} records that did not fit in batch_bytes (#{@config.batch_bytes})" }
+          dropped += over_cap
+          dropped_bytes += over_cap_bytes
+        end
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped, batch_id), expected_count: records.size)
-          result = parse(post(body, dropped, batch_id), expected_count: records.size) if attempt < 2 && (500..599).cover?(result.status)
+          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: records.size)
+          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: records.size) if attempt < 2 && (500..599).cover?(result.status)
           apply_status_policy(result)
           result
         rescue StandardError => e
@@ -67,19 +76,41 @@ module Lantern
 
       private
 
+      # The one serialization of the batch, so it is also where its exact
+      # uncompressed size is known. Records past config.batch_bytes are left
+      # out and reported back to the caller rather than growing the request
+      # without limit. Returns [body, records written, records left out,
+      # bytes left out].
       def encode(records)
         io = StringIO.new
         gz = Zlib::GzipWriter.new(io)
-        records.each { |r| gz.write(JSON.generate(r)); gz.write("\n") }
+        bytes = 0
+        sent = 0
+        over_cap = 0
+        over_cap_bytes = 0
+        records.each do |record|
+          json = JSON.generate(record)
+          size = json.bytesize + 1
+          if bytes + size > @config.batch_bytes
+            over_cap += 1
+            over_cap_bytes += size
+            next
+          end
+          gz.write(json)
+          gz.write("\n")
+          bytes += size
+          sent += 1
+        end
         gz.close
-        io.string
+        [ io.string, sent, over_cap, over_cap_bytes ]
       end
 
-      def post(body, dropped, batch_id)
+      def post(body, dropped, dropped_bytes, batch_id)
         req = Net::HTTP::Post.new(@uri)
         req["Content-Type"] = "application/x-ndjson"
         req["Content-Encoding"] = "gzip"
         req["X-Lantern-Dropped"] = dropped.to_s if dropped.positive?
+        req["X-Lantern-Dropped-Bytes"] = dropped_bytes.to_s if dropped_bytes.positive?
         req["X-Lantern-Version"] = Lantern::VERSION
         req["X-Lantern-Batch-Id"] = batch_id
         req.body = body

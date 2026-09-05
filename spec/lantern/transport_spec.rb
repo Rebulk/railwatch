@@ -56,6 +56,26 @@ RSpec.describe Lantern::Transport::Http do
       expect(captured.headers).not_to have_key("X-Lantern-Dropped")
     end
 
+    it "drops records that do not fit the batch byte cap rather than retrying forever" do
+      config = Lantern.config.dup
+      config.batch_bytes = 64
+      bounded = described_class.new(config)
+      captured = nil
+      stub_request(:post, "http://lantern.test/ingest").to_return do |request|
+        captured = request
+        { status: 200, body: '{"accepted":1}' }
+      end
+
+      result = bounded.deliver([ { t: "log", message: "a" }, { t: "log", message: "x" * 200 } ])
+
+      expect(result.ok).to be(true)
+      expect(result).not_to be_retryable
+      expect(captured.headers["X-Lantern-Dropped"]).to eq("1")
+      decoded = Zlib::GzipReader.new(StringIO.new(captured.body)).read
+      expect(decoded.lines.size).to eq(1)
+      expect(decoded).to include('"message":"a"')
+    end
+
     it "retries once on a network error, then returns a retryable result without raising" do
       seen_errors = []
       Lantern.on_unrecoverable { |e| seen_errors << e }
@@ -218,6 +238,34 @@ RSpec.describe Lantern::Buffer do
       batch, dropped = buffer.drain
       expect(batch).to eq(%i[b c])
       expect(dropped).to eq(1)
+    end
+
+    it "stays under its byte ceiling through sustained mixed-size writes" do
+      buffer = described_class.new(10_000, byte_capacity: 4_096)
+
+      1_000.times do |index|
+        buffer.push({ message: "x" * (index.even? ? 40 : 900), index: index })
+        expect(buffer.bytes).to be <= 4_096
+      end
+
+      records, dropped, dropped_bytes = buffer.drain
+      expect(records).not_to be_empty
+      expect(dropped).to be_positive
+      expect(dropped_bytes).to be_positive
+    end
+
+    it "drops a record heavier than the whole queue instead of emptying the queue for it" do
+      buffer = described_class.new(10, byte_capacity: 1_024)
+      buffer.push({ message: "keep me" })
+
+      buffer.push({ message: "x" * 4_096 })
+
+      records, dropped, dropped_bytes = buffer.drain
+      expect(records).to eq([ { message: "keep me" } ])
+      expect(dropped).to eq(1)
+      # A record past the ceiling is only weighed as far as the ceiling, so
+      # the byte counter is a floor for it -- the record counter is exact.
+      expect(dropped_bytes).to be > 1_024
     end
   end
 
@@ -383,6 +431,30 @@ RSpec.describe Lantern::Reporter do
       reporter.flush
 
       expect(seen_dropped).to eq([ 2, 2 ])
+    end
+
+    it "splits a queue larger than one delivery instead of dropping the tail" do
+      record = { t: "log", message: "x" * 40 }
+      one = Lantern::Record.buffered_bytes(record, limit: Float::INFINITY)
+      deliveries = []
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+        deliveries << [ records.size, dropped, batch_id ]
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      config = reporter_config
+      config.buffer_size = 10
+      config.buffer_bytes = one * 10
+      config.batch_bytes = one * 3
+      reporter = described_class.new(config, transport: transport)
+      5.times { reporter.buffer.push(record.dup) }
+
+      reporter.flush
+      reporter.flush
+
+      expect(deliveries.map(&:first)).to eq([ 3, 2 ])
+      expect(deliveries.map { |_, dropped, _| dropped }).to eq([ 0, 0 ])
+      expect(deliveries.map(&:last).uniq.size).to eq(2)
     end
 
     it "keeps a failed request immutable while buffering records written during delivery" do

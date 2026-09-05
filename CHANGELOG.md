@@ -2,6 +2,24 @@
 
 ## 0.1.0 (unreleased)
 
+- Telemetry memory is now bounded by bytes as well as by record count. A
+  record count alone does not bound memory: 10,000 records is a few megabytes
+  of ordinary telemetry, or a gigabyte of captured attachments and
+  multi-megabyte SQL strings. Three new ceilings, all configurable:
+  `buffer_bytes` (16 MiB, reporter queue), `execution_buffer_bytes` (8 MiB,
+  one execution's buffered tree), and `batch_bytes` (8 MiB uncompressed
+  NDJSON per ingest request). Each record is weighed once, when it is
+  buffered, and the weight travels with it, so nothing is measured twice.
+  Byte loss is counted and reported alongside record loss
+  (`X-Lantern-Dropped-Bytes`).
+- A queue holding more than one batch is delivered as several batches; the
+  tail is kept for the next flush rather than dropped. A record that still
+  does not fit one delivery is dropped and counted rather than raising -- a
+  batch that is too large is exactly as large on the next attempt, so
+  retrying it would burn all eight attempts and drop it anyway.
+- `Lantern.attach` reads a file or IO with a bounded `cap + 1` read. A 2GB
+  log file used to be read whole and then sliced to 1 MiB.
+
 - User references survive a tenant that binds after the user is resolved.
   An app that resolves its user in one `before_action` and its tenant in the
   next used to emit a bare `"1"` for every tenant's user 1 -- two tenants

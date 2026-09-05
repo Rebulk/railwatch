@@ -121,6 +121,24 @@ RSpec.describe Lantern::Attachments do
       expect(att[:bytes]).to eq(10)
       expect(att[:truncated]).to be(true)
     end
+
+    it "never asks an IO for more than the cap plus one byte" do
+      reader = Class.new do
+        attr_reader :requested
+
+        def read(length = nil)
+          raise "unbounded read" unless length
+
+          @requested = length
+          "0123456789abcdef".byteslice(0, length)
+        end
+      end.new
+
+      Lantern.attach("dump.bin", reader)
+
+      expect(reader.requested).to eq(11)
+      expect(unpack(lantern_records(:attachment).sole)).to eq("0123456789")
+    end
   end
 
   describe "linking to an exception" do

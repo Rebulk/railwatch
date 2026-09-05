@@ -49,6 +49,23 @@ RSpec.describe Lantern::Execution do
       expect(exe.records.last).to eq(described_class::MAX_RECORDS - 1)
       expect(exe.dropped_records).to eq(2)
     end
+
+    it "bounds a tree by bytes as well as by record count" do
+      record = { message: "x" * 100 }
+      bytes = Lantern::Record.buffered_bytes(record, limit: Float::INFINITY)
+      previous = Lantern.config.execution_buffer_bytes
+      Lantern.config.execution_buffer_bytes = bytes + 10
+      exe = new_execution
+
+      10.times { exe.buffer(record.dup) }
+
+      expect(exe.records).to eq([ record ])
+      expect(exe.buffered_bytes).to eq(bytes)
+      expect(exe.dropped_records).to eq(9)
+      expect(exe.dropped_bytes).to eq(bytes * 9)
+    ensure
+      Lantern.config.execution_buffer_bytes = previous
+    end
   end
 
   describe "#envelope" do

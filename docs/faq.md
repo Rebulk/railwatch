@@ -146,12 +146,21 @@ oldest-job age on `health` records.
 Nothing, from your app's point of view. This is the property everything
 else is built around: **delivery never raises into application code.**
 
-Concretely. Recording pushes onto a bounded in-memory buffer
-(`c.buffer_size`, default 5,000). When it's full the *oldest* record is
-dropped and a counter is incremented — the app thread never blocks
-waiting for room. The counter rides along on the next successful batch
-(`X-Lantern-Dropped`), so loss shows up on the platform instead of being
-silent.
+Concretely. Recording pushes onto an in-memory buffer bounded two ways:
+by record count (`c.buffer_size`, default 10,000) and by estimated payload
+memory (`c.buffer_bytes`, default 16 MiB). The byte ceiling is the one that
+matters when records are large — 10,000 records is a few megabytes of
+ordinary telemetry, or a gigabyte of captured attachments. One execution's
+buffered tree gets the same treatment (`c.execution_buffer_bytes`, 8 MiB),
+and one delivery is capped at `c.batch_bytes` (8 MiB uncompressed). When a
+limit is reached the *oldest* record is dropped and a counter is
+incremented — the app thread never blocks waiting for room. The counters
+ride along on the next successful batch (`X-Lantern-Dropped` and
+`X-Lantern-Dropped-Bytes`), so loss shows up on the platform instead of
+being silent.
+
+A queue holding more than one batch is delivered as several batches: the
+tail is put back for the next flush rather than dropped.
 
 A background thread drains the buffer and POSTs. Each POST retries one
 raised network error or 5xx immediately. If delivery still fails, the batch

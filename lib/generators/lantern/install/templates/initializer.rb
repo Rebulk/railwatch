@@ -22,6 +22,9 @@ Lantern.configure do |c|
   # c.capture_default_vendor_cache_keys = false  # LANTERN_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS
 
   # c.log_level = :info
+  # c.buffer_bytes = 16 * 1024 * 1024   # reporter queue memory ceiling
+  # c.execution_buffer_bytes = 8 * 1024 * 1024
+  # c.batch_bytes = 8 * 1024 * 1024     # uncompressed NDJSON per request
   # c.capture_request_payload = false   # only captured for requests that raised, always redacted
   # c.redact_headers += %w[X-Api-Key]
   # c.redact_params  += %w[ssn]         # merged with Rails.application.config.filter_parameters

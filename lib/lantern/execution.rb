@@ -15,7 +15,8 @@ module Lantern
                   transactions hydrated_models lazy_loads deprecations spans].freeze
 
     attr_reader :source, :id, :trace_id, :parent_id, :started_at, :started_mono, :counters,
-                :stages, :stage_durations, :query_groups, :records, :dropped_records, :keep
+                :stages, :stage_durations, :query_groups, :records, :dropped_records,
+                :dropped_bytes, :buffered_bytes, :keep
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
                   :queue_latency, :drift, :exception_sampled, :parent_execution
@@ -106,7 +107,10 @@ module Lantern
       @user_raw_id = nil
       @tenant = nil
       @records = []
+      @record_bytes = []
+      @buffered_bytes = 0
       @dropped_records = 0
+      @dropped_bytes = 0
       @keep = false
       # Tail sampling keeps buffering child records for a head-sampled-out
       # execution so the ship/discard decision can be made at the end. Read
@@ -123,6 +127,7 @@ module Lantern
       @failure_context = !sampled && !@tail_buffering && Lantern.config.failure_context.positive?
       @tail_buffering ||= @failure_context
       @record_limit = @failure_context ? Lantern.config.failure_context : MAX_RECORDS
+      @byte_limit = Lantern.config.execution_buffer_bytes
       @transaction_statement_counts = Hash.new(0)
       @allocations_start = GC.stat(:total_allocated_objects)
       @gc_time_start = GC.stat(:time) if GC.stat.key?(:time)
@@ -201,17 +206,47 @@ module Lantern
     # decision made late (route-level lantern_sample, dont_sample) still
     # applies to everything recorded before it.
     def buffer(record)
-      if @records.size >= @record_limit
+      bytes = Record.buffered_bytes(record, limit: @byte_limit)
+      # A record heavier than the whole per-execution budget can only be
+      # dropped: making room for it would mean discarding the entire tree and
+      # still not fitting.
+      if bytes > @byte_limit
         @dropped_records += 1
-        # A failure-context ring keeps the LAST record_limit records: the
-        # ones just before the exception are the ones worth having. Every
-        # other buffer keeps the earliest and drops the overflow. Either way
-        # the loss is counted onto the parent's batch (Lantern.finish_execution).
-        return unless @failure_context
-        @records.shift
+        @dropped_bytes += bytes
+        return
       end
+
+      # A failure-context ring keeps the LAST record_limit records: the ones
+      # just before the exception are the ones worth having. Every other
+      # buffer keeps the earliest and rejects the overflow. Either way the
+      # loss is counted onto the parent's batch (Lantern.finish_execution).
+      if @failure_context
+        drop_oldest while @records.any? && (@records.size >= @record_limit || @buffered_bytes + bytes > @byte_limit)
+      elsif @records.size >= @record_limit || @buffered_bytes + bytes > @byte_limit
+        @dropped_records += 1
+        @dropped_bytes += bytes
+        return
+      end
+
       @records << record
+      @record_bytes << bytes
+      @buffered_bytes += bytes
     end
+
+    # The tree, with each record's already-measured weight, so the reporter
+    # queue does not weigh them a second time.
+    def each_record
+      @records.each_with_index { |record, index| yield record, @record_bytes[index] }
+    end
+
+    def drop_oldest
+      @records.shift
+      bytes = @record_bytes.shift
+      @buffered_bytes -= bytes
+      @dropped_records += 1
+      @dropped_bytes += bytes
+    end
+    private :drop_oldest
 
     # Resident set size in bytes, Linux only. Reading /proc costs ~14µs, so
     # it is sampled at most once per MEMORY_SAMPLE_INTERVAL per process and

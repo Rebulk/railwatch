@@ -131,8 +131,10 @@ module Lantern
         # entity's final reference, which a tenant bound after the entity was
         # resolved will have changed.
         Subscribers::Users.commit_execution!(exe) if exe.pending_users
-        exe.records.each { |r| reporter.write(r) }
-        reporter.buffer.account_dropped(exe.dropped_records) if exe.dropped_records.positive?
+        exe.each_record { |record, bytes| reporter.write(record, bytes) }
+        if exe.dropped_records.positive?
+          reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
+        end
         reporter.write(parent) if parent
       elsif parent && exe.exception_sampled
         reporter.write(parent)

@@ -37,6 +37,54 @@ module Lantern
       }
     end
 
+    # Bounds the walk below. A record is a flat-ish tree (headers, files, a
+    # filtered payload); nothing legitimate is deeper, and the bound is also
+    # what makes a self-referential structure terminate.
+    MAX_SIZING_DEPTH = 8
+
+    # How much resident memory a record costs, for the in-memory byte budgets
+    # (Execution#buffer and Buffer#push). Deliberately an estimate built from
+    # O(1) String#bytesize rather than a JSON encode: this runs on the request
+    # thread for every record, and the exact NDJSON size is measured once,
+    # later, on the reporter thread, while the batch is being written. The
+    # constants are CRuby object overhead -- a String header, a Hash entry, an
+    # Array slot -- so the estimate errs high, which is the safe direction for
+    # a memory ceiling.
+    #
+    # Counting stops as soon as `limit` is exceeded: past that the only fact
+    # the caller uses is "too big", so there is no reason to keep walking.
+    def buffered_bytes(value, limit:, depth: 0)
+      return limit + 1 if depth > MAX_SIZING_DEPTH
+
+      bytes = case value
+      when String then 40 + value.bytesize
+      when Hash then hash_bytes(value, limit, depth)
+      when Array then array_bytes(value, limit, depth)
+      when Symbol then 16
+      else 16
+      end
+      bytes > limit ? limit + 1 : bytes
+    end
+
+    def hash_bytes(hash, limit, depth)
+      bytes = 80 + (hash.size * 40)
+      hash.each do |key, value|
+        bytes += buffered_bytes(key, limit: limit, depth: depth + 1)
+        bytes += buffered_bytes(value, limit: limit, depth: depth + 1)
+        break if bytes > limit
+      end
+      bytes
+    end
+
+    def array_bytes(array, limit, depth)
+      bytes = 40 + (array.size * 8)
+      array.each do |value|
+        bytes += buffered_bytes(value, limit: limit, depth: depth + 1)
+        break if bytes > limit
+      end
+      bytes
+    end
+
     # 128-bit grouping hash. MD5 is the fastest 128-bit digest in stdlib and
     # is only used for bucketing, never for security.
     def group_hash(*parts)
