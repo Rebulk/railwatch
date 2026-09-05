@@ -114,6 +114,9 @@ Lantern.instrument_outgoing(:get, url) { http_client.get(url) }
 
 ## Testing
 
+Production browser errors can be resolved to original source files using
+[private source-map uploads](docs/source-maps.md).
+
 The same instrumentation runs in your test suite, so a spec can hold a hot
 path to a query budget and CI can fail the pull request that regresses it:
 

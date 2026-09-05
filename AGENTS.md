@@ -32,6 +32,7 @@ initializer; every option also has a `LANTERN_*` environment variable.
 | `bin/rails lantern:token` | Where to create an ingest token for this app's platform. |
 | `bin/rails lantern:mcp` | Paste-ready MCP client configuration for this app's platform. |
 | `bin/rails lantern:deploy[ref,name,url]` | Records a deploy marker. Use as a release step when not deploying with Kamal. |
+| `bin/rails 'lantern:sourcemaps[public,true]'` | Uploads Vite source maps for the configured deploy, then deletes acknowledged files. Run after building and before publishing assets. Omit `true` to retain files. See [Source maps](docs/source-maps.md). |
 
 ## Facade
 

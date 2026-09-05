@@ -10,6 +10,14 @@
 set -e
 [ -z "$LANTERN_TOKEN" ] && exit 0
 
+# Optional: .kamal/hooks/post-deploy --sourcemaps, or set
+# LANTERN_SOURCEMAPS=true. Requires the build artifacts on the deployer.
+# Prefer uploading in CI before publishing the image. Deletion is opt-in
+# with LANTERN_SOURCEMAPS_DELETE=true and happens only after acknowledgment.
+if [ "${1:-}" = "--sourcemaps" ] || [ "${LANTERN_SOURCEMAPS:-}" = "true" ]; then
+  LANTERN_DEPLOY="$KAMAL_VERSION" bin/rails lantern:sourcemaps || echo "Lantern source map upload failed" >&2
+fi
+
 if ! command -v curl >/dev/null 2>&1 || ! command -v ruby >/dev/null 2>&1 || [ -z "$LANTERN_INGEST_URL" ]; then
   # Fall back to the rake task inside the deployed container. It records the
   # same deploy minus the commit list, which a container has no git history

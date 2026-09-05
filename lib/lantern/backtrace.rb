@@ -100,7 +100,7 @@ module Lantern
       (?:at\s+)?                       # V8 indents every frame with "at "
       (?:(?<function>[^@]*?)\s*[@(])?  # "fn@" (Firefox, Safari) or "fn (" (V8)
       (?<file>\S+?)
-      :(?<line>\d+)(?::\d+)?           # line, and the column both engines add
+      :(?<line>\d+)(?::(?<column>\d+))? # line and column (both one-based)
       \)?
       \z
     /x
@@ -125,12 +125,14 @@ module Lantern
         own = js_own_origin?(url, origin)
         file = own ? url.delete_prefix(origin.to_s).delete_prefix("/") : url
         function = match[:function].to_s.strip
-        frames << {
+        frame = {
           file: file[0, 255],
           line: match[:line].to_i,
           function: function.empty? ? "(anonymous)" : function[0, 255],
           in_app: own && !VENDOR_PATH.match?(file)
         }
+        frame[:column] = match[:column].to_i if match[:column]
+        frames << frame
       end
       frames
     end
