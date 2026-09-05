@@ -165,6 +165,56 @@ RSpec.describe Lantern::Profiler do
     end
   end
 
+  describe ".restart_after_fork!" do
+    it "clears a profile the parent was taking so the child can profile again" do
+      described_class.instance_variable_set(:@running, :parent_profile)
+      described_class.instance_variable_set(:@skipped, 7)
+
+      described_class.restart_after_fork!
+
+      expect(described_class.instance_variable_get(:@running)).to be_nil
+      expect(described_class.skipped).to eq(0)
+      expect(described_class.start(mode: :wall)).to be_a(described_class::Handle)
+    ensure
+      described_class.stop
+    end
+
+    it "does not block on a lock another parent thread was holding" do
+      lock = described_class.instance_variable_get(:@lock)
+      locked = Queue.new
+      release = Queue.new
+      holder = Thread.new { lock.synchronize { locked << true; release.pop } }
+      locked.pop
+
+      expect { Timeout.timeout(5) { described_class.restart_after_fork! } }.not_to raise_error
+    ensure
+      release << true
+      holder&.join
+    end
+
+    it "runs in the child from the Process._fork hook, leaving no parent profile behind" do
+      skip "fork not supported on this platform" unless Process.respond_to?(:fork)
+
+      described_class.start(mode: :wall)
+      reader, writer = IO.pipe
+      pid = fork do
+        reader.close
+        writer.write(described_class.instance_variable_get(:@running).inspect)
+        writer.close
+        exit!(0)
+      end
+      writer.close
+      result = reader.read
+      Process.wait(pid)
+
+      expect(result).to eq("nil")
+      expect(described_class.instance_variable_get(:@running)).to be_a(described_class::Handle)
+    ensure
+      reader&.close unless reader&.closed?
+      described_class.stop
+    end
+  end
+
   describe ".collapse" do
     it "orders by count descending, breaking ties on the stack text" do
       result = stackprof_result([ [ %w[root b], 1 ], [ %w[root c], 5 ], [ %w[root a], 1 ] ])

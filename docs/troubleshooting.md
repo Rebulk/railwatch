@@ -135,7 +135,9 @@ have workers.
 `Kernel#fork` through `Process._fork`, and Lantern prepends hooks for the
 reporter, health sampler, and session flusher. Before the child returns
 from `fork`, it replaces the inherited reporter buffer, drop accounting,
-transport policy state, mutexes, condition variables, and dead threads.
+transport policy state, mutexes, condition variables, dead threads, and the
+profiler's process-global state (a parent's in-flight profile would
+otherwise leave the child permanently unable to profile).
 The parent's half-finished session map is discarded too. The child then
 emits its own `process` record and starts fresh health/session threads for
 its role. Parent records remain owned by and delivered from the parent;

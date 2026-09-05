@@ -2,6 +2,18 @@
 
 ## 0.1.0 (unreleased)
 
+- A forked worker profiles again. `Process._fork` now resets the profiler's
+  process-global state in the child: it used to inherit `@running` holding
+  the handle of a profile the parent was taking, which nothing in the child
+  ever stopped, so every execution in that worker was counted as skipped and
+  never profiled for the life of the process.
+
+- Numeric `LANTERN_*` environment variables are parsed with `Integer()`/
+  `Float()` and fall back to the documented default when the value is not a
+  number. `LANTERN_BUFFER_SIZE=12px` used to become `0` via `String#to_i`,
+  silently turning off buffering; the same applied to timeouts, intervals
+  and sample rates.
+
 - Inbound `traceparent` parsing follows the W3C trace-context validity
   rules: version `ff`, an all-zero trace id, and an all-zero parent id are
   rejected instead of being adopted as a trace, and trailing data after the

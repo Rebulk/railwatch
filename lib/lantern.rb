@@ -77,6 +77,7 @@ module Lantern
     # child's own process record, so nothing inherited from the parent can be
     # flushed alongside it.
     def restart_after_fork!
+      Profiler.restart_after_fork!
       @reporter&.restart_after_fork!
       Subscribers::ProcessInfo.restart_after_fork!
     end

@@ -45,6 +45,15 @@ RSpec.describe Lantern::Configuration do
       end
     end
 
+    it "keeps the documented default when a numeric variable is not a number, instead of silently zeroing it" do
+      with_env("LANTERN_BUFFER_SIZE" => "12px", "LANTERN_FLUSH_INTERVAL" => "never",
+               "LANTERN_REQUEST_SAMPLE_RATE" => "half") do |config|
+        expect(config.buffer_size).to eq(10_000)
+        expect(config.flush_interval).to eq(2.0)
+        expect(config.sample[:requests]).to eq(1.0)
+      end
+    end
+
     it "maps LANTERN_REQUEST/JOB/COMMAND/SCHEDULED_TASK/EXCEPTION_SAMPLE_RATE into config.sample, defaulting every kind to 1.0" do
       with_env(
         "LANTERN_REQUEST_SAMPLE_RATE" => "0.2", "LANTERN_JOB_SAMPLE_RATE" => "0.3",
