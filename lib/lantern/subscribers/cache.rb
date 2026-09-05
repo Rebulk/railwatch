@@ -24,9 +24,12 @@ module Lantern
 
       # Bounded cache of key => shape, so a given cache key's id-stripping
       # regexes only run once. Keys repeat heavily (same fetch in a loop).
+      # The group hash of (store, shape) is cached the same way, per store,
+      # so the MD5 also runs once per shape rather than once per event.
       KEY_SHAPE_CACHE_LIMIT = 2_048
       @key_shape_cache = {}
       @key_shape_mutex = Mutex.new
+      @group_cache = Hash.new { |h, k| h[k] = {} }
 
       # Computed once so the hot cache_event record doesn't look this up per call.
       CACHE_EVENT_VERSION = Record::VERSIONS.fetch(:cache_event)
@@ -55,7 +58,7 @@ module Lantern
               timestamp: started_at(event),
               deploy: cfg.deploy,
               server: cfg.server,
-              _group: Record.group_hash(store, key_shape(key)),
+              _group: group_for(store, key_shape(key)),
               **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
               store: store,
               key: key[0, 255],
@@ -90,11 +93,24 @@ module Lantern
         shape
       end
 
+      def group_for(store, shape)
+        bucket = @group_cache[store]
+        cached = bucket[shape]
+        return cached if cached
+
+        group = Record.group_hash(store, shape)
+        @key_shape_mutex.synchronize do
+          bucket.clear if bucket.size >= KEY_SHAPE_CACHE_LIMIT
+          bucket[shape] = group
+        end
+        group
+      end
+
       def ignored_key?(key)
         config = Lantern.config
         return true if config.ignored_cache_key_prefixes.any? { |pattern| Configuration.match_cache_key?(pattern, key) }
         return false if config.capture_default_vendor_cache_keys
-        Configuration::DEFAULT_VENDOR_CACHE_KEYS.any? { |pattern| pattern.match?(key) }
+        Configuration::DEFAULT_VENDOR_CACHE_KEY.match?(key)
       end
     end
   end

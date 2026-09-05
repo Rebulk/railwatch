@@ -17,6 +17,17 @@ RSpec.describe "log record" do
     expect(log[:message]).to eq("hello world")
   end
 
+  it "does not make Rails.logger.debug? true just by being attached to the broadcast logger" do
+    # BroadcastLogger#debug? is true when any broadcast is at DEBUG, and
+    # every framework LogSubscriber (Active Record's SQL line, Action
+    # View's render lines) formats its message only when it is. A Capture
+    # left at DEBUG would make the app pay for log lines nobody stores.
+    capture = Rails.logger.broadcasts.find { |l| l.is_a?(Lantern::Subscribers::Logs::Capture) }
+    expect(capture).not_to be_nil
+    expect(capture.level).to eq(::Logger::INFO)
+    expect(Rails.logger.debug?).to be(false)
+  end
+
   it "drops lines below config.log_level and keeps lines at or above it" do
     old_log_level = Lantern.config.log_level
     Lantern.config.log_level = "warn"

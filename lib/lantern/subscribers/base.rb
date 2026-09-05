@@ -14,13 +14,28 @@ module Lantern
         end
       end
 
+      # For a subscriber that only reads the payload (a counter, say). The
+      # five-argument block form makes Rails skip building an Event object
+      # -- six clock and GC reads -- for every notification it delivers.
+      def subscribe_payload(name, &block)
+        ActiveSupport::Notifications.monotonic_subscribe(name) do |_name, _start, _finish, _id, payload|
+          block.call(payload)
+        rescue StandardError => e
+          Lantern.debug { "#{name} subscriber raised #{e.class}: #{e.message}" }
+          Lantern.notify_unrecoverable(e)
+        end
+      end
+
       def execution
         Lantern.execution
       end
 
+      # Whether a child record built now would be kept. With no execution
+      # there is nothing to attach it to and Lantern.push drops it, so the
+      # subscriber should not build it in the first place.
       def recording?
         exe = Lantern.execution
-        exe.nil? || exe.recording?
+        !exe.nil? && exe.recording?
       end
 
       def micros(event)

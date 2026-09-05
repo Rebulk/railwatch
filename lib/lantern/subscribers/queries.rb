@@ -91,6 +91,11 @@ module Lantern
             next
           end
           exe&.count(:queries)
+          # Statement count for the currently-open transaction, keyed by AR's
+          # transaction object identity (the same object the transaction
+          # subscriber below sees), so nested/concurrent transactions on the
+          # same execution don't collide. Read once at transaction end.
+          exe&.count_transaction_statement(p[:transaction].object_id) if p[:transaction]
           next unless recording?
 
           sql = p[:sql]
@@ -143,20 +148,6 @@ module Lantern
           end
         end
 
-        # Separate from the sql.active_record subscriber above (which stays a
-        # tight hot path): counts statements against the currently-open
-        # transaction, keyed by AR's transaction object identity. Payload
-        # carries the same transaction object as the query subscriber sees
-        # (current_transaction.user_transaction), so the two correlate.
-        # Gated entirely behind "was there a transaction" — no per-query cost
-        # outside that branch.
-        subscribe("sql.active_record") do |event|
-          p = event.payload
-          next if SKIP_NAMES.include?(p[:name]) || p[:cached]
-          txn = p[:transaction]
-          execution&.count_transaction_statement(txn.object_id) if txn
-        end
-
         subscribe("transaction.active_record") do |event|
           exe = execution
           exe&.count(:transactions)
@@ -170,8 +161,8 @@ module Lantern
                          connection: connection_name, statement_count: statement_count)
         end
 
-        subscribe("instantiation.active_record") do |event|
-          execution&.count(:hydrated_models, event.payload[:record_count].to_i)
+        subscribe_payload("instantiation.active_record") do |payload|
+          execution&.count(:hydrated_models, payload[:record_count].to_i)
         end
 
         subscribe("strict_loading_violation.active_record") do |event|

@@ -19,6 +19,9 @@ module Lantern
       /\Arack::attack/, /\Aflipper/, /\Asolid_cable/,
       /\Aactive_storage/, /\Amigration_/, /\Aschema_cache/
     ].freeze
+    # The same list as one anchored alternation: one regex run per cache
+    # event instead of six.
+    DEFAULT_VENDOR_CACHE_KEY = Regexp.union(DEFAULT_VENDOR_CACHE_KEYS).freeze
 
     # Scratch roots. A deployed script ships in the image (under Rails.root,
     # or wherever the ops scripts live); a `.rb` file under one of these was

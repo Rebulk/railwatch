@@ -30,6 +30,17 @@ module Lantern
           super(nil)
         end
 
+        # BroadcastLogger#debug? is true when ANY broadcast is at DEBUG, and
+        # every framework LogSubscriber (Active Record's SQL line, Action
+        # View's render lines, the cache store's) formats its message only
+        # when it is. A Logger.new(nil) sits at DEBUG, which made adding
+        # Lantern turn all of that formatting on for lines nobody stored.
+        # Reporting config.log_level instead keeps the app's own level in
+        # charge; #add below filters on the same value.
+        def level
+          Logs.min_severity
+        end
+
         def add(severity, message = nil, progname = nil)
           return true unless Lantern.enabled?
           return true unless Logs.execution

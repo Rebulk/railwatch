@@ -844,14 +844,17 @@ commit diff, and the server inventory.
 
 ## Overhead gate
 
-`bench/overhead.rb` boots the dummy app, drives a request that runs 200
-queries with Lantern off and on, and fails (exit 1) if instrumentation
-adds more than the budget in `LIMITS`: `p50_ms: 1.5` (CPU time, not wall
-— stable under CI load), `per_query_us: 8.0`, `allocations: 3_000`. Run
-it with `bundle exec ruby bench/overhead.rb`. Measured on an idle core,
-the gem adds ~0.85ms per request (0.4ms fixed, ~2µs per query); the
-limits leave headroom for slower CI hosts without letting a real
-regression through unnoticed.
+`bench/overhead.rb` boots the dummy app on SQLite, drives three request
+shapes (no queries; 20 uncached queries; the N+1 widgets page) with
+Lantern's subscribers unsubscribed and then subscribed, alternating every
+batch, and fails (exit 1) if instrumentation adds more than the per-shape
+budget in `LIMITS` (CPU time on the request thread, not wall — stable
+under CI load — plus an allocation count). It also fails if the log
+capture has made `Rails.logger.debug?` true. Run it with `bundle exec ruby
+bench/overhead.rb`. Measured on a shared box the gem adds ~0.4ms fixed per
+request plus 40–80µs per real query; the limits leave headroom for slower
+CI hosts without letting a real regression through unnoticed. The numbers
+and how they were taken are in [`docs/faq.md`](faq.md).
 
 ## Testing your own app against Lantern
 

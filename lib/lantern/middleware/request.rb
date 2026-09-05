@@ -104,7 +104,16 @@ module Lantern
 
       def finish(env, exe, status, headers)
         exe.finish_stages
-        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
+        if exe.may_ship?
+          Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
+        else
+          # A head-sampled-out request with nothing to rescue it: skip the
+          # request record (ActionDispatch::Request, header walk) that
+          # finish_execution would only throw away. Sessions.touch below
+          # still needs the user, which parent_fields would have resolved.
+          exe.user_id ||= Subscribers::Users.resolve_id(env) if Lantern.config.track_sessions
+          Lantern.finish_execution
+        end
         # After the parent, which is where exe.user_id is resolved: a request
         # with no user and no session cookie has no session, and Sessions.touch
         # returns without writing anything.
