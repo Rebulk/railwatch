@@ -128,6 +128,20 @@ module Lantern
         end
       end
 
+      # Process._fork hook. A child inherits @running still holding the
+      # Handle for a profile the parent was taking, and nothing in the child
+      # ever stops it: `start` then sees a profile already running and every
+      # execution in that worker is counted as skipped and never profiled
+      # again. Clear the process-global state without taking @lock -- the
+      # child is single-threaded here, and Ruby has already abandoned any
+      # mutex a parent thread held across the fork.
+      def restart_after_fork!
+        @running = nil
+        @loadable = {}
+        @skipped = 0
+        self
+      end
+
       private
 
       # Whether a backend gem can be required, resolved once per process:

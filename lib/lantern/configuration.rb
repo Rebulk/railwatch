@@ -248,12 +248,14 @@ module Lantern
       %w[1 true yes on].include?(ENV[key].to_s.downcase)
     end
 
+    # String#to_f/#to_i turn a typo into 0.0/0 -- a zero buffer, timeout, or
+    # interval -- so parse strictly and keep the documented default instead.
     def env_float(key, default)
-      ENV.key?(key) ? ENV[key].to_f : default
+      ENV.key?(key) ? Float(ENV[key], exception: false) || default : default
     end
 
     def env_int(key, default)
-      ENV.key?(key) ? ENV[key].to_i : default
+      ENV.key?(key) ? Integer(ENV[key], 10, exception: false) || default : default
     end
   end
 end
