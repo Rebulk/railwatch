@@ -14,9 +14,9 @@ module Lantern
       RETRYABLE_STATUSES = [ 402, 408, 429 ].freeze
       UNAUTHORIZED_STATUS = 401
 
-      Result = Struct.new(:ok, :status, :accepted, :rejected, :error, keyword_init: true) do
+      Result = Struct.new(:ok, :status, :accepted, :rejected, :rejections, :error, :retryable_error, keyword_init: true) do
         def retryable?
-          !ok && Http.retryable_status?(status)
+          !ok && (retryable_error || Http.retryable_status?(status))
         end
       end
 
@@ -48,8 +48,8 @@ module Lantern
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped, batch_id))
-          result = parse(post(body, dropped, batch_id)) if attempt < 2 && (500..599).cover?(result.status)
+          result = parse(post(body, dropped, batch_id), expected_count: records.size)
+          result = parse(post(body, dropped, batch_id), expected_count: records.size) if attempt < 2 && (500..599).cover?(result.status)
           apply_status_policy(result)
           result
         rescue StandardError => e
@@ -98,13 +98,55 @@ module Lantern
         end
       end
 
-      def parse(response)
+      def parse(response, expected_count:)
         if response.is_a?(Net::HTTPSuccess)
-          data = JSON.parse(response.body) rescue {}
-          Result.new(ok: true, status: response.code.to_i, accepted: data["accepted"], rejected: data["rejected"])
+          parse_acknowledgement(response, expected_count)
         else
           Result.new(ok: false, status: response.code.to_i, error: response.body.to_s[0, 200])
         end
+      end
+
+      def parse_acknowledgement(response, expected_count)
+        data = JSON.parse(response.body)
+        return invalid_acknowledgement(response, "response must be a JSON object") unless data.is_a?(Hash)
+
+        accepted = data["accepted"]
+        rejected = data["rejected"]
+        unless accepted.is_a?(Integer) && accepted >= 0 && rejected.is_a?(Integer) && rejected >= 0
+          return invalid_acknowledgement(response, "accepted and rejected must be non-negative integers")
+        end
+        unless drained?(data, accepted, rejected) || accepted + rejected == expected_count
+          return invalid_acknowledgement(response,
+                                         "accepted + rejected was #{accepted + rejected}, expected #{expected_count}")
+        end
+
+        rejections = data["rejections"]
+        unless rejections.nil? || rejections.is_a?(Array)
+          return invalid_acknowledgement(response, "rejections must be an array when present")
+        end
+
+        Result.new(ok: true, status: response.code.to_i, accepted: accepted, rejected: rejected,
+                   rejections: Array(rejections).first(10))
+      rescue JSON::ParserError => error
+        invalid_acknowledgement(response, "invalid JSON (#{error.message})")
+      end
+
+      # Ingest can take a whole batch off our hands without storing any of it:
+      # a paused or over-quota environment answers 200 with
+      # {"accepted":0,"rejected":0,"reason":"paused"}. That batch IS delivered
+      # -- the platform decided its fate -- so retrying it would burn eight
+      # attempts and drop the records anyway. Any acknowledgement carrying a
+      # `reason`, and any all-zero acknowledgement, drains the batch.
+      def drained?(data, accepted, rejected)
+        data.key?("reason") || (accepted.zero? && rejected.zero?)
+      end
+
+      # A proxy-generated 2xx page or a contract mismatch cannot acknowledge
+      # the submitted records. Keep the batch for Reporter retry instead of
+      # silently treating it as delivered.
+      def invalid_acknowledgement(response, detail)
+        Result.new(ok: false, status: response.code.to_i, error: "invalid ingest acknowledgement: #{detail}",
+                   retryable_error: true)
       end
 
       def apply_status_policy(result)
