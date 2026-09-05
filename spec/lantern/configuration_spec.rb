@@ -35,6 +35,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_N_PLUS_ONE_THRESHOLD" => [ :n_plus_one_threshold, "9", 9, 5 ],
       "LANTERN_FAILURE_CONTEXT" => [ :failure_context, "200", 200, 0 ],
       "LANTERN_HEALTH_INTERVAL" => [ :health_interval, "60.0", 60.0, 15.0 ],
+      "LANTERN_CAPTURE_SQL_VALUES" => [ :capture_sql_values, "1", true, false ],
       "LANTERN_CAPTURE_QUERY_EXPLAIN" => [ :capture_query_explain, "1", true, false ],
       "LANTERN_EXPLAIN_THRESHOLD_MS" => [ :explain_threshold_ms, "250.0", 250.0, 100.0 ],
       "LANTERN_CAPTURE_RESCUED_EXCEPTIONS" => [ :capture_rescued_exceptions, "0", false, true ],

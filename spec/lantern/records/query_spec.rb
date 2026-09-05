@@ -5,6 +5,74 @@ require "spec_helper"
 RSpec.describe "query record", type: :request do
   before { 3.times { |i| Widget.create!(name: "w#{i}", gadget: Gadget.create!(name: "g#{i}")) } }
 
+  after { Lantern.config.capture_sql_values = false }
+
+  it "does not capture SQL literal values by default" do
+    sql = "SELECT 'private-customer@example.test' AS secret"
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    ActiveRecord::Base.connection.select_all(sql)
+    Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+    q = lantern_records(:query).find { |r| r[:sql].start_with?("SELECT") }
+    expect(q[:sql]).to eq("SELECT ? AS secret")
+    expect(q[:sql]).not_to include("private-customer@example.test")
+    expect(q).not_to have_key(:binds)
+  end
+
+  it "does not capture SQLite's ambiguous double-quoted string values" do
+    sql = 'SELECT "private-dqs@example.test" AS secret'
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    # Rails disables SQLite's legacy DQS fallback where supported, but older
+    # deployments can execute this as a string. The failed-query notification
+    # must be private too.
+    expect { ActiveRecord::Base.connection.select_all(sql) }.to raise_error(ActiveRecord::StatementInvalid)
+    Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+    q = lantern_records(:query).find { |r| r[:sql].start_with?("SELECT") }
+    expect(q[:sql]).to eq("SELECT ? AS secret")
+    expect(q[:sql]).not_to include("private-dqs@example.test")
+  end
+
+  it "captures raw SQL only after an explicit opt-in" do
+    Lantern.config.capture_sql_values = true
+    sql = "SELECT 'private-customer@example.test' AS secret"
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    ActiveRecord::Base.connection.select_all(sql)
+    Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+    q = lantern_records(:query).find { |r| r[:sql].start_with?("SELECT") }
+    expect(q[:sql]).to eq(sql)
+    expect(q).not_to have_key(:binds)
+  end
+
+  it "bounds and repairs encoding in explicitly captured raw SQL" do
+    Lantern.config.capture_sql_values = true
+    sql = ("SELECT ".b + "\xFF".b + ("x" * 20_000).b).force_encoding(Encoding::UTF_8)
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    ActiveSupport::Notifications.instrument("sql.active_record", sql: sql, binds: [], name: "Raw SQL")
+    Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+    q = lantern_records(:query).find { |r| r[:name] == "Raw SQL" }
+    expect(q[:sql]).to be_valid_encoding
+    expect(q[:sql].length).to eq(Lantern::Subscribers::Queries::MAX_SQL)
+  end
+
+  it "never ships Active Record's structured bind payload" do
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    ActiveSupport::Notifications.instrument(
+      "sql.active_record",
+      sql: "SELECT * FROM widgets WHERE name = ?",
+      binds: [ "structured-secret@example.test" ],
+      name: "Widget Load"
+    )
+    Lantern.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+
+    q = lantern_records(:query).find { |r| r[:name] == "Widget Load" }
+    expect(q[:sql]).to eq("SELECT * FROM widgets WHERE name = ?")
+    expect(q).not_to have_key(:binds)
+    expect(q.values).not_to include("structured-secret@example.test")
+  end
+
   it "captures sql, name, duration, connection, adapter, row_count, and in_transaction for a SELECT" do
     get "/widgets"
     q = lantern_records(:query).find { |r| r[:sql].include?("FROM \"widgets\"") }
@@ -54,11 +122,13 @@ RSpec.describe "query record", type: :request do
     before do
       Lantern::Subscribers::Queries.instance_variable_get(:@explained).clear
       Lantern.config.capture_query_explain = true
+      Lantern.config.capture_sql_values = true
       Lantern.config.explain_threshold_ms = 0.0
     end
 
     after do
       Lantern.config.capture_query_explain = false
+      Lantern.config.capture_sql_values = false
       Lantern.config.explain_threshold_ms = 100.0
     end
 
@@ -93,6 +163,18 @@ RSpec.describe "query record", type: :request do
       get "/widgets"
 
       expect(lantern_records(:query).map { |r| r[:explain] }.compact).to be_empty
+    end
+
+    it "still captures plans while sql itself stays normalized" do
+      Lantern.config.capture_sql_values = false
+      get "/widgets"
+
+      explained = lantern_records(:query).reject { |r| r[:explain].nil? }
+      expect(explained).not_to be_empty
+      # The plan came from the raw statement; what is stored is the shape.
+      expect(explained.map { |r| r[:sql] }).to all(satisfy { |sql| !sql.match?(/\bLIMIT\s+\d/) })
+      expect(explained.find { |r| r[:sql].include?("gadgets") }[:sql])
+        .to eq('SELECT "gadgets".* FROM "gadgets" WHERE "gadgets"."id" = ? LIMIT ?')
     end
 
     it "leaves explain nil for a write, which has no plan worth capturing" do

@@ -2,6 +2,29 @@
 
 ## 0.1.0 (unreleased)
 
+- **Behaviour change for every app: `query` records now carry normalized SQL,
+  not the raw statement.** String, numeric, hex, Postgres dollar-quoted and
+  adapter-specific literals, plus SQL comments, are replaced with `?` while
+  the statement shape and placeholders remain. SQL literals routinely contain
+  email addresses, tokens, and other customer data, and until now every one of
+  them was shipped. Set `capture_sql_values` (`LANTERN_CAPTURE_SQL_VALUES`) to
+  restore the old behaviour. Active Record's separate structured binds are
+  never sent either way, and `capture_query_explain` is unaffected -- the
+  EXPLAIN still runs on the raw statement, only what is stored in `sql`
+  changed. Note that a plan can echo literal predicates, so
+  `capture_query_explain` remains a privacy decision of its own.
+- The SQL normalizer is a byte-oriented lexical scanner rather than a set of
+  regexes: adapter-aware quoting (MySQL backticks and double-quoted strings,
+  SQLite `[ident]` and its double-quoted-string fallback, Postgres
+  dollar-quoting and `E''`), nested block comments, and bounded input. It
+  scans each dialect's *default* backslash-escaping rule. Session modes that
+  change that rule (`NO_BACKSLASH_ESCAPES`, `standard_conforming_strings =
+  off`) are not carried in the notification; the previous approach of
+  abandoning the rest of the statement whenever a backslash-quote appeared
+  was worse, because on MySQL -- where backslash escaping is the quoting
+  Active Record emits -- it truncated every statement containing an
+  apostrophe and collapsed distinct queries into one group.
+
 - Telemetry memory is now bounded by bytes as well as by record count. A
   record count alone does not bound memory: 10,000 records is a few megabytes
   of ordinary telemetry, or a gigabyte of captured attachments and
