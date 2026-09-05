@@ -59,7 +59,8 @@ module Lantern
     attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
-                  :buffer_size, :flush_interval, :flush_threshold,
+                  :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
+                  :flush_interval, :flush_threshold,
                   :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
@@ -107,6 +108,13 @@ module Lantern
       # than the tree drops the tree's own oldest records -- the outgoing
       # requests and first queries at the top of a long job.
       @buffer_size = env_int("LANTERN_BUFFER_SIZE", 10_000)
+      # A record count does not bound memory: 10,000 records is a few
+      # megabytes of ordinary telemetry, or a gigabyte of captured
+      # attachments. These are the byte ceilings that do -- one execution's
+      # tree, the reporter queue, and one delivery.
+      @buffer_bytes = env_int("LANTERN_BUFFER_BYTES", 16 * 1024 * 1024)
+      @execution_buffer_bytes = env_int("LANTERN_EXECUTION_BUFFER_BYTES", 8 * 1024 * 1024)
+      @batch_bytes = env_int("LANTERN_BATCH_BYTES", 8 * 1024 * 1024)
       @flush_interval = env_float("LANTERN_FLUSH_INTERVAL", 2.0)
       @flush_threshold = env_int("LANTERN_FLUSH_THRESHOLD", 500)
       @connect_timeout = env_float("LANTERN_CONNECT_TIMEOUT", 1.0)

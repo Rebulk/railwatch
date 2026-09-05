@@ -15,15 +15,17 @@ module Lantern
     # newer was discarded around it. Eight attempts on the backoff ladder is
     # roughly four minutes of outage.
     MAX_RETRY_ATTEMPTS = 8
-    DeliveryBatch = Data.define(:id, :records, :dropped, :prepared)
+    DeliveryBatch = Data.define(:id, :records, :bytes, :dropped, :dropped_bytes, :prepared)
 
     class DeliveryError < StandardError
-      attr_reader :status, :records, :dropped
+      attr_reader :status, :records, :bytes, :dropped, :dropped_bytes
 
-      def initialize(message, status: nil, records: 0, dropped: 0)
+      def initialize(message, status: nil, records: 0, bytes: 0, dropped: 0, dropped_bytes: 0)
         @status = status
         @records = records
+        @bytes = bytes
         @dropped = dropped
+        @dropped_bytes = dropped_bytes
         super(message)
       end
     end
@@ -41,7 +43,7 @@ module Lantern
 
     def initialize(config, transport: nil, random: Random)
       @config = config
-      @buffer = Buffer.new(config.buffer_size)
+      @buffer = build_buffer
       @transport = transport || Transport::Http.new(config)
       @random = random
       @mutex = Mutex.new
@@ -56,6 +58,8 @@ module Lantern
       @retry_batch = nil
       @in_flight_records = 0
       @in_flight_dropped = 0
+      @in_flight_bytes = 0
+      @in_flight_dropped_bytes = 0
       @shutdown_notified = false
     end
 
@@ -64,9 +68,9 @@ module Lantern
       @buffer
     end
 
-    def write(record)
+    def write(record, bytes = nil)
       ensure_process!
-      size = @buffer.push(record)
+      size = @buffer.push(record, bytes)
       arm_thread unless @thread&.alive?
       request_flush if size >= @config.flush_threshold
     end
@@ -97,7 +101,7 @@ module Lantern
       return if @pid == Process.pid
 
       @pid = Process.pid
-      @buffer = Buffer.new(@config.buffer_size)
+      @buffer = build_buffer
       @transport = forked_transport
       @mutex = Mutex.new
       @flush_mutex = Mutex.new
@@ -113,6 +117,8 @@ module Lantern
       @retry_batch = nil
       @in_flight_records = 0
       @in_flight_dropped = 0
+      @in_flight_bytes = 0
+      @in_flight_dropped_bytes = 0
       @shutdown_notified = false
       remove_instance_variable(:@shutdown_deadline) if defined?(@shutdown_deadline)
       self
@@ -229,15 +235,33 @@ module Lantern
         return
       end
 
-      deliverable = batch.prepared ? batch.records : Lantern.run_before_ingest(batch.records)
-      if deliverable.empty?
-        delivery_succeeded
-        return
+      unless batch.prepared
+        deliverable = Lantern.run_before_ingest(batch.records)
+        if deliverable.empty?
+          @buffer.account_dropped(batch.dropped, bytes: batch.dropped_bytes) if batch.dropped.positive?
+          delivery_succeeded
+          return
+        end
+        # A before_ingest hook can rewrite records, so their measured weights
+        # no longer describe them. Re-bound only then; without hooks the
+        # batch is already inside batch_bytes from drain_into_flight.
+        batch = if deliverable.equal?(batch.records)
+          DeliveryBatch.new(**batch.to_h, prepared: true)
+        else
+          rebound(batch, deliverable)
+        end
+        if batch.records.empty?
+          @buffer.account_dropped(batch.dropped, bytes: batch.dropped_bytes)
+          delivery_succeeded
+          return
+        end
       end
-      batch = DeliveryBatch.new(id: batch.id, records: deliverable, dropped: batch.dropped, prepared: true)
 
       result = deliver(batch)
-      Lantern.debug { "flushed #{deliverable.size} records (dropped #{batch.dropped}): #{result.to_h}" }
+      Lantern.debug do
+        "flushed #{batch.records.size} records/#{batch.bytes} bytes " \
+          "(dropped #{batch.dropped}/#{batch.dropped_bytes} bytes): #{result.to_h}"
+      end
       if result.ok
         # Per-record rejection is routine and documented (an unsupported
         # record kind, a record the environment does not retain). Cloud's
@@ -257,7 +281,7 @@ module Lantern
       Lantern.notify_unrecoverable(e)
       result
     ensure
-      in_flight(0, 0)
+      in_flight(0, 0, 0, 0)
     end
 
     def retryable?(result)
@@ -270,9 +294,12 @@ module Lantern
       @mutex.synchronize do
         @in_flight_records = 0
         @in_flight_dropped = 0
+        @in_flight_bytes = 0
+        @in_flight_dropped_bytes = 0
         @retry_attempt += 1
         if @retry_attempt > MAX_RETRY_ATTEMPTS
-          @buffer.account_dropped(batch.records.size + batch.dropped)
+          @buffer.account_dropped(batch.records.size + batch.dropped,
+                                  bytes: batch.bytes + batch.dropped_bytes)
           @retry_attempt = 0
           @retry_at = nil
           Lantern.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
@@ -300,6 +327,8 @@ module Lantern
       @mutex.synchronize do
         @in_flight_records = 0
         @in_flight_dropped = 0
+        @in_flight_bytes = 0
+        @in_flight_dropped_bytes = 0
         @retry_attempt = 0
         @retry_at = nil
       end
@@ -310,7 +339,8 @@ module Lantern
       detail = result.error.to_s.empty? ? "HTTP #{result.status}" : result.error
       Lantern.notify_unrecoverable(
         DeliveryError.new("Lantern ingest permanently rejected #{batch.records.size} records: #{detail}",
-                          status: result.status, records: batch.records.size, dropped: batch.dropped)
+                          status: result.status, records: batch.records.size, bytes: batch.bytes,
+                          dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
       )
     end
 
@@ -323,17 +353,63 @@ module Lantern
     end
 
     def drain_into_flight
-      @mutex.synchronize do
-        batch = @retry_batch
+      batch = @mutex.synchronize do
+        retry_batch = @retry_batch
         @retry_batch = nil
-        unless batch
-          records, dropped = @buffer.drain
-          batch = DeliveryBatch.new(id: SecureRandom.uuid, records: records, dropped: dropped, prepared: false)
-        end
-        @in_flight_records = batch.records.size
-        @in_flight_dropped = batch.dropped
-        batch
+        next drained_batch unless retry_batch
+
+        retry_batch
       end
+      in_flight(batch.records.size, batch.dropped, batch.bytes, batch.dropped_bytes)
+      batch
+    end
+
+    # Called with the mutex held. One delivery is capped at batch_bytes while
+    # the queue holds up to buffer_bytes, so a full queue can be more than one
+    # POST. The split uses the weights measured when the records were pushed
+    # -- nothing is weighed twice -- and the tail goes back on the queue for
+    # the next flush instead of being dropped.
+    def drained_batch
+      records, dropped, dropped_bytes, sizes = @buffer.drain
+      cut = records.size
+      bytes = 0
+      sizes.each_with_index do |size, index|
+        # index.positive? so a single record heavier than batch_bytes still
+        # goes out on its own rather than deferring forever; the transport
+        # drops it there, once, and counts it.
+        if index.positive? && bytes + size > @config.batch_bytes
+          cut = index
+          break
+        end
+        bytes += size
+      end
+      if cut < records.size
+        @buffer.restore(records[cut..], sizes[cut..])
+        records = records[0, cut]
+      end
+      DeliveryBatch.new(id: SecureRandom.uuid, records: records, bytes: bytes,
+                        dropped: dropped, dropped_bytes: dropped_bytes, prepared: false)
+    end
+
+    # A before_ingest hook returned different records; weigh them again and
+    # drop whatever no longer fits in one delivery.
+    def rebound(batch, deliverable)
+      kept = []
+      bytes = 0
+      dropped = 0
+      dropped_bytes = 0
+      deliverable.each do |record|
+        record_bytes = Record.buffered_bytes(record, limit: @config.batch_bytes)
+        if kept.any? && bytes + record_bytes > @config.batch_bytes || record_bytes > @config.batch_bytes
+          dropped += 1
+          dropped_bytes += record_bytes
+        else
+          kept << record
+          bytes += record_bytes
+        end
+      end
+      DeliveryBatch.new(id: batch.id, records: kept, bytes: bytes, dropped: batch.dropped + dropped,
+                        dropped_bytes: batch.dropped_bytes + dropped_bytes, prepared: true)
     end
 
     # Third-party/test transports written before batch idempotency only accept
@@ -342,16 +418,24 @@ module Lantern
     def deliver(batch)
       parameters = @transport.method(:deliver).parameters
       accepts_batch_id = parameters.any? { |kind, name| kind == :keyrest || name == :batch_id }
+      accepts_dropped_bytes = parameters.any? { |kind, name| kind == :keyrest || name == :dropped_bytes }
       keywords = { dropped: batch.dropped }
       keywords[:batch_id] = batch.id if accepts_batch_id
+      keywords[:dropped_bytes] = batch.dropped_bytes if accepts_dropped_bytes
       @transport.deliver(batch.records, **keywords)
     end
 
-    def in_flight(records, dropped)
+    def in_flight(records, dropped, bytes, dropped_bytes)
       @mutex.synchronize do
         @in_flight_records = records
         @in_flight_dropped = dropped
+        @in_flight_bytes = bytes
+        @in_flight_dropped_bytes = dropped_bytes
       end
+    end
+
+    def build_buffer
+      Buffer.new(@config.buffer_size, byte_capacity: @config.buffer_bytes)
     end
 
     def flush_for_shutdown
@@ -378,7 +462,7 @@ module Lantern
     end
 
     def notify_unsent(reason)
-      records, dropped = pending_delivery
+      records, dropped, bytes, dropped_bytes = pending_delivery
       return if records.zero?
 
       should_notify = @mutex.synchronize do
@@ -388,17 +472,20 @@ module Lantern
       return unless should_notify
 
       Lantern.notify_unrecoverable(
-        DeliveryError.new("Lantern #{reason} with #{records} unsent records retained in memory",
-                          records: records, dropped: dropped)
+        DeliveryError.new("Lantern #{reason} with #{records} unsent records retained in memory (#{bytes} bytes)",
+                          records: records, bytes: bytes, dropped: dropped, dropped_bytes: dropped_bytes)
       )
     end
 
     def pending_delivery
       @mutex.synchronize do
-        buffered, dropped = @buffer.stats
+        buffered, dropped, buffered_bytes, buffer_dropped_bytes = @buffer.stats
         retry_records = @retry_batch&.records&.size || 0
         retry_dropped = @retry_batch&.dropped || 0
-        [ buffered + retry_records + @in_flight_records, dropped + retry_dropped + @in_flight_dropped ]
+        [ buffered + retry_records + @in_flight_records,
+          dropped + retry_dropped + @in_flight_dropped,
+          buffered_bytes + (@retry_batch&.bytes || 0) + @in_flight_bytes,
+          buffer_dropped_bytes + (@retry_batch&.dropped_bytes || 0) + @in_flight_dropped_bytes ]
       end
     end
 

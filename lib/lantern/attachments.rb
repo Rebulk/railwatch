@@ -27,11 +27,14 @@ module Lantern
     def attach(name, data, content_type: nil, exception: nil)
       return nil unless Lantern.enabled?
 
-      bytes = read(data)
+      # cap + 1 so "was it truncated?" is still answerable without ever
+      # holding more than the cap in memory. A 2GB log file used to be read
+      # whole and then sliced.
+      cap = Lantern.config.max_attachment_bytes
+      bytes = read(data, cap + 1)
       return nil if bytes.nil? || bytes.empty?
 
       name = name.to_s[0, MAX_NAME]
-      cap = Lantern.config.max_attachment_bytes
       truncated = bytes.bytesize > cap
       bytes = bytes.byteslice(0, cap) if truncated
 
@@ -52,12 +55,14 @@ module Lantern
 
     # A String is the data itself; a Pathname is a file to read; anything else
     # that responds to #read (File, StringIO, an uploaded file) is read.
-    def read(data)
+    def read(data, limit)
       case data
       when nil then nil
-      when String then data
-      when Pathname then File.binread(data)
-      else data.respond_to?(:read) ? data.read.to_s : data.to_s
+      when String then data.byteslice(0, limit)
+      when Pathname then File.binread(data, limit)
+      else
+        value = data.respond_to?(:read) ? data.read(limit) : data.to_s
+        value.to_s.byteslice(0, limit)
       end
     rescue StandardError => e
       Lantern.debug { "attachment read failed: #{e.class}: #{e.message}" }

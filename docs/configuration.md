@@ -362,6 +362,9 @@ database.
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
 | `buffer_size` | `LANTERN_BUFFER_SIZE` | `10000` | Max buffered records (`Lantern::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. Keep it at or above `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
+| `buffer_bytes` | `LANTERN_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
+| `execution_buffer_bytes` | `LANTERN_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
+| `batch_bytes` | `LANTERN_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
 | `flush_interval` | `LANTERN_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
@@ -731,7 +734,7 @@ when Lantern is disabled or the payload is empty.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `max_attachment_bytes` | `LANTERN_MAX_ATTACHMENT_BYTES` | `1048576` (1 MiB) | Payloads longer than this are cut to the cap and the record is flagged `truncated: true`. `bytes` on the record is always the stored size. Data is gzipped and base64-encoded on the wire, so the cap is on the *original* bytes, not what ships. |
+| `max_attachment_bytes` | `LANTERN_MAX_ATTACHMENT_BYTES` | `1048576` (1 MiB) | Payloads longer than this are cut to the cap and the record is flagged `truncated: true`. Files and IOs are read with at most cap + 1 bytes rather than read whole and then sliced. `bytes` on the record is always the stored size. Data is gzipped and base64-encoded on the wire, so the cap is on the *original* bytes, not what ships. |
 
 ## on_unrecoverable
 
