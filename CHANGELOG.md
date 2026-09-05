@@ -2,6 +2,14 @@
 
 ## 0.1.0 (unreleased)
 
+- Inbound `traceparent` parsing follows the W3C trace-context validity
+  rules: version `ff`, an all-zero trace id, and an all-zero parent id are
+  rejected instead of being adopted as a trace, and trailing data after the
+  flags is rejected on version `00`. A future version that appends
+  dash-delimited fields after the flags is now accepted (its extra fields
+  are never interpreted) rather than dropped, so a newer upstream still
+  links to this service.
+
 - The request record's `url` and `redirect_to` URL fields now retain only
   origin (without authority credentials) and path. Query strings and
   fragments are always removed from these fields, preventing reset tokens,

@@ -154,5 +154,52 @@ RSpec.describe "distributed tracing", type: :request do
 
       expect(lantern_records(:request).sole[:trace_id]).not_to eq("a" * 31)
     end
+
+    it "ignores a traceparent with an all-zero trace id" do
+      get "/widgets", headers: { "traceparent" => "00-#{'0' * 32}-#{parent_id}-01" }
+
+      request = lantern_records(:request).sole
+      expect(request[:trace_id]).not_to eq("0" * 32)
+      expect(request[:parent_id]).to be_nil
+    end
+
+    it "ignores a traceparent with an all-zero parent id" do
+      get "/widgets", headers: { "traceparent" => "00-#{trace_id}-#{'0' * 16}-01" }
+
+      request = lantern_records(:request).sole
+      expect(request[:trace_id]).not_to eq(trace_id)
+      expect(request[:parent_id]).to be_nil
+    end
+
+    it "ignores the forbidden ff traceparent version" do
+      get "/widgets", headers: { "traceparent" => "ff-#{trace_id}-#{parent_id}-01" }
+
+      request = lantern_records(:request).sole
+      expect(request[:trace_id]).not_to eq(trace_id)
+      expect(request[:parent_id]).to be_nil
+    end
+
+    it "accepts opaque extension fields from a future traceparent version" do
+      get "/widgets", headers: { "traceparent" => "01-#{trace_id}-#{parent_id}-03-vendor-data" }
+
+      request = lantern_records(:request).sole
+      expect(request).to include(trace_id: trace_id, parent_id: parent_id)
+    end
+
+    it "rejects extension fields on traceparent version 00" do
+      get "/widgets", headers: { "traceparent" => "00-#{trace_id}-#{parent_id}-01-vendor-data" }
+
+      request = lantern_records(:request).sole
+      expect(request[:trace_id]).not_to eq(trace_id)
+      expect(request[:parent_id]).to be_nil
+    end
+
+    it "rejects a future traceparent whose extension is not dash-delimited" do
+      get "/widgets", headers: { "traceparent" => "01-#{trace_id}-#{parent_id}-01vendor-data" }
+
+      request = lantern_records(:request).sole
+      expect(request[:trace_id]).not_to eq(trace_id)
+      expect(request[:parent_id]).to be_nil
+    end
   end
 end

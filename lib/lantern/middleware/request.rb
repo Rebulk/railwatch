@@ -11,7 +11,7 @@ module Lantern
       # split/map/capitalize/join-ing on every request.
       HEADER_NAME_CACHE_LIMIT = 512
       # W3C trace context: version-trace_id-parent_id-flags, all lower-case hex.
-      TRACEPARENT = /\A([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})\z/
+      TRACEPARENT = /\A([0-9a-f]{2})-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})(.*)\z/
       # Reverse proxies stamp the moment the request was accepted; the gap to
       # our own start is how long it waited for a worker. Anything beyond this
       # is clock skew between the proxy and this box, not a real wait.
@@ -22,6 +22,13 @@ module Lantern
       def self.traceparent(value)
         match = value && TRACEPARENT.match(value)
         return nil unless match
+        return nil if match[1] == "ff"
+        # Version 00 has exactly 55 characters. Future versions may append
+        # opaque fields, but W3C requires the byte after trace-flags to be a
+        # dash; do not inspect or make assumptions about the fields beyond it.
+        return nil if match[1] == "00" && !match[5].empty?
+        return nil unless match[5].empty? || match[5].start_with?("-")
+        return nil if match[2] == "0" * 32 || match[3] == "0" * 16
 
         [ match[2], match[3], match[4].to_i(16).odd? ]
       end

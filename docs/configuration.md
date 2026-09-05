@@ -222,9 +222,14 @@ sampled-out execution still propagates, it just says so. A `traceparent`
 the app set itself is never overwritten.
 
 Inbound: the Rack middleware parses `HTTP_TRACEPARENT` and adopts its
-trace id and parent id for this execution (a malformed header is
-ignored, and the execution starts its own trace). If the upstream flags
-say the trace is sampled, the downstream execution is kept
+trace id and parent id for this execution. A header the W3C spec calls
+invalid is ignored and the execution starts its own trace: wrong lengths or
+non-hex characters, the forbidden version `ff`, an all-zero trace id, an
+all-zero parent id, and anything trailing the flags on version `00`. A
+future version may append fields after the flags, which are accepted and
+never interpreted as long as they are dash-delimited, so a newer upstream
+still links to this service instead of losing the trace. If the upstream
+flags say the trace is sampled, the downstream execution is kept
 (`Lantern.keep!`, above) whatever its own head decision was — otherwise
 the trace would have a hole exactly where this service should be.
 
