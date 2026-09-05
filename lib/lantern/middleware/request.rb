@@ -28,13 +28,12 @@ module Lantern
           @origin_thread = Thread.current
           @origin_context = ActiveSupport::IsolatedExecutionState.context
           @completion_mutex = Mutex.new
-          @active_consumptions = 0
+          @active_operations = 0
           @close_started = false
           @close_finished = false
           @finalization_claimed = false
           @deferred_profile_stopped = false
           @preserving = nil
-          @finish_context = nil
           stop_deferred_profile if ActiveSupport::IsolatedExecutionState.isolation_level == :fiber
         end
 
@@ -53,6 +52,7 @@ module Lantern
         def method_missing(method_name, *args, &block)
           return super if method_name == :to_str
           return consume_to_ary(*args, &block) if method_name == :to_ary
+          return observe_to_path(*args, &block) if method_name == :to_path
 
           @body.__send__(method_name, *args, &block)
         end
@@ -61,7 +61,7 @@ module Lantern
         private
 
         def consume(capture_error: nil, close_body: true)
-          begin_consumption
+          begin_operation
           error = nil
           with_request_state do
             begin
@@ -76,11 +76,11 @@ module Lantern
           end
         end
 
-        def begin_consumption
+        def begin_operation
           @completion_mutex.synchronize do
             raise IOError, "closed response body" if @close_started
 
-            @active_consumptions += 1
+            @active_operations += 1
           end
         end
 
@@ -91,6 +91,35 @@ module Lantern
           Context.with(close_context_snapshot) do
             consume(close_body: false) { @body.__send__(:to_ary, *args, &block) }
           end
+        end
+
+        def observe_to_path(*args, &block)
+          # Rack may use #to_path instead of #each to send a file efficiently,
+          # but explicitly says it does not consume the body. Keep any lazy
+          # application work and failures attached to the request without
+          # closing it; the server still owns the eventual #close call.
+          begin_operation
+          error = nil
+          with_request_state do
+            begin
+              @body.__send__(:to_path, *args, &block)
+            rescue Exception => e # rubocop:disable Lint/RescueException
+              error = e
+              capture(e)
+              raise
+            ensure
+              finish_observation(preserving: error)
+            end
+          end
+        end
+
+        def finish_observation(preserving:)
+          should_finalize = @completion_mutex.synchronize do
+            @active_operations -= 1
+            @preserving ||= preserving
+            claim_finalization if @close_finished
+          end
+          finalize if should_finalize
         end
 
         def consume_stream(stream)
@@ -104,7 +133,7 @@ module Lantern
           close_owner = false
           should_finalize = false
           @completion_mutex.synchronize do
-            @active_consumptions -= 1 if consumption_finished
+            @active_operations -= 1 if consumption_finished
             @preserving ||= preserving
             unless @close_started
               @close_started = true
@@ -124,11 +153,6 @@ module Lantern
                   close_error = e
                   Context.with(close_snapshot) { capture(e) } unless preserving || downstream_disconnect?(e)
                 ensure
-                  # ActionDispatch::Executor may clear Rails' execution state
-                  # from its inner BodyProxy#close. Serialize afterward while
-                  # the retained snapshot is still installed so context added
-                  # by close is included in the request parent.
-                  @finish_context = Context.with(close_snapshot) { Context.serialized }
                   @completion_mutex.synchronize do
                     @preserving ||= close_error
                     @close_finished = true
@@ -144,15 +168,19 @@ module Lantern
         end
 
         def claim_finalization
-          return false if @finalization_claimed || !@close_finished || @active_consumptions.positive?
+          return false if @finalization_claimed || !@close_finished || @active_operations.positive?
 
           @finalization_claimed = true
         end
 
         def finalize
+          # Finalization can be delayed after #close while another thread is
+          # still enumerating or resolving #to_path. Serialize only now, after
+          # the last active operation has finished, so its context is present.
+          context = Context.with(close_context_snapshot(refresh: false)) { Context.serialized }
           with_request_state do
             @middleware.__send__(:finish, @env, @execution, @status, @headers,
-                                 preserving: @preserving, context: @finish_context)
+                                 preserving: @preserving, context: context)
           end
         end
 
@@ -178,9 +206,12 @@ module Lantern
 
         def close_context_snapshot(refresh: true)
           write_through = ActiveSupport::IsolatedExecutionState.context.equal?(@origin_context)
-          @context_snapshot.values.replace(Context.current) if refresh && write_through && !Context.override
+          if refresh && write_through && !Context.override
+            current = Context.current
+            @context_snapshot.mutex.synchronize { @context_snapshot.values.merge!(current) }
+          end
           Context::Snapshot.new(values: @context_snapshot.values, tenant: @context_snapshot.tenant,
-                                write_through: write_through)
+                                write_through: write_through, mutex: @context_snapshot.mutex)
         end
 
         def downstream_disconnect?(error)

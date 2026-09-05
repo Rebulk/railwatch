@@ -447,6 +447,47 @@ RSpec.describe Lantern::Middleware::Request do
     expect(proxied.close_calls).to eq(1)
   end
 
+  it "keeps Rack to_path work in the lifecycle without consuming or closing the body" do
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:each) { |_| raise "each should not run" }
+    stream.define_singleton_method(:to_path) do
+      Lantern.record(:span, name: "file path")
+      "/tmp/lantern-response"
+    end
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/file"))
+
+    expect(body.to_path).to eq("/tmp/lantern-response")
+    expect(close_calls).to eq(0)
+    expect(lantern_records).to be_empty
+
+    body.close
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:span).sole[:name]).to eq("file path")
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "captures an application failure while Rack resolves to_path" do
+    path_error = Class.new(StandardError)
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:each) { |_| raise "each should not run" }
+    stream.define_singleton_method(:to_path) { raise path_error, "path generation failed" }
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/file"))
+
+    expect { body.to_path }.to raise_error(path_error, "path generation failed")
+    expect(close_calls).to eq(0)
+    body.close
+
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:exception).sole[:exception_class]).to eq(path_error.name)
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
   it "preserves Rack 3 call-only streaming body semantics" do
     writes = []
     close_calls = 0
@@ -631,6 +672,7 @@ RSpec.describe Lantern::Middleware::Request do
     )
   ensure
     ActiveSupport::ExecutionContext.clear
+    Rails.event.clear_context
   end
 
   it "does not report a downstream client disconnect as an application exception" do
@@ -766,6 +808,43 @@ RSpec.describe Lantern::Middleware::Request do
     release << true if consumer&.alive?
     consumer&.join
     closer&.join
+  end
+
+  it "retains all request context when close races cross-thread enumeration" do
+    entered = Queue.new
+    release = Queue.new
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      Lantern.context(stream_phase: "before-close")
+      entered << true
+      release.pop
+      Lantern.context(after_close: "retained")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { nil }
+    app = lambda do |_|
+      Lantern.context(request_marker: "request-value")
+      [ 200, {}, stream ]
+    end
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+    consumer = Thread.new { body.each { |_| nil } }
+    entered.pop
+    body.close
+    expect(lantern_records(:request)).to be_empty
+    release << true
+    consumer.join
+
+    expect(JSON.parse(lantern_records(:request).sole[:context])).to include(
+      "request_marker" => "request-value",
+      "stream_phase" => "before-close",
+      "after_close" => "retained"
+    )
+  ensure
+    release << true if consumer&.alive?
+    consumer&.join
+    ActiveSupport::ExecutionContext.clear
+    Rails.event.clear_context
   end
 
   it "defers profiler cleanup until a streaming body finishes" do

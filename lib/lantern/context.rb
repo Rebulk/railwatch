@@ -9,7 +9,7 @@ module Lantern
     EMPTY_JSON = "{}".freeze
     OVERRIDE_KEY = :lantern_context_snapshot
 
-    Snapshot = Struct.new(:values, :tenant, :write_through, keyword_init: true)
+    Snapshot = Struct.new(:values, :tenant, :write_through, :mutex, keyword_init: true)
 
     module_function
 
@@ -19,7 +19,7 @@ module Lantern
         # unrelated Rails work. Keep Lantern.context changes in the captured
         # request snapshot. Only mirror them into Rails' stores when this is
         # the originating context; never contaminate another thread or fiber.
-        snapshot.values.merge!(attrs)
+        snapshot.mutex.synchronize { snapshot.values.merge!(attrs) }
         return attrs unless snapshot.write_through
       end
 
@@ -30,7 +30,9 @@ module Lantern
     end
 
     def current
-      return override.values.dup if override
+      if (snapshot = override)
+        return snapshot.mutex.synchronize { snapshot.values.dup }
+      end
 
       ctx = {}
       ctx.merge!(ActiveSupport::ExecutionContext.to_h.except(:controller, :job))
@@ -50,7 +52,7 @@ module Lantern
     end
 
     def snapshot
-      Snapshot.new(values: current, tenant: current_tenant)
+      Snapshot.new(values: current, tenant: current_tenant, mutex: Mutex.new)
     end
 
     def with(snapshot)
