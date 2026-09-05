@@ -143,24 +143,31 @@ Every tool returns JSON as the text body of a single content block. **All
 durations are milliseconds.** Every `window` argument takes `1h`, `6h`,
 `24h`, `7d`, or `30d`, and defaults to `24h`.
 
+Start with `list_applications`. It returns stable `application_id` values and
+readable `account_slug` + `application_slug` pairs. Application-scoped tools
+accept either the stable id, the slug pair, or a legacy bare application slug
+when it is unique across the token's scope. Issue results return stable
+`issue_id`, canonical `<account_slug>/<application_id>/<legacy-key>` keys, and
+`legacy_key`; ambiguous legacy identifiers fail instead of selecting a tenant.
+
 | Tool | Arguments | Returns |
 |---|---|---|
-| `list_applications` | — | applications, their account, and their environments. Start here — everything else takes the `application_slug` and `environment` this returns. |
-| `list_issues` | `application_slug?`, `environment?`, `status?` (`open`/`resolved`/`ignored`, default `open`), `limit?` | issues with key, title, kind, status, priority, occurrence and affected-user counts, culprit, first/last seen. |
-| `get_issue` | `key` | one issue plus the sample occurrence: exception class, message, stack frames, and the execution it happened inside. |
-| `update_issue` | `key`, `status?`, `priority?`, `assignee_email?`, `agent?` | the updated issue. Writes an activity entry attributed to your user and `agent`. |
-| `add_comment` | `key`, `body`, `agent?` | the created comment, attributed the same way. |
-| `list_slow_routes` | `application_slug`, `environment`, `window?` | the 20 slowest routes by p95, each with `group_hash`, count, errors, `p95_ms`. |
-| `get_route` | `application_slug`, `environment`, `route` or `group_hash`, `window?` | one route's count/errors, p50/p95/p99/max, its slowest individual requests, the slowest queries those requests ran, and each N+1 with a concrete Active Record fix. |
-| `search_requests` | `application_slug`, `environment`, `q?`, `window?`, `limit?` | individual requests. `q` is the dashboard's filter grammar: `method:GET`, `route:/checkout`, `status:500` or `status:5xx`, `deploy:…`, `tenant:…`, `user:…`, `min_ms:250`; bare words match the route name. |
-| `get_execution` | `application_slug`, `environment`, `execution_id` | one execution and its full child timeline — every query, cache read, log line, outgoing request, view render, and exception, each offset in ms from the start. |
-| `explain_query` | `application_slug`, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `LANTERN_CAPTURE_QUERY_EXPLAIN`. |
-| `get_profile` | `application_slug`, `environment`, `profile_id?`, `execution_id?`, `limit?` | the hottest frames of a stack profile — self and total samples, each with a percentage. |
-| `search_logs` | `application_slug`, `environment`, `q`, `level?`, `limit?` | matching log lines, each with the `execution_id` to expand with `get_execution`. |
-| `list_tenants` | `application_slug`, `environment`, `window?`, `q?` | your app's own tenants (whatever it passes to `Lantern.context(tenant:)`) with request, error, job, exception, and user counts. |
-| `recent_deploys` | `application_slug`, `environment` | the 20 most recent deploys with ref, name, time, and link. |
-| `release_health` | `application_slug`, `environment`, `window?` | crash-free session rate, crash-free user rate, and adoption per release. |
-| `list_alerts` | `application_slug?`, `event?`, `status?`, `limit?` | fired alerts: which rule, which issue, which integration, and whether delivery succeeded. |
+| `list_applications` | — | applications with stable ids, account/application slugs, and environments. |
+| `list_issues` | application selector?, `environment?`, `status?` (`open`/`resolved`/`ignored`, default `open`), `limit?` | issues with stable/canonical identities, title, kind, status, priority, counts, culprit, and first/last seen. |
+| `get_issue` | `issue_id` or canonical/unique legacy `key` | one issue plus the sample occurrence: exception class, message, stack frames, and the execution it happened inside. |
+| `update_issue` | `issue_id` or `key`, `status?`, `priority?`, `assignee_email?`, `agent?` | the updated issue. Writes an activity entry attributed to your user and `agent`. |
+| `add_comment` | `issue_id` or `key`, `body`, `agent?` | the created comment, attributed the same way. |
+| `list_slow_routes` | application selector, `environment`, `window?` | the 20 slowest routes by p95, each with `group_hash`, count, errors, `p95_ms`. |
+| `get_route` | application selector, `environment`, `route` or `group_hash`, `window?` | one route's count/errors, p50/p95/p99/max, its slowest individual requests, the slowest queries those requests ran, and each N+1 with a concrete Active Record fix. |
+| `search_requests` | application selector, `environment`, `q?`, `window?`, `limit?` | individual requests. `q` is the dashboard's filter grammar: `method:GET`, `route:/checkout`, `status:500` or `status:5xx`, `deploy:…`, `tenant:…`, `user:…`, `min_ms:250`; bare words match the route name. |
+| `get_execution` | application selector, `environment`, `execution_id` | one execution and its full child timeline — every query, cache read, log line, outgoing request, view render, and exception, each offset in ms from the start. |
+| `explain_query` | application selector, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `LANTERN_CAPTURE_QUERY_EXPLAIN`. |
+| `get_profile` | application selector, `environment`, `profile_id?`, `execution_id?`, `limit?` | the hottest frames of a stack profile — self and total samples, each with a percentage. |
+| `search_logs` | application selector, `environment`, `q`, `level?`, `limit?` | matching log lines, each with the `execution_id` to expand with `get_execution`. |
+| `list_tenants` | application selector, `environment`, `window?`, `q?` | your app's own tenants (whatever it passes to `Lantern.context(tenant:)`) with request, error, job, exception, and user counts. |
+| `recent_deploys` | application selector, `environment` | the 20 most recent deploys with ref, name, time, and link. |
+| `release_health` | application selector, `environment`, `window?` | crash-free session rate, crash-free user rate, and adoption per release. |
+| `list_alerts` | application selector?, `event?`, `status?`, `limit?` | fired alerts with canonical application/issue identities and delivery status. |
 
 ## 4. Prompts
 
@@ -171,9 +178,9 @@ exists.
 
 | Prompt | Arguments | What it does |
 |---|---|---|
-| `triage_issue` | `key` | Reads the issue and its sample, pulls the execution timeline around the failure, searches the logs for the same failure elsewhere, lines `first_seen_at` up against recent deploys, then reports what breaks, for whom, how often, and the smallest fix. It will comment and set a priority; it is told not to resolve. |
-| `slow_route` | `application_slug`, `environment`, `route`, `window?` | Pulls the route summary, its slow queries and N+1s, the stored plan for each query group, and a stack profile if one exists, then reports the indexes and `includes` to add, ordered by expected saving, quoting measured milliseconds. |
-| `daily_summary` | `application_slug`, `environment`, `window?` | New issues, spiking issues, deploys, release-health movement, the worst routes, and what already alerted — leading with the one thing worth acting on. |
+| `triage_issue` | canonical/unique legacy `key` | Reads the issue and its sample, pulls the execution timeline around the failure, searches the logs for the same failure elsewhere, lines `first_seen_at` up against recent deploys, then reports what breaks, for whom, how often, and the smallest fix. It will comment and set a priority; it is told not to resolve. |
+| `slow_route` | application selector, `environment`, `route`, `window?` | Pulls the route summary, its slow queries and N+1s, the stored plan for each query group, and a stack profile if one exists, then reports the indexes and `includes` to add, ordered by expected saving, quoting measured milliseconds. |
+| `daily_summary` | application selector, `environment`, `window?` | New issues, spiking issues, deploys, release-health movement, the worst routes, and what already alerted — leading with the one thing worth acting on. |
 
 In Claude Code these appear as slash commands once the server is connected.
 
@@ -185,7 +192,7 @@ call:
 | URI | Contents |
 |---|---|
 | `lantern://applications` | Every application and environment the token can see. |
-| `lantern://applications/<slug>/environments/<name>/summary` | Request and job volume, p95, errors, open issue count, last-seen time, and deploys, over the last 24 hours, with the previous 24 hours alongside for comparison. |
+| `lantern://accounts/<account>/applications/<id>/environments/<name>/summary` | Canonical request and job volume, p95, errors, open issue count, last-seen time, and deploys, over the last 24 hours, with the previous 24 hours alongside for comparison. |
 | `lantern://docs/<name>` | Lantern's own documentation — `readme`, `getting-started`, `configuration`, `records`, `testing`, `replacing-sentry`, `troubleshooting`, `faq`, and the rest. An assistant that doesn't know an option can look it up instead of guessing. |
 
 ## 6. What an assistant can and can't do
