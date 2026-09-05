@@ -20,7 +20,7 @@ module Lantern
 
     RATE_LIMIT_WINDOW = 60 # seconds
 
-    before_action :throttle
+    before_action :throttle, if: -> { Lantern.config.beacon_enabled }
 
     def create
       return head :no_content unless Lantern.config.beacon_enabled

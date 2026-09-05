@@ -19,12 +19,27 @@ RSpec.describe "beacon rate limit", type: :request do
     Rails.cache.clear
   end
 
-  it "defaults to 120 beacons per client per minute, off with LANTERN_BEACON_RATE_LIMIT=0" do
+  it "defaults to 120 beacons per client per minute; 0 turns it off and a negative value counts as 0" do
+    original = ENV["LANTERN_BEACON_RATE_LIMIT"]
+    ENV.delete("LANTERN_BEACON_RATE_LIMIT")
     expect(Lantern::Configuration.new.beacon_rate_limit).to eq(120)
     ENV["LANTERN_BEACON_RATE_LIMIT"] = "0"
     expect(Lantern::Configuration.new.beacon_rate_limit).to eq(0)
+    ENV["LANTERN_BEACON_RATE_LIMIT"] = "-5"
+    expect(Lantern::Configuration.new.beacon_rate_limit).to eq(0)
   ensure
-    ENV.delete("LANTERN_BEACON_RATE_LIMIT")
+    original ? ENV["LANTERN_BEACON_RATE_LIMIT"] = original : ENV.delete("LANTERN_BEACON_RATE_LIMIT")
+  end
+
+  it "answers 204 rather than 429 when the beacon is disabled, whatever the client has sent before" do
+    Lantern.config.beacon_rate_limit = 1
+    Lantern.config.beacon_enabled = false
+
+    3.times { post_beacon }
+    expect(response).to have_http_status(:no_content)
+    expect(lantern_records(:visit)).to be_empty
+  ensure
+    Lantern.config.beacon_enabled = true
   end
 
   it "refuses the beacon past the limit with a Retry-After, and records nothing from it" do

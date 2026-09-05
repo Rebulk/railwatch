@@ -28,10 +28,13 @@ RSpec.configure do |config|
   config.order = :random
   config.expect_with(:rspec) { |c| c.syntax = :expect }
 
+  # The beacon's per-IP counter lives in Rails.cache and every request spec
+  # posts from 127.0.0.1, so a count that carried across the suite would
+  # eventually trip the limit in an unrelated spec. Request specs only: the
+  # dummy app's memory store makes this a hash reset, not I/O.
+  config.before(:each, type: :request) { Rails.cache.clear }
+
   config.before(:each) do
-    # The beacon's per-IP counter lives in Rails.cache; every request spec
-    # posts from 127.0.0.1, so a suite-wide count would trip the limit.
-    Rails.cache.clear
     stub_request(:post, "http://lantern.test/ingest").to_return do |request|
       accepted = Zlib::GzipReader.new(StringIO.new(request.body)).each_line.count
       { status: 200, body: JSON.generate(accepted: accepted, rejected: 0) }

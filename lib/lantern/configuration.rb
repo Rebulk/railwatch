@@ -132,8 +132,9 @@ module Lantern
       @beacon_enabled = env_bool("LANTERN_BEACON", true)
       # The beacon is unauthenticated and forces Lantern.keep! for browser
       # errors, so without a ceiling anyone can spend an app's event quota
-      # from a shell. Per client IP per minute; 0 turns the limit off.
-      @beacon_rate_limit = env_int("LANTERN_BEACON_RATE_LIMIT", 120)
+      # from a shell. Per client IP per minute; 0 turns the limit off, and a
+      # negative value is normalized to 0 rather than left to mean anything.
+      @beacon_rate_limit = [ env_int("LANTERN_BEACON_RATE_LIMIT", 120), 0 ].max
       @debug = env_bool("LANTERN_DEBUG", false)
       # Tail-based sampling: a head-sampled-out execution is still kept when
       # it ran at least this long, raised, or Lantern.keep! was called. nil = off.
