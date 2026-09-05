@@ -16,6 +16,10 @@ module Lantern
       # our own start is how long it waited for a worker. Anything beyond this
       # is clock skew between the proxy and this box, not a real wait.
       MAX_QUEUE_TIME = 60_000_000 # microseconds
+      # Only a multipart request can carry an UploadedFile; same raw
+      # CONTENT_TYPE test Subscribers::Requests uses before its params walk.
+      MULTIPART = "multipart/form-data"
+      NO_FILES = [].freeze
 
       # Returns [trace_id, parent_id, sampled] from an inbound traceparent,
       # or nil when the header is absent or malformed.
@@ -133,7 +137,7 @@ module Lantern
           route_domain: req.host,
           controller: controller,
           action: action,
-          format: (req.format&.symbol rescue nil).to_s,
+          format: request_format(req, env),
           ip: req.remote_ip,
           status_code: status.to_i,
           request_size: req.content_length.to_i,
@@ -149,8 +153,41 @@ module Lantern
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
-          files: env["lantern.files"] || uploaded_files(req.params)
+          files: env["lantern.files"] || uploaded_files_fallback(req, env)
         }
+      end
+
+      # Rack parses the request body the first time anything asks it for
+      # params, and both of the reads below ask -- `uploaded_files` walks
+      # `request.params`, and ActionDispatch::Request#format goes through
+      # `parameters[:format]`.
+      #
+      # Once a controller has run, that parse has already happened and its
+      # result is memoized on env, so both reads are free (and the files were
+      # captured back in Subscribers::Requests, before Rack::TempfileReaper
+      # unlinked the tempfiles). When no controller ran -- a routing 404, a
+      # rack-attack block, a middleware that rejected the request -- doing it
+      # here would make Lantern the only component that ever reads that body,
+      # at teardown, after the response has been decided. A streaming upload,
+      # or simply megabytes we would immediately throw away.
+      #
+      # So the fallback is narrow: multipart only, because nothing else can
+      # contain a file, and no format symbol is worth parsing a body for.
+      def uploaded_files_fallback(req, env)
+        return NO_FILES unless multipart?(env)
+
+        uploaded_files(req.params)
+      end
+
+      def request_format(req, env)
+        return "" unless env.key?("action_dispatch.request.formats") || multipart?(env)
+
+        (req.format&.symbol rescue nil).to_s
+      end
+
+      def multipart?(env)
+        content_type = env["CONTENT_TYPE"]
+        !content_type.nil? && content_type.start_with?(MULTIPART)
       end
 
       # Microseconds this request waited in the proxy/web-server queue before

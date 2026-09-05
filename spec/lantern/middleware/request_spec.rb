@@ -119,4 +119,20 @@ RSpec.describe Lantern::Middleware::Request do
     reporter&.shutdown
     Lantern.config.ingest_url = "http://lantern.test"
   end
+
+  it "does not read a non-multipart request body while finishing a request no controller handled" do
+    %w[application/json application/x-www-form-urlencoded].each do |content_type|
+      input = Object.new
+      %i[read gets each rewind].each do |method|
+        input.define_singleton_method(method) { |*| raise "request body was parsed" }
+      end
+      env = env_for("http://customer.test/rejected", method: "POST", headers: {
+        "CONTENT_TYPE" => content_type, "CONTENT_LENGTH" => "10000000", "rack.input" => input
+      })
+
+      expect { middleware.call(env) }.not_to raise_error
+    end
+
+    expect(lantern_records(:request).map { |request| request[:files] }).to eq([ [], [] ])
+  end
 end
