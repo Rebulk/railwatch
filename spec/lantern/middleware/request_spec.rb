@@ -382,6 +382,71 @@ RSpec.describe Lantern::Middleware::Request do
     expect(lantern_records(:request).sole[:path]).to eq("/eager")
   end
 
+  it "keeps a materialized Rails RackBody on the immediate lifecycle" do
+    response = ActionDispatch::Response.new(200, { "Content-Type" => "text/plain" }, [ "ready" ])
+    response_body = response.to_a.last
+    allow(Lantern::Context).to receive(:snapshot).and_call_original
+
+    _, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/rails-eager")
+    )
+
+    expect(body).to equal(response_body)
+    expect(body.to_ary).to eq([ "ready" ])
+    expect(Lantern::Context).not_to have_received(:snapshot)
+    expect(lantern_records(:request).sole[:path]).to eq("/rails-eager")
+  end
+
+  it "looks through Rails' executor BodyProxy without wrapping its materialized RackBody" do
+    response = ActionDispatch::Response.new(200, { "Content-Type" => "text/plain" }, [ "ready" ])
+    response_body = Rack::BodyProxy.new(response.to_a.last) { nil }
+    allow(Lantern::Context).to receive(:snapshot).and_call_original
+
+    _, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/rails-proxied-eager")
+    )
+
+    expect(body).to equal(response_body)
+    expect(body.to_ary).to eq([ "ready" ])
+    expect(Lantern::Context).not_to have_received(:snapshot)
+    expect(lantern_records(:request).sole[:path]).to eq("/rails-proxied-eager")
+  end
+
+  it "looks through nested Rails middleware BodyProxies around an Array" do
+    response_body = Rack::BodyProxy.new(Rack::BodyProxy.new([ "ready" ]) { nil }) { nil }
+    allow(Lantern::Context).to receive(:snapshot).and_call_original
+
+    _, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/rails-proxy-chain")
+    )
+
+    expect(body).to equal(response_body)
+    expect(body.to_ary).to eq([ "ready" ])
+    expect(Lantern::Context).not_to have_received(:snapshot)
+    expect(lantern_records(:request).sole[:path]).to eq("/rails-proxy-chain")
+  end
+
+  it "still wraps a Rails RackBody when its underlying stream is lazy" do
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      Lantern.record(:span, name: "lazy Rails body")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) { nil }
+    response = ActionDispatch::Response.new(200, { "Content-Type" => "text/plain" }, stream)
+    response_body = Rack::BodyProxy.new(response.to_a.last) { nil }
+
+    _, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/rails-lazy")
+    )
+
+    expect(body).to be_a(described_class::EnumerableResponseBody)
+    expect(lantern_records).to be_empty
+    expect(body.each.to_a).to eq([ "chunk" ])
+    expect(lantern_records(:span).sole[:name]).to eq("lazy Rails body")
+    expect(lantern_records(:request).sole[:path]).to eq("/rails-lazy")
+  end
+
   it "wraps an Array subclass because its enumeration can still be lazy" do
     body_class = Class.new(Array) do
       def each

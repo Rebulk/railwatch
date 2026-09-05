@@ -11,7 +11,9 @@
   disconnects are not misreported as application failures, and concurrent
   close/finalization still occurs exactly once. A cross-thread body discards
   its optional origin-thread profile so unrelated work cannot be attributed
-  to the request.
+  to the request. Literal Arrays and Rails' normal buffered RackBody keep the
+  allocation-free immediate-finalization path; only genuinely deferred bodies
+  pay for lifecycle/context coordination.
 
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost

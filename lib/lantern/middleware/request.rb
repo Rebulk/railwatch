@@ -367,15 +367,13 @@ module Lantern
               # disconnect while sending headers (before callback invocation)
               # cannot strand the request execution or process-global profile.
               body = lifecycle
-            # A literal Array is already materialized and has no close
-            # lifecycle, so retain the allocation-free pre-streaming path for
-            # the common Rack response used by small endpoints and middleware.
-            # Subclasses are wrapped: they can override #each with lazy work.
-            elsif body.instance_of?(Array)
+            # Keep the ordinary, already-materialized Rails response on the
+            # pre-streaming path. ActionDispatch::Executor normally wraps its
+            # RackBody in Rack::BodyProxy, so eager_response_body? looks
+            # through only that known proxy. A RackBody backed by a lazy
+            # stream does not advertise #to_ary and is still wrapped.
+            elsif eager_response_body?(body)
               finish(env, exe, status, headers, preserving: nil)
-            elsif body.respond_to?(:each)
-              context_snapshot = streaming_context(env, exe)
-              body = response_body(body, env, exe, status, headers, context_snapshot)
             else
               context_snapshot = streaming_context(env, exe)
               body = response_body(body, env, exe, status, headers, context_snapshot)
@@ -394,6 +392,17 @@ module Lantern
       end
 
       private
+
+      def eager_response_body?(body)
+        return true if body.instance_of?(Array)
+
+        candidate = body
+        while candidate.instance_of?(Rack::BodyProxy)
+          candidate = candidate.instance_variable_get(:@body)
+        end
+        candidate.instance_of?(Array) ||
+          (candidate.instance_of?(ActionDispatch::Response::RackBody) && candidate.respond_to?(:to_ary))
+      end
 
       def streaming_context(env, exe)
         # Resolve Current.user and retain Lantern.context and tenant while

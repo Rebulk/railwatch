@@ -70,9 +70,9 @@ borrowing the consumer thread or fiber's tenant or context. Because the
 optional profiler is process-global and pins samples to its starting thread,
 Lantern safely discards a request profile if the body moves to another thread;
 request records and all other child telemetry still span the full lifecycle.
-A literal,
-already-materialized Array response without a partial hijack still finalizes
-as soon as the Rack application returns it.
+A literal Array or Rails' normal already-materialized RackBody without a
+partial hijack still finalizes as soon as the Rack application returns it.
+Only a RackBody whose underlying stream is actually lazy is wrapped.
 
 | Field | Meaning |
 |---|---|
