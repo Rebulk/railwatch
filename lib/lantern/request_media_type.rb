@@ -10,7 +10,7 @@ module Lantern
     def multipart_form_data?(content_type)
       type, = content_type.to_s.split(";", 2)
       type.strip.casecmp?("multipart/form-data")
-    rescue StandardError
+    rescue StandardError, SystemStackError
       false
     end
   end

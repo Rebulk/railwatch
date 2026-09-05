@@ -237,6 +237,114 @@ RSpec.describe Lantern::Middleware::Request do
     env&.fetch("rack.tempfiles", [])&.each(&:close!)
   end
 
+  it "does not parse an opt-in payload after an outer catcher and tempfile reaper unwind" do
+    Lantern.config.capture_request_payload = true
+    boundary = "AaB03x"
+    body = multipart_body(boundary)
+    calls = []
+    input = StringIO.new(body)
+    tracker = Module.new do
+      %i[read gets each rewind].each do |method|
+        define_method(method) do |*args, &block|
+          calls << method
+          super(*args, &block)
+        end
+      end
+    end
+    input.singleton_class.prepend(tracker)
+    env = env_for("http://customer.test/boom", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => input
+    })
+    failing = lambda do |_request_env|
+      Lantern.report(RuntimeError.new("handled before the app failure"))
+      raise "original app error"
+    end
+    inner = Rack::TempfileReaper.new(failing)
+    catcher = lambda do |request_env|
+      inner.call(request_env)
+    rescue StandardError
+      [ 500, { "Content-Type" => "text/plain" }, [] ]
+    end
+
+    status, = described_class.new(catcher).call(env)
+
+    expect(status).to eq(500)
+    expect(calls).to be_empty
+    expect(env.fetch("rack.tempfiles")).to be_empty
+    expect(lantern_records(:request).sole).to include(status_code: 500, payload: nil, files: [])
+    expect(Lantern::Current.execution).to be_nil
+  ensure
+    env&.fetch("rack.tempfiles", [])&.each(&:close!)
+    Lantern.config.capture_request_payload = false
+  end
+
+  it "preserves successful responses and original errors for cyclic cached parameters" do
+    cycle = {}
+    cycle["self"] = cycle
+    success_env = env_for("http://customer.test/upload", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=x",
+      "action_dispatch.request.request_parameters" => cycle
+    })
+
+    status, = middleware.call(success_env)
+
+    expect(status).to eq(204)
+    expect(lantern_records(:request).sole).to include(status_code: 204, files: [])
+    expect(Lantern::Current.execution).to be_nil
+
+    error_env = success_env.dup
+    original = Class.new(StandardError)
+    expect do
+      described_class.new(->(_) { raise original, "original app error" }).call(error_env)
+    end.to raise_error(original, "original app error")
+    expect(Lantern::Current.execution).to be_nil
+  end
+
+  it "fails closed on cyclic cached opt-in payloads" do
+    Lantern.config.capture_request_payload = true
+    cycle = {}
+    cycle["self"] = cycle
+    env = env_for("http://customer.test/api", method: "POST", headers: {
+      "CONTENT_TYPE" => "application/json",
+      "action_dispatch.request.request_parameters" => cycle
+    })
+    app = lambda do |_request_env|
+      Lantern.report(RuntimeError.new("handled"))
+      [ 422, { "Content-Type" => "application/json" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env)
+
+    expect(status).to eq(422)
+    expect(lantern_records(:request).sole).to include(status_code: 422, payload: nil)
+    expect(Lantern::Current.execution).to be_nil
+  ensure
+    Lantern.config.capture_request_payload = false
+  end
+
+  it "uses Rack-native multipart parameters only after Rack cached them" do
+    boundary = "AaB03x"
+    body = multipart_body(boundary)
+    env = env_for("http://customer.test/upload", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => StringIO.new(body)
+    })
+    app = lambda do |request_env|
+      Rack::Request.new(request_env).POST
+      [ 201, { "Content-Type" => "text/plain" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env)
+
+    expect(status).to eq(201)
+    expect(lantern_records(:request).sole[:files].sole).to include(
+      name: "attachment", size: 5, content_type: "text/plain"
+    )
+  ensure
+    env&.fetch("rack.tempfiles", [])&.each(&:close!)
+  end
+
   it "omits a failed opt-in payload without losing the parent or masking the app error" do
     Lantern.config.capture_request_payload = true
     input = Object.new

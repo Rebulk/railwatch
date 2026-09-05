@@ -7,10 +7,10 @@
   its first records when the tree was written at the end of the execution;
   on rebulk-system that was every outgoing HTTP request of a 30-second sync.
 
-- Request finalization never initiates request-body parsing. It only inspects
-  parameters already cached upstream, and only for multipart uploads. JSON and
-  urlencoded bodies rejected by an upstream middleware remain unread, while
-  nested and array multipart uploads retain their filename-independent size,
+- Request finalization never initiates request-body parsing. Upload inspection
+  and opt-in exception payload capture only use parameters already cached
+  upstream. JSON and urlencoded bodies rejected by middleware remain unread,
+  while nested and array multipart uploads retain filename-independent size,
   field-name, and content-type metadata.
 
 - Active Job payloads now carry the enqueuing execution's user and tenant

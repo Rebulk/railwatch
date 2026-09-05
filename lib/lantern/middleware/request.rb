@@ -45,16 +45,14 @@ module Lantern
         exe.enter_stage(:middleware_before)
         env["lantern.execution"] = exe
         status = headers = body = nil
-        app_failed = false
         begin
           status, headers, body = @app.call(env)
         rescue Exception => e # rubocop:disable Lint/RescueException
-          app_failed = true
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
           raise
         ensure
           exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          finish(env, exe, status, headers, app_failed: app_failed)
+          finish(env, exe, status, headers)
         end
         [ status, headers, body ]
       end
@@ -93,19 +91,25 @@ module Lantern
         false
       end
 
-      def finish(env, exe, status, headers, app_failed:)
+      def finish(env, exe, status, headers)
         exe.finish_stages
-        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers, app_failed: app_failed))
+        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
         # After the parent, which is where exe.user_id is resolved: a request
         # with no user and no session cookie has no session, and Sessions.touch
         # returns without writing anything.
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         Lantern.debug { "request finish failed: #{e.class}: #{e.message}" }
-        Lantern.finish_execution
+        begin
+          Lantern.finish_execution
+        rescue StandardError, SystemStackError => cleanup_error
+          Lantern.debug { "request execution cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}" }
+        end
+      ensure
+        Current.execution = exe.parent_execution if Current.execution.equal?(exe)
       end
 
-      def parent_fields(env, exe, status, headers, app_failed:)
+      def parent_fields(env, exe, status, headers)
         req = ActionDispatch::Request.new(env)
         route = env["lantern.route"] || {}
         pattern = route[:pattern] || (req.respond_to?(:route_uri_pattern) ? (req.route_uri_pattern rescue nil) : nil) || "unmatched"
@@ -116,7 +120,7 @@ module Lantern
         exe.user_id ||= Subscribers::Users.resolve_id(env)
 
         inertia = inertia_fields(env, headers)
-        payload = request_payload(env, req, exe, app_failed: app_failed)
+        payload = request_payload(env, req, exe)
 
         {
           group: Record.group_hash(method, pattern),
@@ -156,28 +160,27 @@ module Lantern
         return env["lantern.files"] if env.key?("lantern.files")
         return [] unless RequestMediaType.multipart_form_data?(env["CONTENT_TYPE"])
 
-        parameters = if env.key?("action_dispatch.request.parameters")
-          env["action_dispatch.request.parameters"]
-        elsif env.key?("action_dispatch.request.request_parameters")
-          env["action_dispatch.request.request_parameters"]
-        else
-          return []
-        end
-        uploaded_files(parameters)
-      rescue StandardError => e
+        parameters = env["action_dispatch.request.parameters"] ||
+                     env["action_dispatch.request.request_parameters"] ||
+                     env["rack.request.form_hash"]
+        return [] unless parameters
+
+        UploadedFiles.extract(parameters)
+      rescue StandardError, SystemStackError => e
         Lantern.debug { "request upload inspection failed: #{e.class}: #{e.message}" }
         []
       end
 
-      # Payload capture is explicitly opt-in and exception-only, so it may
-      # parse a request body. A broken or hostile Rack input must only omit
-      # this optional field, never discard the request's parent record.
-      def request_payload(env, request, exe, app_failed:)
+      # Payload capture is explicitly opt-in and exception-only. It uses
+      # ActionDispatch parameters only after an upstream component populated
+      # one of its caches, so request teardown never initiates body parsing.
+      def request_payload(env, request, exe)
         return nil unless Lantern.config.capture_request_payload && exe.counters[:exceptions].positive?
-        return nil if app_failed && !env.key?("action_dispatch.request.request_parameters")
+        return nil unless env["action_dispatch.request.parameters"] ||
+                          env["action_dispatch.request.request_parameters"]
 
         Lantern.redactor.params(request.filtered_parameters.except("controller", "action"))
-      rescue StandardError => e
+      rescue StandardError, SystemStackError => e
         Lantern.debug { "request payload inspection failed: #{e.class}: #{e.message}" }
         nil
       end
@@ -238,22 +241,6 @@ module Lantern
           props_bytes: env["lantern.inertia_props_bytes"],
           ssr_ms: env["lantern.inertia_ssr_ms"]
         }.compact
-      end
-
-      # Recursively pulls ActionDispatch::Http::UploadedFile metadata out of
-      # request.params -- never its contents. Handles both a single file
-      # field and array-of-files fields (e.g. `attachments[]`).
-      def uploaded_files(value, name = nil)
-        case value
-        when ActionDispatch::Http::UploadedFile
-          [ { name: name, size: (value.tempfile.size rescue nil), content_type: value.content_type, error: nil } ]
-        when Hash
-          value.flat_map { |k, v| uploaded_files(v, k.to_s) }
-        when Array
-          value.flat_map { |v| uploaded_files(v, name) }
-        else
-          []
-        end
       end
 
       # Builds the (already redacted) header hash in one pass over env so the
