@@ -6,6 +6,11 @@ module Lantern
   # anything the app already hides from logs is hidden here too.
   class Redactor
     FILTERED = "[FILTERED]"
+    # Credentials are often carried in vendor-specific headers that an app
+    # cannot enumerate ahead of time (X-Api-Key, Stripe-Signature,
+    # X-Auth-Token, and similar). Match credential-shaped name segments in
+    # addition to the exact configurable denylist.
+    SENSITIVE_HEADER_NAME = /(?:\A|-)(?:api-?key|auth(?:entication|orization)?|token|secret|signature)(?:-|\z)/i
 
     def initialize(config)
       @config = config
@@ -26,7 +31,8 @@ module Lantern
       hit = @header_case[name]
       return hit unless hit.nil?
       @header_case.clear if @header_case.size > 512
-      @header_case[name] = @header_keys.include?(name.to_s.downcase)
+      normalized = name.to_s.downcase
+      @header_case[name] = @header_keys.include?(normalized) || SENSITIVE_HEADER_NAME.match?(normalized)
     end
 
     def params(hash)

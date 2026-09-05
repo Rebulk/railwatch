@@ -16,17 +16,25 @@ RSpec.describe "redaction and rejection", type: :request do
   end
 
   describe "header masking" do
-    it "masks the documented sensitive headers, leaving unlisted headers intact" do
+    it "masks exact and credential-shaped header names, leaving ordinary headers intact" do
       get "/widgets", headers: {
         "Authorization" => "Bearer secret",
         "Cookie" => "session=abc",
         "X-CSRF-Token" => "tok123",
+        "X-API-Key" => "api-secret",
+        "X-Auth-Token" => "auth-secret",
+        "X-Hub-Signature-256" => "github-secret",
+        "Stripe-Signature" => "stripe-secret",
         "X-Custom" => "keep-me"
       }
       req = lantern_records(:request).sole
       expect(req[:headers]["Authorization"]).to eq("[FILTERED]")
       expect(req[:headers]["Cookie"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Csrf-Token"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Api-Key"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Auth-Token"]).to eq("[FILTERED]")
+      expect(req[:headers]["X-Hub-Signature-256"]).to eq("[FILTERED]")
+      expect(req[:headers]["Stripe-Signature"]).to eq("[FILTERED]")
       expect(req[:headers]["X-Custom"]).to eq("keep-me")
     end
   end

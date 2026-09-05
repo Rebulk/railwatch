@@ -2,6 +2,14 @@
 
 ## 0.1.0 (unreleased)
 
+- Header masking no longer depends on an app enumerating every vendor
+  header name. A header whose name has a credential-shaped segment
+  (`api-key`/`apikey`, `auth`/`authentication`/`authorization`, `token`,
+  `secret`, `signature`) is masked as `[FILTERED]` on top of the exact
+  `redact_headers` denylist, so `X-Api-Key`, `X-Auth-Token`,
+  `Stripe-Signature` and `X-Hub-Signature-256` are private by default.
+  Ordinary diagnostic headers are untouched.
+
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost
   its first records when the tree was written at the end of the execution;
