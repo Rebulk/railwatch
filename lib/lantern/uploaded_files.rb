@@ -9,6 +9,9 @@ module Lantern
     MAX_NODES = 10_000
     MAX_DEPTH = 100
     MAX_FILES = 100
+    MAX_NAME_BYTES = 256
+    MAX_CONTENT_TYPE_BYTES = 256
+    MAX_FILE_BYTES = (2**63) - 1
 
     module_function
 
@@ -48,7 +51,7 @@ module Lantern
       children = []
       if value.is_a?(Hash)
         value.each do |key, child|
-          children << [ child, key.to_s, depth ]
+          children << [ child, safe_string(key, MAX_NAME_BYTES), depth ]
           break if children.size >= capacity
         end
       else
@@ -65,8 +68,10 @@ module Lantern
     end
 
     def rack_upload?(value)
-      value.is_a?(Hash) && rack_key?(value, :filename) && rack_key?(value, :tempfile) &&
-        rack_value(value, :tempfile).respond_to?(:size)
+      return false unless value.is_a?(Hash) && rack_key?(value, :filename) && rack_key?(value, :tempfile)
+
+      tempfile = rack_value(value, :tempfile)
+      tempfile.respond_to?(:read) && tempfile.respond_to?(:rewind) && tempfile.respond_to?(:size)
     end
 
     def rack_key?(hash, key)
@@ -78,7 +83,32 @@ module Lantern
     end
 
     def metadata(tempfile, name, content_type)
-      { name: name&.to_s, size: (tempfile.size rescue nil), content_type: content_type, error: nil }
+      {
+        name: safe_string(name, MAX_NAME_BYTES),
+        size: safe_size(tempfile),
+        content_type: safe_string(content_type, MAX_CONTENT_TYPE_BYTES),
+        error: nil
+      }
+    end
+
+    def safe_size(tempfile)
+      size = tempfile.size
+      return nil unless size.is_a?(Integer) && size >= 0
+
+      [ size, MAX_FILE_BYTES ].min
+    rescue StandardError, SystemStackError
+      nil
+    end
+
+    def safe_string(value, max_bytes)
+      return nil if value.nil?
+
+      text = value.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
+      return text if text.bytesize <= max_bytes
+
+      # byteslice can cut a multi-byte character; dropping only that partial
+      # tail keeps the result valid UTF-8 and within the exact byte budget.
+      text.byteslice(0, max_bytes).scrub("")
     end
   end
 end

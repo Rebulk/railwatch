@@ -33,6 +33,44 @@ RSpec.describe Lantern::Middleware::Request do
     Lantern.config.enabled = true
   end
 
+  it "does not finish a nested parent when writing the request record fails" do
+    parent = Lantern.start_execution(source: :job)
+    fail_next_write = true
+    allow(Lantern.reporter).to receive(:write).and_wrap_original do |original, record|
+      if fail_next_write
+        fail_next_write = false
+        raise "reporter write failed"
+      end
+      original.call(record)
+    end
+
+    status, = middleware.call(env_for("http://customer.test/widgets"))
+
+    expect(status).to eq(204)
+    expect(Lantern.execution).to equal(parent)
+    Lantern.record(:span, name: "parent continued")
+    Lantern.finish_execution
+    expect(lantern_records(:span).sole[:name]).to eq("parent continued")
+  ensure
+    Lantern::Current.clear
+  end
+
+  it "does not finish a nested parent when session tracking fails after request finalization" do
+    Lantern.config.track_sessions = true
+    parent = Lantern.start_execution(source: :job)
+    allow(Lantern::Sessions).to receive(:touch).and_raise("session tracking failed")
+
+    status, = middleware.call(env_for("http://customer.test/widgets"))
+
+    expect(status).to eq(204)
+    expect(Lantern.execution).to equal(parent)
+    Lantern.finish_execution
+    expect(Lantern.execution).to be_nil
+  ensure
+    Lantern.config.track_sessions = false
+    Lantern::Current.clear
+  end
+
   it "does not record the default health path" do
     seen = []
 
@@ -341,6 +379,36 @@ RSpec.describe Lantern::Middleware::Request do
     expect(lantern_records(:request).sole[:files].sole).to include(
       name: "attachment", size: 5, content_type: "text/plain"
     )
+  ensure
+    env&.fetch("rack.tempfiles", [])&.each(&:close!)
+  end
+
+  it "makes malformed multipart upload metadata safe to encode" do
+    boundary = "AaB03x"
+    invalid_content_type = "\xFF".b
+    body = "--#{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"a.txt\"\r\n".b +
+           "Content-Type: ".b + invalid_content_type +
+           "\r\n\r\nhello\r\n--#{boundary}--\r\n".b
+    env = env_for("http://customer.test/upload", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => StringIO.new(body)
+    })
+    app = lambda do |request_env|
+      ActionDispatch::Request.new(request_env).request_parameters
+      [ 201, { "Content-Type" => "text/plain" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env)
+
+    expect(status).to eq(201)
+    record = lantern_records(:request).sole
+    content_type = record[:files].sole[:content_type]
+    expect(content_type.encoding).to eq(Encoding::UTF_8)
+    expect(content_type).to be_valid_encoding
+    expect(content_type).to eq("\uFFFD")
+    expect { JSON.generate(record) }.not_to raise_error
+    transport = Lantern::Transport::Http.new(Lantern.config)
+    expect { transport.send(:encode, [ record ]) }.not_to raise_error
   ensure
     env&.fetch("rack.tempfiles", [])&.each(&:close!)
   end

@@ -11,7 +11,8 @@
   and opt-in exception payload capture only use parameters already cached
   upstream. JSON and urlencoded bodies rejected by middleware remain unread,
   while nested and array multipart uploads retain filename-independent size,
-  field-name, and content-type metadata.
+  field-name, and content-type metadata. That metadata is bounded and normalized
+  to valid UTF-8 so a malformed upload cannot poison an NDJSON delivery batch.
 
 - Active Job payloads now carry the enqueuing execution's user and tenant
   (`lantern_user`/`lantern_tenant`) next to the trace and parent ids, and

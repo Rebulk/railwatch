@@ -70,4 +70,39 @@ RSpec.describe Lantern::UploadedFiles do
   ensure
     file&.close!
   end
+
+  it "bounds and normalizes emitted strings and sizes" do
+    io = StringIO.new("hello")
+    invalid_type = ("text/" + "\xFF".b + ("x" * described_class::MAX_CONTENT_TYPE_BYTES)).b
+    oversized_name = "a" * (described_class::MAX_NAME_BYTES + 100)
+    params = {
+      oversized_name => { filename: "a.txt", type: invalid_type, tempfile: io }
+    }
+
+    metadata = described_class.extract(params).sole
+
+    expect(metadata[:name].bytesize).to eq(described_class::MAX_NAME_BYTES)
+    expect(metadata[:content_type].bytesize).to be <= described_class::MAX_CONTENT_TYPE_BYTES
+    expect(metadata[:content_type]).to be_valid_encoding
+    expect(metadata[:size]).to eq(5)
+    expect { JSON.generate(metadata) }.not_to raise_error
+  end
+
+  it "rejects string lookalikes and validates hostile file sizes" do
+    lookalike = { filename: "a.txt", tempfile: "not an IO", type: "text/plain" }
+    expect(described_class.extract(lookalike)).to eq([])
+
+    io = Object.new
+    io.define_singleton_method(:read) { }
+    io.define_singleton_method(:rewind) { }
+    io.define_singleton_method(:size) { -1 }
+    invalid_size = { filename: "a.txt", tempfile: io, type: "text/plain" }
+    expect(described_class.extract(invalid_size).sole[:size]).to be_nil
+
+    io.define_singleton_method(:size) { 2**100 }
+    expect(described_class.extract(invalid_size).sole[:size]).to eq(described_class::MAX_FILE_BYTES)
+
+    io.define_singleton_method(:size) { "5" }
+    expect(described_class.extract(invalid_size).sole[:size]).to be_nil
+  end
 end

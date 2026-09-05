@@ -100,10 +100,16 @@ module Lantern
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions
       rescue StandardError, SystemStackError => e
         Lantern.debug { "request finish failed: #{e.class}: #{e.message}" }
-        begin
-          Lantern.finish_execution
-        rescue StandardError, SystemStackError => cleanup_error
-          Lantern.debug { "request execution cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}" }
+        # finish_execution always restores the execution's parent, even when
+        # building or buffering the request record raised. Only retry cleanup
+        # while this request is still current: otherwise this call would
+        # finish and pop an outer job/command execution instead.
+        if Current.execution.equal?(exe)
+          begin
+            Lantern.finish_execution
+          rescue StandardError, SystemStackError => cleanup_error
+            Lantern.debug { "request execution cleanup failed: #{cleanup_error.class}: #{cleanup_error.message}" }
+          end
         end
       ensure
         Current.execution = exe.parent_execution if Current.execution.equal?(exe)
