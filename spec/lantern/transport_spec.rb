@@ -35,7 +35,7 @@ RSpec.describe Lantern::Transport::Http do
       seen_ids = []
       stub_request(:post, "http://lantern.test/ingest").to_return do |request|
         seen_ids << request.headers["X-Lantern-Batch-Id"]
-        seen_ids.one? ? { status: 503, body: "unavailable" } : { status: 200, body: '{"accepted":1}' }
+        seen_ids.one? ? { status: 503, body: "unavailable" } : { status: 200, body: '{"accepted":1,"rejected":0}' }
       end
 
       result = transport.deliver([ { t: "log" } ], batch_id: "804b36bd-5cf7-4ed5-b649-ab8a7064e13b")
@@ -48,7 +48,7 @@ RSpec.describe Lantern::Transport::Http do
       captured = nil
       stub_request(:post, "http://lantern.test/ingest").to_return do |request|
         captured = request
-        { status: 200, body: '{"accepted":1}' }
+        { status: 200, body: '{"accepted":1,"rejected":0}' }
       end
 
       transport.deliver([ { t: "log" } ], dropped: 0)
@@ -84,7 +84,7 @@ RSpec.describe Lantern::Transport::Http do
 
     it "retries a 5xx response once and succeeds on the retry" do
       stub_request(:post, "http://lantern.test/ingest")
-        .to_return({ status: 503, body: "unavailable" }, { status: 200, body: '{"accepted":1}' })
+        .to_return({ status: 503, body: "unavailable" }, { status: 200, body: '{"accepted":1,"rejected":0}' })
 
       result = transport.deliver([ { t: "log" } ])
 
@@ -108,9 +108,95 @@ RSpec.describe Lantern::Transport::Http do
       end
     end
 
+    it "retains a batch when a successful proxy response is HTML" do
+      stub_request(:post, "http://lantern.test/ingest").to_return(status: 200, body: "<html>sign in</html>")
+
+      result = transport.deliver([ { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("invalid ingest acknowledgement", "invalid JSON")
+    end
+
+    it "retains a batch when a successful response contains malformed JSON" do
+      stub_request(:post, "http://lantern.test/ingest").to_return(status: 200, body: '{"accepted":1')
+
+      result = transport.deliver([ { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("invalid JSON")
+    end
+
+    it "retains a batch when a successful acknowledgement omits counts" do
+      stub_request(:post, "http://lantern.test/ingest").to_return(status: 200, body: '{"accepted":1}')
+
+      result = transport.deliver([ { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("accepted and rejected must be non-negative integers")
+    end
+
+    it "retains a batch when acknowledgement counts do not cover the submitted batch" do
+      stub_request(:post, "http://lantern.test/ingest")
+        .to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+
+      result = transport.deliver([ { t: "log" }, { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("accepted + rejected was 1, expected 2")
+    end
+
+    it "drains a batch when a paused environment acknowledges it without ingesting" do
+      stub_request(:post, "http://lantern.test/ingest")
+        .to_return(status: 200, body: '{"accepted":0,"rejected":0,"reason":"paused"}')
+
+      result = transport.deliver([ { t: "log" }, { t: "log" } ])
+
+      expect(result.ok).to be(true)
+      expect(result).not_to be_retryable
+      expect(result).to have_attributes(accepted: 0, rejected: 0)
+    end
+
+    it "drains a batch when ingest acknowledges a partial count with a reason" do
+      stub_request(:post, "http://lantern.test/ingest")
+        .to_return(status: 200, body: '{"accepted":1,"rejected":0,"reason":"over quota"}')
+
+      result = transport.deliver([ { t: "log" }, { t: "log" } ])
+
+      expect(result.ok).to be(true)
+      expect(result).to have_attributes(accepted: 1, rejected: 0)
+    end
+
+    it "returns a valid partial acknowledgement with bounded rejection details" do
+      rejections = Array.new(12) { |index| { type: "bogus", reason: "record #{index}" } }
+      stub_request(:post, "http://lantern.test/ingest").to_return(
+        status: 200, body: JSON.generate(accepted: 1, rejected: 1, rejections: rejections)
+      )
+
+      result = transport.deliver([ { t: "log" }, { t: "bogus" } ])
+
+      expect(result.ok).to be(true)
+      expect(result).to have_attributes(accepted: 1, rejected: 1)
+      expect(result.rejections.size).to eq(10)
+    end
+
+    it "rejects a non-array rejections field even when its value is false" do
+      stub_request(:post, "http://lantern.test/ingest")
+        .to_return(status: 200, body: '{"accepted":1,"rejected":0,"rejections":false}')
+
+      result = transport.deliver([ { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("rejections must be an array")
+    end
+
     it "leaves quota backoff to the reporter instead of suppressing the next delivery" do
       stub_request(:post, "http://lantern.test/ingest")
-        .to_return({ status: 402, body: "quota" }, { status: 200, body: '{"accepted":1}' })
+        .to_return({ status: 402, body: "quota" }, { status: 200, body: '{"accepted":1,"rejected":0}' })
 
       first = transport.deliver([ { t: "log" } ])
       second = transport.deliver([ { t: "log" } ])
@@ -161,8 +247,9 @@ RSpec.describe Lantern::Reporter do
     end
   end
 
-  def delivery_result(ok:, status: nil, error: nil, accepted: nil)
-    Lantern::Transport::Http::Result.new(ok: ok, status: status, error: error, accepted: accepted)
+  def delivery_result(ok:, status: nil, error: nil, accepted: nil, rejected: nil, rejections: nil)
+    Lantern::Transport::Http::Result.new(ok: ok, status: status, error: error, accepted: accepted,
+                                         rejected: rejected, rejections: rejections)
   end
 
   def fork_pipe_transport(writer)
@@ -346,6 +433,36 @@ RSpec.describe Lantern::Reporter do
       expect(seen_errors.first).to be_a(described_class::DeliveryError)
       expect(seen_errors.map(&:status)).to eq([ 401, 422 ])
       expect(seen_errors.first.message).to include("permanently rejected")
+    ensure
+      Lantern.config.on_unrecoverable = nil
+    end
+
+    it "treats a per-record rejection as a delivered batch, not an unrecoverable failure" do
+      seen_errors = []
+      seen_dropped = []
+      Lantern.on_unrecoverable { |error| seen_errors << error }
+      outcomes = [
+        delivery_result(ok: true, status: 200, accepted: 1, rejected: 1,
+                        rejections: [ { "type" => "bogus", "reason" => "unsupported record" } ]),
+        delivery_result(ok: true, status: 200, accepted: 1, rejected: 0)
+      ]
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+        seen_dropped << dropped
+        outcomes.shift
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ t: "log" })
+      reporter.buffer.push({ t: "bogus" })
+
+      reporter.flush
+      reporter.buffer.push({ t: "log" })
+      reporter.flush
+
+      expect(seen_dropped).to eq([ 0, 0 ])
+      expect(seen_errors).to be_empty
+      expect(reporter.buffer.dropped).to eq(0)
+      expect(reporter.instance_variable_get(:@retry_batch)).to be_nil
     ensure
       Lantern.config.on_unrecoverable = nil
     end

@@ -2,6 +2,20 @@
 
 ## 0.1.0 (unreleased)
 
+- Ingest acknowledgements are validated before a batch is considered
+  delivered: a 2xx whose body is not a JSON object, is malformed JSON, omits
+  `accepted`/`rejected`, or reports counts that do not cover the submitted
+  batch now retains the batch (under the same idempotency key) for retry
+  instead of silently dropping it. HTML sign-in pages from an intercepting
+  proxy were the motivating case. Two shapes are explicitly a successful
+  drain rather than a failure: an acknowledgement carrying a `reason`, and an
+  all-zero `{"accepted":0,"rejected":0}` -- that is how the platform answers
+  for a paused or over-quota environment, and retrying it would burn eight
+  attempts and drop the records anyway. Per-record rejections
+  (`rejected > 0`) stay routine: they are logged under `LANTERN_DEBUG` and
+  are not reported to `on_unrecoverable`, since the platform's ingest batch
+  is the authoritative accounting for them.
+
 - The installer now prefers a hidden prompt, stdin, or `LANTERN_TOKEN`, never
   prints token values, and refuses to put a token in a tracked or non-ignored
   `.env`. `lantern:doctor` also fails when it finds a plaintext `lt_...` token
@@ -19,8 +33,6 @@
   number. `LANTERN_BUFFER_SIZE=12px` used to become `0` via `String#to_i`,
   silently turning off buffering; the same applied to timeouts, intervals
   and sample rates.
-
-
 
 - Inbound `traceparent` parsing follows the W3C trace-context validity
   rules: version `ff`, an all-zero trace id, and an all-zero parent id are

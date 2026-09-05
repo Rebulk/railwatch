@@ -29,7 +29,10 @@ RSpec.configure do |config|
   config.expect_with(:rspec) { |c| c.syntax = :expect }
 
   config.before(:each) do
-    stub_request(:post, "http://lantern.test/ingest").to_return(status: 200, body: '{"accepted":1}')
+    stub_request(:post, "http://lantern.test/ingest").to_return do |request|
+      accepted = Zlib::GzipReader.new(StringIO.new(request.body)).each_line.count
+      { status: 200, body: JSON.generate(accepted: accepted, rejected: 0) }
+    end
     stub_request(:get, %r{http://example\.test/}).to_return(status: 200, body: "hi", headers: { "Content-Length" => "2" })
     lantern_transport
     Lantern.config.sample = { requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, exceptions: 1.0 }

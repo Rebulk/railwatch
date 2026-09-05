@@ -156,7 +156,10 @@ silent.
 A background thread drains the buffer and POSTs. Each POST retries one
 raised network error or 5xx immediately. If delivery still fails, the batch
 and its drop counter go back into the bounded buffer; **402**, **408**,
-**429**, and all **5xx** responses are retained the same way. The reporter
+**429**, and all **5xx** responses are retained the same way. So is a **2xx
+that cannot acknowledge the batch** — a proxy's HTML sign-in page, malformed
+JSON, or `accepted`/`rejected` counts that do not cover what was sent — which
+would otherwise be a silent drop. The reporter
 retries with jittered exponential backoff from one second up to 60 seconds,
 so an outage cannot create a busy loop. A retained batch is retried eight
 times (about four minutes on that ladder), then dropped and counted so the
@@ -170,6 +173,17 @@ transport unauthorized and stops further HTTP attempts for that process's
 lifetime (fix the token and restart). A 401 or other permanent client
 rejection drops that rejected batch and calls `Lantern.on_unrecoverable`
 with its status and record count.
+
+Two 2xx shapes are a *successful* drain rather than a failure. An
+acknowledgement carrying a `reason`, and an all-zero
+`{"accepted":0,"rejected":0}`, are how the platform answers for an
+environment it is not currently ingesting for (paused, over quota) — the
+batch is released, because retrying it would burn all eight attempts and
+drop the records anyway. And `rejected > 0` is routine, not an incident:
+the platform rejects individual records it cannot store, records that
+already appear on its own ingest batch. Those are visible under
+`LANTERN_DEBUG=1` and are deliberately **not** sent to
+`Lantern.on_unrecoverable`.
 
 On shutdown, `at_exit` gives the thread `c.shutdown_timeout` (2 seconds) to
 attempt retained records immediately and retry within the remaining time.

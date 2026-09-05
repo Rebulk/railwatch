@@ -239,6 +239,11 @@ module Lantern
       result = deliver(batch)
       Lantern.debug { "flushed #{deliverable.size} records (dropped #{batch.dropped}): #{result.to_h}" }
       if result.ok
+        # Per-record rejection is routine and documented (an unsupported
+        # record kind, a record the environment does not retain). Cloud's
+        # ingest batch is the authoritative accounting for it; re-reporting it
+        # through on_unrecoverable would page an operator for normal traffic.
+        Lantern.debug { "ingest rejected #{result.rejected} of #{deliverable.size} records" } if result.rejected.to_i.positive?
         delivery_succeeded
       elsif retryable?(result)
         retain(batch, result)
