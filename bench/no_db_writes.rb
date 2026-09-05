@@ -6,16 +6,7 @@
 #
 #   bundle exec ruby bench/no_db_writes.rb
 #
-ENV["RAILS_ENV"] = "test"
-ENV["LANTERN_TOKEN"] = "bench"
-ENV["LANTERN_INGEST_URL"] = "http://127.0.0.1:9"
-require_relative "../spec/dummy/config/environment"
-require "rack/test"
-
-ActiveRecord::Schema.verbose = false
-load File.expand_path("../spec/dummy/db/schema.rb", __dir__)
-3.times { |i| Widget.create!(name: "w#{i}", gadget: Gadget.create!(name: "g#{i}")) }
-Lantern.reporter.define_singleton_method(:flush) { @buffer.drain; nil }
+require_relative "support"
 
 gem_root = File.expand_path("..", __dir__) + "/lib/lantern"
 offenders = []
@@ -26,16 +17,11 @@ ActiveSupport::Notifications.subscribe("sql.active_record") do |event|
   offenders << "#{sql[0, 80]} <- #{frame.path.delete_prefix(gem_root)}:#{frame.lineno}" if frame
 end
 
-class Driver
-  include Rack::Test::Methods
-  def app = Rails.application
-end
-driver = Driver.new
 50.times do
-  driver.get "/widgets"
-  driver.get "/boom"
-  driver.get "/enqueue"
-  driver.get "/cached"
+  DRIVER.get "/widgets"
+  DRIVER.get "/boom"
+  DRIVER.get "/enqueue"
+  DRIVER.get "/cached"
 end
 WidgetJob.perform_now("bench")
 

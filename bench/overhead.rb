@@ -7,61 +7,15 @@
 #
 # "Off" means off: every ActiveSupport::Notifications subscriber the gem
 # installed is unsubscribed and its log Capture is removed from the
-# broadcast logger. Flipping config.enabled at runtime is not enough -- the
-# subscribers still receive every event, and a Capture logger left at DEBUG
-# makes every framework LogSubscriber format lines nobody stores -- and a
-# baseline measured that way hid most of the gem's cost.
+# broadcast logger (see bench/support.rb). Flipping config.enabled at
+# runtime is not enough -- the subscribers still receive every event, and
+# a Capture logger left at DEBUG makes every framework LogSubscriber format
+# lines nobody stores -- and a baseline measured that way hid most of the
+# gem's cost.
 #
 #   bundle exec ruby bench/overhead.rb
 #
-ENV["RAILS_ENV"] = "test"
-ENV["LANTERN_TOKEN"] = "bench"
-ENV["LANTERN_INGEST_URL"] = "http://127.0.0.1:9" # nothing listens; transport must not add latency
-
-require "active_support"
-require "active_support/notifications"
-SUBSCRIPTIONS = []
-module TrackLanternSubscriptions
-  def subscribe(pattern = nil, callback = nil, &block)
-    sub = super
-    SUBSCRIPTIONS << [ pattern, sub ] if caller_locations(1, 3).any? { |l| l.path.include?("/lib/lantern/") }
-    sub
-  end
-
-  def monotonic_subscribe(pattern = nil, callback = nil, &block)
-    sub = super
-    SUBSCRIPTIONS << [ pattern, sub ] if caller_locations(1, 3).any? { |l| l.path.include?("/lib/lantern/") }
-    sub
-  end
-end
-ActiveSupport::Notifications.singleton_class.prepend(TrackLanternSubscriptions)
-
-require_relative "../spec/dummy/config/environment"
-require "rack/test"
-
-ActiveRecord::Schema.verbose = false
-load File.expand_path("../spec/dummy/db/schema.rb", __dir__)
-3.times { |i| Widget.create!(name: "w#{i}", gadget: Gadget.create!(name: "g#{i}")) }
-User.create!(name: "bench", email: "bench@example.com")
-
-# Swallow transport work entirely so we measure only in-process cost.
-Lantern.reporter.define_singleton_method(:flush) { @buffer.drain; nil }
-CAPTURE = Rails.logger.broadcasts.find { |l| l.is_a?(Lantern::Subscribers::Logs::Capture) }
-
-def lantern_off!
-  SUBSCRIPTIONS.each { |_, sub| ActiveSupport::Notifications.unsubscribe(sub) }
-  Rails.logger.stop_broadcasting_to(CAPTURE)
-  Lantern.config.enabled = false
-end
-
-def lantern_on!
-  SUBSCRIPTIONS.map! do |pattern, sub|
-    delegate = sub.instance_variable_get(:@delegate)
-    [ pattern, ActiveSupport::Notifications.subscribe(pattern, delegate) ]
-  end
-  Rails.logger.broadcast_to(CAPTURE)
-  Lantern.config.enabled = true
-end
+require_relative "support"
 
 # Limits are on CPU time, not wall time, so the gate is stable on a loaded
 # CI box: wall time would swing by tens of ms with other processes running.
@@ -74,35 +28,11 @@ LIMITS = {
 }.freeze
 SHAPES = {
   "trivial (no queries)" => "/bench/trivial",
-  "20 sqlite queries" => "/bench/queries",
+  "20 sqlite queries" => "/bench/queries?n=20",
   "widgets (n+1, 7 queries, 1 log)" => "/widgets"
 }.freeze
 ROUNDS = 9
 BATCH = 15
-
-class BenchController < ActionController::Base
-  def trivial = render(plain: "ok")
-
-  # uncached: Rails' per-request query cache would otherwise collapse these
-  # into three real statements, and the gem's cost is per real query.
-  def queries
-    ActiveRecord::Base.uncached { 20.times { |i| Widget.where(id: i % 3 + 1).to_a } }
-    render plain: "ok"
-  end
-end
-Rails.application.routes.draw do
-  get "bench/trivial", to: "bench#trivial"
-  get "bench/queries", to: "bench#queries"
-  get "widgets", to: "widgets#index"
-end
-
-class Driver
-  include Rack::Test::Methods
-  def app = Rails.application
-end
-DRIVER = Driver.new
-
-def cpu_us = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID, :microsecond)
 
 def sample(path)
   GC.start

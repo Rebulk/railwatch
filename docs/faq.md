@@ -40,6 +40,10 @@ for reasons that have nothing to do with the gem, which would make the
 gate useless. And the 20-query request is a stress case; a normal request
 pays mostly the fixed cost.
 
+The scripts behind these numbers, and the ones for finding out where a
+number comes from before changing the code, are listed in
+[`bench/README.md`](../bench/README.md).
+
 A second gate, `bench/no_db_writes.rb`, drives 200 requests and a job with
 a `sql.active_record` subscriber watching for any `INSERT`/`UPDATE`/
 `DELETE` issued from a frame inside `lib/lantern`, and fails if it finds

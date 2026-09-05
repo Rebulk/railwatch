@@ -133,6 +133,10 @@
   for the "off" batches, rather than flipping `config.enabled` with
   everything still wired in, which had hidden most of the cost. It gates
   three request shapes on SQLite and fails if `Rails.logger.debug?` is on.
+  The scripts that produced the numbers in the docs are committed alongside
+  it and indexed in `bench/README.md`: per-shape cost, the request, query,
+  and exception paths piece by piece, reporter-thread and wire cost,
+  allocation and CPU attribution, and an end-to-end Puma load harness.
 
 - The installer now prefers a hidden prompt, stdin, or `LANTERN_TOKEN`, never
   prints token values, and refuses to put a token in a tracked or non-ignored
