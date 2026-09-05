@@ -107,7 +107,7 @@ module Lantern
       exe
     end
 
-    PARENT_TYPES = %i[request job_attempt scheduled_task command].freeze
+    PARENT_TYPES = %i[request job_attempt scheduled_task command channel_action].freeze
 
     # Ends the execution. A sampled-in execution ships all of its buffered
     # child records plus the parent; a sampled-out one ships only the parent,

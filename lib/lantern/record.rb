@@ -6,7 +6,7 @@ module Lantern
   # trace_id, execution_*, user) plus tenant.
   module Record
     VERSIONS = {
-      request: 1, job_attempt: 1, scheduled_task: 1, command: 1,
+      request: 1, job_attempt: 1, scheduled_task: 1, command: 1, channel_action: 1,
       query: 1, n_plus_one: 1, transaction: 1, exception: 1, cache_event: 1, mail: 1,
       broadcast: 1, notification: 1, outgoing_request: 1, storage_op: 1, view_render: 1,
       log: 1, enqueued_job: 1, user: 1, deprecation: 1, visit: 1, process: 1, span: 1, health: 1,

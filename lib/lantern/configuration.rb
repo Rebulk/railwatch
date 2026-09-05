@@ -92,6 +92,7 @@ module Lantern
         jobs: env_float("LANTERN_JOB_SAMPLE_RATE", 1.0),
         commands: env_float("LANTERN_COMMAND_SAMPLE_RATE", 1.0),
         scheduled_tasks: env_float("LANTERN_SCHEDULED_TASK_SAMPLE_RATE", 1.0),
+        channels: env_float("LANTERN_CHANNEL_SAMPLE_RATE", 1.0),
         exceptions: env_float("LANTERN_EXCEPTION_SAMPLE_RATE", 1.0)
       }
       self.ignore = RECORD_TYPES.select { |t| env_bool("LANTERN_IGNORE_#{t.to_s.upcase}", false) }

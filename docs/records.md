@@ -18,14 +18,14 @@ Every record carries these (`Record.build`, `lib/lantern/record.rb`):
 | `server` | `Lantern.config.server` — hostname by default. |
 | `_group` | 128-bit grouping hash (MD5 of type-specific parts, `Record.group_hash`) the platform uses to bucket occurrences into one issue/row. |
 
-Records created inside an execution (everything except the four parent
+Records created inside an execution (everything except the five parent
 types, plus `user`/`process`/`visit`, which stand alone) also merge in the
 execution's envelope (`Execution#envelope`, `lib/lantern/execution.rb`):
 
 | Field | Meaning |
 |---|---|
 | `trace_id` | Shared by a request and every job it enqueues (`JobTracing`), so a chain of async work traces back to the request that started it. |
-| `execution_source` | `"request"`, `"job"`, `"scheduled_task"`, or `"command"`. |
+| `execution_source` | `"request"`, `"job"`, `"scheduled_task"`, `"command"`, or `"channel_action"`. |
 | `execution_id` | UUID of the parent execution this child belongs to. |
 | `parent_id` | UUID of the execution that enqueued this one (e.g. the request that enqueued a job), or nil. |
 | `execution_preview` | Human label for the parent, e.g. `"GET /posts"` or `"PostsController#index"`. |
@@ -191,6 +191,26 @@ vs `#execute`). `db:migrate` and other tasks in
 | `command` | Full invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`. |
 | `exit_code` | 0 on success, `SystemExit`'s status, or 1 on an unhandled exception, clamped to 0-255. |
 | `interactive` | `true` on a `bin/rails runner` an engineer typed or piped (`-`, inline code, or a `.rb` file under `config.interactive_runner_paths`); absent otherwise. Such a run ships this record — with its `exit_code` and `exception_preview` — but its exception is not reported. A deployed script (`rails runner script/nightly.rb`), a rake task, and a job are never interactive. See [Console and runner sessions](replacing-sentry.md#console-and-runner-sessions). |
+
+### `channel_action`
+
+One parent per Action Cable channel action. Lantern opens it before
+`perform_action.action_cable` invokes application code and closes it after the
+action returns or raises, so the SQL, logs, broadcasts, transmits, and
+exceptions inside share one trace — an Action Cable action has no HTTP request
+and no Rack middleware around it, so without this they had no parent at all.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of channel class + action. |
+| `channel` | Channel class name, e.g. `ChatChannel`. |
+| `action` | Invoked channel action name. |
+| `status` | `"processed"` or `"failed"`. |
+| `failed` | Whether the action raised. |
+
+Sampling uses `sample[:channels]` / `LANTERN_CHANNEL_SAMPLE_RATE`. An
+unhandled channel exception is still eligible for exception sampling and ships
+with this parent even when the channel sample rate is zero.
 
 ## Child records
 

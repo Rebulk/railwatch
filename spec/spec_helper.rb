@@ -35,6 +35,9 @@ RSpec.configure do |config|
     end
     stub_request(:get, %r{http://example\.test/}).to_return(status: 200, body: "hi", headers: { "Content-Length" => "2" })
     lantern_transport
-    Lantern.config.sample = { requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, exceptions: 1.0 }
+    Lantern.config.sample = {
+      requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0,
+      channels: 1.0, exceptions: 1.0
+    }
   end
 end

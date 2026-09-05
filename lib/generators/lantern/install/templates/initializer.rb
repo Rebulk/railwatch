@@ -9,7 +9,7 @@ Lantern.configure do |c|
 
   # Sampling is decided once per execution; a sampled-in request ships its
   # whole tree of queries, cache events, jobs, mail, and logs.
-  # c.sample = { requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, exceptions: 1.0 }
+  # c.sample = { requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, channels: 1.0, exceptions: 1.0 }
 
   # Drop whole record types: :queries, :cache_events, :mail, :broadcasts,
   # :notifications, :outgoing_requests, :storage_ops, :view_renders, :logs, :transactions
