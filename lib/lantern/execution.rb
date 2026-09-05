@@ -43,6 +43,13 @@ module Lantern
     # reports them (Subscribers::Exceptions.capture). Left uninitialized like
     # the pairs above -- a request must not pay an ivar write for this.
     attr_accessor :interactive
+    # Set only by Subscribers::Users, and only for a user this process has
+    # not emitted an entity for this hour: the cache key(s) and the `user`
+    # record object(s) buffered for them, held until finish_execution says
+    # whether this tree actually shipped. Left uninitialized like the pairs
+    # above -- the common case (a user already seen this hour, or none at
+    # all) must not pay an ivar write.
+    attr_accessor :pending_users
     attr_reader :preview, :user_id, :tenant
 
     def preview=(value)
