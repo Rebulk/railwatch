@@ -6,6 +6,124 @@ module Lantern
     # lifecycle stages, catches anything that escapes the stack as an
     # unhandled exception, and emits the request record at the end.
     class Request
+      # Keeps a Rack response body attached to the request execution until the
+      # server has consumed it. Rack applications return the body before an
+      # Enumerator (or another streaming body) does its work, often on a
+      # different thread, so finalizing in #call loses everything emitted by
+      # #each and reports only the time needed to construct the response.
+      #
+      # Completion owns the wrapped body's close: this makes normal
+      # enumeration, a downstream disconnect, and an explicit close all take
+      # the same exactly-once path. Servers conventionally call close after
+      # each; that second call is harmless, just like Rack::BodyProxy.
+      class ResponseBody
+        def initialize(body, middleware, env, execution, status, headers, context)
+          @body = body
+          @middleware = middleware
+          @env = env
+          @execution = execution
+          @status = status
+          @headers = headers
+          @context = context
+          @origin_thread_id = Thread.current.object_id
+          @completion_mutex = Mutex.new
+          @completed = false
+        end
+
+        def each
+          return enum_for(:each) unless block_given?
+
+          error = nil
+          Current.with(@execution) do
+            begin
+              @body.each { |chunk| yield chunk }
+            rescue Exception => e # rubocop:disable Lint/RescueException
+              error = e
+              capture(e)
+              raise
+            ensure
+              complete(preserving: error)
+            end
+          end
+        end
+
+        def close
+          complete
+        end
+
+        def closed?
+          @completion_mutex.synchronize { @completed }
+        end
+
+        def respond_to_missing?(method_name, include_all = false)
+          method_name != :to_str && (@body.respond_to?(method_name, include_all) || super)
+        end
+
+        def method_missing(method_name, *args, &block)
+          return super if method_name == :to_str
+          return consume_to_ary(*args, &block) if method_name == :to_ary
+
+          @body.__send__(method_name, *args, &block)
+        end
+        ruby2_keywords(:method_missing) if respond_to?(:ruby2_keywords, true) # :nocov:
+
+        private
+
+        def consume_to_ary(*args, &block)
+          error = nil
+          Current.with(@execution) do
+            begin
+              @body.__send__(:to_ary, *args, &block)
+            rescue Exception => e # rubocop:disable Lint/RescueException
+              error = e
+              capture(e)
+              raise
+            ensure
+              complete(preserving: error)
+            end
+          end
+        end
+
+        def complete(preserving: nil)
+          return unless claim_completion
+
+          close_error = nil
+          Current.with(@execution) do
+            # ActionDispatch::Executor clears Rails' execution context from
+            # its inner BodyProxy#close. Snapshot it before delegating. A
+            # cross-thread server has no access to the origin thread's Rails
+            # context, so retain the snapshot taken when #call returned.
+            context = if Thread.current.object_id == @origin_thread_id
+              Context.serialized
+            else
+              @context
+            end
+            begin
+              @body.close if @body.respond_to?(:close)
+            rescue Exception => e # rubocop:disable Lint/RescueException
+              close_error = e
+              capture(e) unless preserving
+            ensure
+              @middleware.__send__(:finish, @env, @execution, @status, @headers,
+                                   preserving: preserving || close_error, context: context)
+            end
+          end
+          raise close_error if close_error && !preserving
+        end
+
+        def claim_completion
+          @completion_mutex.synchronize do
+            next false if @completed
+
+            @completed = true
+          end
+        end
+
+        def capture(error)
+          @middleware.__send__(:capture_exception, @execution, error)
+        end
+      end
+
       # Env keys repeat request after request (same client/proxy headers), so
       # the Rack key -> "Header-Name" conversion is cached instead of
       # split/map/capitalize/join-ing on every request.
@@ -47,21 +165,54 @@ module Lantern
         status = headers = body = nil
         application_error = nil
         begin
-          status, headers, body = @app.call(env)
-        rescue Exception => e # rubocop:disable Lint/RescueException
-          application_error = e
-          capture_exception(exe, e)
-          raise
-        ensure
           begin
-            exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          rescue Exception => stage_error # rubocop:disable Lint/RescueException
-            debug_error = debug_failure("request stage cleanup failed", stage_error)
-            stage_error = prefer_fatal(stage_error, debug_error)
-            raise stage_error if fatal_exception?(stage_error) && !application_error
+            status, headers, body = @app.call(env)
+          rescue Exception => e # rubocop:disable Lint/RescueException
+            application_error = e
+            capture_exception(exe, e)
+            raise
           ensure
-            finish(env, exe, status, headers, preserving: application_error)
+            if application_error
+              begin
+                enter_middleware_after(exe, preserving: application_error)
+              ensure
+                finish(env, exe, status, headers, preserving: application_error)
+              end
+            end
           end
+
+          begin
+            enter_middleware_after(exe)
+          rescue Exception => setup_error # rubocop:disable Lint/RescueException
+            finish(env, exe, status, headers, preserving: setup_error)
+            raise
+          end
+
+          # A literal Array is already materialized and has no close
+          # lifecycle, so retain the allocation-free pre-streaming path for
+          # the common Rack response used by small endpoints and middleware.
+          # Subclasses are wrapped: they can override #each with lazy work.
+          if body.instance_of?(Array)
+            finish(env, exe, status, headers, preserving: nil)
+          else
+            begin
+              # Resolve Current.user and retain Lantern.context while Rails'
+              # request executor is still active. Its inner body proxy clears
+              # both when it closes, which is before our outer proxy emits the
+              # parent request record.
+              exe.user_id ||= Subscribers::Users.resolve_id(env)
+              context = Context.serialized
+              body = ResponseBody.new(body, self, env, exe, status, headers, context)
+            rescue Exception => setup_error # rubocop:disable Lint/RescueException
+              finish(env, exe, status, headers, preserving: setup_error)
+              raise
+            end
+          end
+        ensure
+          # #each may run later or on another thread. Neither this request nor
+          # a nested execution abandoned by the app may remain Current on the
+          # server thread after the Rack response has been returned.
+          Current.execution = exe.parent_execution
         end
         [ status, headers, body ]
       end
@@ -100,7 +251,7 @@ module Lantern
         false
       end
 
-      def finish(env, exe, status, headers, preserving:)
+      def finish(env, exe, status, headers, preserving:, context: nil)
         failure = nil
         # Application code can open an execution and fail to close it. Request
         # finalization must still describe and close the execution this
@@ -108,6 +259,7 @@ module Lantern
         Current.execution = exe
         exe.finish_stages
         fields = parent_fields(env, exe, status, headers)
+        fields[:context] = context if context
         Current.execution = exe
         Lantern.finish_execution(:request, **fields)
         # After the parent, which is where exe.user_id is resolved: a request
@@ -126,6 +278,14 @@ module Lantern
           Current.execution = exe.parent_execution
         end
         raise failure if fatal_exception?(failure) && !preserving
+      end
+
+      def enter_middleware_after(exe, preserving: nil)
+        exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
+      rescue Exception => stage_error # rubocop:disable Lint/RescueException
+        debug_error = debug_failure("request stage cleanup failed", stage_error)
+        stage_error = prefer_fatal(stage_error, debug_error)
+        raise stage_error if fatal_exception?(stage_error) && !preserving
       end
 
       def capture_exception(exe, error)

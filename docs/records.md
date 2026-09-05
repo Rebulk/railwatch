@@ -61,7 +61,12 @@ Built by the outermost Rack middleware (`lib/lantern/middleware/request.rb`),
 which also owns the `middleware_before`/`action`/`render`/`middleware_after`
 stage boundaries (the `action`/`render` boundaries come from
 `start_processing.action_controller` and `render_template.action_view` in
-`lib/lantern/subscribers/requests.rb`).
+`lib/lantern/subscribers/requests.rb`). A lazy or streaming Rack response stays
+inside this execution through body enumeration and close, including when the
+server consumes it on another thread. Its chunk-producing queries, logs,
+spans, and failures therefore belong to this request, and `duration` includes
+that work. A literal, already-materialized Array response still finalizes as
+soon as the Rack application returns it.
 
 | Field | Meaning |
 |---|---|

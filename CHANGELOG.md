@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- Lazy and streaming Rack response bodies remain inside their request
+  execution until enumeration or an explicit close completes. Work performed
+  while producing chunks now contributes duration, child records, and
+  unhandled exceptions to the correct request even when a server consumes the
+  body on another thread; disconnects and close failures finalize exactly
+  once without leaking Lantern's current execution.
+
 - `buffer_size` defaults to 10,000 (was 5,000), matching
   `Execution::MAX_RECORDS`. A job whose tree was larger than the queue lost
   its first records when the tree was written at the end of the execution;

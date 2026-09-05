@@ -198,6 +198,225 @@ RSpec.describe Lantern::Middleware::Request do
     Lantern.config.profile_sample = 0.0
   end
 
+  it "keeps streaming enumeration and close inside the request execution" do
+    seen = []
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      seen << [ :each, Lantern.execution ]
+      Lantern.record(:span, name: "stream each")
+      sleep 0.002
+      block.call("one")
+      block.call("two")
+    end
+    stream.define_singleton_method(:close) do
+      close_calls += 1
+      seen << [ :close, Lantern.execution ]
+      Lantern.record(:span, name: "stream close")
+    end
+    headers = { "Content-Type" => "text/plain", "X-Stream" => "yes" }
+    app = ->(env) { [ 206, headers, stream ] }
+
+    status, returned_headers, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+    expect(status).to eq(206)
+    expect(returned_headers).to equal(headers)
+    expect(lantern_records).to be_empty
+    expect(Lantern.execution).to be_nil
+
+    chunks = []
+    body.each { |chunk| chunks << chunk }
+
+    expect(chunks).to eq(%w[one two])
+    expect(close_calls).to eq(1)
+    expect(seen.map(&:first)).to eq(%i[each close])
+    expect(seen.map(&:last).uniq).to contain_exactly(an_instance_of(Lantern::Execution))
+    execution = seen.first.last
+    expect(seen.last.last).to equal(execution)
+    expect(lantern_records(:span).map { |record| record[:name] }).to eq([ "stream each", "stream close" ])
+    expect(lantern_records(:span).map { |record| record[:execution_id] }.uniq).to eq([ execution.id ])
+    expect(lantern_records(:request).sole).to include(
+      execution_id: execution.id, status_code: 206, path: "/stream"
+    )
+    expect(lantern_records(:request).sole[:duration]).to be >= 1_000
+    expect(Lantern.execution).to be_nil
+
+    body.close
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "finalizes an unconsumed streaming body when Rack closes it explicitly" do
+    seen = []
+    stream = Object.new
+    stream.define_singleton_method(:each) { |&block| block.call("unused") }
+    stream.define_singleton_method(:close) do
+      seen << Lantern.execution
+      Lantern.record(:span, name: "explicit close")
+    end
+    app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+    expect(lantern_records).to be_empty
+
+    body.close
+    body.close
+
+    execution = seen.sole
+    expect(execution).to be_a(Lantern::Execution)
+    expect(lantern_records(:span).sole).to include(name: "explicit close", execution_id: execution.id)
+    expect(lantern_records(:request).sole[:execution_id]).to eq(execution.id)
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "captures an enumeration failure and preserves it through hostile close and telemetry failures" do
+    enumeration_error = Class.new(Exception)
+    close_error = Class.new(Exception)
+    original = enumeration_error.new("stream exploded")
+    stream = Object.new
+    close_calls = 0
+    stream.define_singleton_method(:each) do |&block|
+      block.call("first")
+      raise original
+    end
+    stream.define_singleton_method(:close) do
+      close_calls += 1
+      raise close_error, "hostile close"
+    end
+    app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+
+    expect { body.each { |_| nil } }.to raise_error { |error| expect(error).to equal(original) }
+
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:exception).sole).to include(message: "stream exploded", handled: false)
+    request = lantern_records(:request).sole
+    expect(lantern_records(:exception).sole[:execution_id]).to eq(request[:execution_id])
+    expect(Lantern.execution).to be_nil
+
+    body.close
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "runs a streaming body on another thread without leaking either thread's Current state" do
+    seen = []
+    stream = Object.new
+    stream.define_singleton_method(:each) do |&block|
+      seen << [ :each, Lantern.execution, Thread.current ]
+      Lantern.record(:span, name: "cross-thread each")
+      block.call("chunk")
+    end
+    stream.define_singleton_method(:close) do
+      seen << [ :close, Lantern.execution, Thread.current ]
+      Lantern.record(:span, name: "cross-thread close")
+    end
+    app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+    worker_parent = Lantern::Execution.new(source: :job, sampled: true)
+    after = Queue.new
+    worker = Thread.new do
+      Lantern::Current.execution = worker_parent
+      body.each { |_| nil }
+      after << Lantern.execution
+    ensure
+      Lantern::Current.clear
+    end
+    worker.join
+
+    request_execution = seen.first[1]
+    expect(seen.map(&:first)).to eq(%i[each close])
+    expect(seen.map { |entry| entry[1] }).to eq([ request_execution, request_execution ])
+    expect(seen.map { |entry| entry[2] }).to eq([ worker, worker ])
+    expect(after.pop).to equal(worker_parent)
+    expect(lantern_records(:request).sole[:execution_id]).to eq(request_execution.id)
+    expect(lantern_records(:span).map { |record| record[:execution_id] }.uniq).to eq([ request_execution.id ])
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "preserves an explicit body-close failure when telemetry finalization also fails" do
+    close_error = Class.new(Exception)
+    original = close_error.new("close exploded")
+    stream = Object.new
+    stream.define_singleton_method(:each) { |_| nil }
+    stream.define_singleton_method(:close) { raise original }
+    app = ->(_) { [ 200, { "Content-Type" => "text/plain" }, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/stream"))
+    allow(Lantern).to receive(:finish_execution).and_raise(SignalException.new("TERM"))
+
+    expect { body.close }.to raise_error { |error| expect(error).to equal(original) }
+    expect(body).to be_closed
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "keeps Array responses on the immediate allocation-free lifecycle" do
+    response_body = [ "ready" ]
+    status, _, body = described_class.new(->(_) { [ 200, {}, response_body ] }).call(
+      env_for("http://customer.test/eager")
+    )
+
+    expect(status).to eq(200)
+    expect(body).to equal(response_body)
+    expect(lantern_records(:request).sole[:path]).to eq("/eager")
+  end
+
+  it "wraps an Array subclass because its enumeration can still be lazy" do
+    body_class = Class.new(Array) do
+      def each
+        Lantern.record(:span, name: "array subclass")
+        yield "lazy"
+      end
+    end
+    app = ->(_) { [ 200, {}, body_class.new ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/lazy"))
+
+    expect(lantern_records).to be_empty
+    expect(body.each.to_a).to eq([ "lazy" ])
+    expect(lantern_records(:span).sole[:name]).to eq("array subclass")
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "finishes the lifecycle when a server consumes a coercible body through to_ary" do
+    close_calls = 0
+    stream = Object.new
+    stream.define_singleton_method(:to_ary) do
+      Lantern.record(:span, name: "coerced body")
+      [ "coerced" ]
+    end
+    stream.define_singleton_method(:each) { |_| raise "each should not run" }
+    stream.define_singleton_method(:close) { close_calls += 1 }
+    app = ->(_) { [ 200, {}, stream ] }
+    _, _, body = described_class.new(app).call(env_for("http://customer.test/coerced"))
+
+    expect(body.to_ary).to eq([ "coerced" ])
+    expect(close_calls).to eq(1)
+    expect(lantern_records(:span).sole[:name]).to eq("coerced body")
+    expect(lantern_records(:request).size).to eq(1)
+  end
+
+  it "defers profiler cleanup until a streaming body finishes" do
+    handle = Object.new
+    Lantern.config.profile_sample = 1.0
+    allow(Lantern::Profiler).to receive(:available?).and_return(true)
+    allow(Lantern::Profiler).to receive(:start).and_return(handle)
+    allow(Lantern::Profiler).to receive(:stop).and_return(nil)
+    stream = Object.new
+    stream.define_singleton_method(:each) { |_| nil }
+    stream.define_singleton_method(:close) { nil }
+    request_middleware = described_class.new(->(_) { [ 200, {}, stream ] })
+    allow(request_middleware).to receive(:parent_fields).and_raise("parent construction failed")
+
+    _, _, body = request_middleware.call(env_for("http://customer.test/stream"))
+
+    expect(Lantern::Profiler).not_to have_received(:stop)
+    body.close
+    expect(Lantern::Profiler).to have_received(:stop).with(handle).once
+    expect(Lantern.execution).to be_nil
+  ensure
+    Lantern.config.profile_sample = 0.0
+  end
+
   it "finishes the request execution when the app leaves an inner execution current" do
     parent_execution = Lantern.start_execution(source: :job)
     request_execution = nil
