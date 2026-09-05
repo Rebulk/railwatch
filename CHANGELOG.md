@@ -2,6 +2,18 @@
 
 ## 0.1.0 (unreleased)
 
+- `Lantern.context` is now redacted with the same `ActiveSupport::ParameterFilter`
+  that redacts request params. Context is application data and gets copied
+  onto every record built while it is set, so an app that put an API token or
+  a password there was writing it verbatim into telemetry.
+- An oversized context is now rebuilt rather than sliced. The 64KB cap used
+  to `byteslice` the encoded JSON, which cut it mid-string or mid-object and
+  left the platform with an unparseable fragment -- the whole context was
+  lost rather than most of it. Whole values are kept while they fit, an
+  oversized string value ends with `[TRUNCATED]`, anything that still does
+  not fit is dropped, and `"_lantern_truncated": true` says it happened. The
+  empty-context fast path (which runs on every log record) is unchanged.
+
 - Request teardown no longer parses a non-multipart request body. Emitting
   the `request` record read `request.params` (for `files`) and
   `request.format`, and Rack parses the body the first time either is asked
