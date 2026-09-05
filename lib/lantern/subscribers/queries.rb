@@ -115,7 +115,7 @@ module Lantern
             server: cfg.server,
             _group: group,
             **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
-            sql: sql.length > MAX_SQL ? sql[0, MAX_SQL] : sql,
+            sql: cfg.capture_sql_values ? SqlNormalizer.raw_for_record(sql, max_characters: MAX_SQL) : normalized[0, MAX_SQL],
             name: p[:name],
             duration: duration,
             connection: db,
@@ -127,6 +127,13 @@ module Lantern
             in_transaction: p[:transaction] ? true : false,
             source: source_for(group, slow),
             allocations: event.allocations,
+            # The EXPLAIN still runs on the raw statement -- the plan would be
+            # meaningless otherwise -- and capture_query_explain keeps working
+            # on its own. Only what is STORED changes: `sql` above is the
+            # normalized shape. A plan can echo literal predicates (Postgres
+            # does, in Filter/Index Cond lines), so capture_query_explain is
+            # its own privacy decision, independent of capture_sql_values;
+            # docs/configuration.md says so at both options.
             explain: cfg.capture_query_explain ? explain_for(p, event.duration, group) : nil
           })
 

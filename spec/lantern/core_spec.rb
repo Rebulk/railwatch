@@ -15,6 +15,198 @@ RSpec.describe Lantern do
       expect(described_class.normalize("SELECT 1 WHERE a = $1", adapter: "postgresql")).to eq("SELECT ? WHERE a = ?")
     end
 
+    it "removes comments without exposing literals around comment-like text" do
+      sql = "SELECT '-- not a comment', secret FROM users /* token=very-secret */ WHERE email = 'person@example.test' -- password=hunter2"
+      normalized = described_class.normalize(sql)
+      expect(normalized).to eq("SELECT ?, secret FROM users WHERE email = ?")
+      expect(normalized).not_to include("very-secret", "person@example.test", "hunter2")
+    end
+
+    it "fully removes nested comments and preserves comment markers in quoted identifiers" do
+      sql = 'SELECT "odd--column" FROM "users/*archive*/" /* outer /* password=nested-secret */ token=outer-secret */ WHERE id = 1'
+      normalized = described_class.normalize(sql, adapter: "postgresql")
+      expect(normalized).to eq('SELECT "odd--column" FROM "users/*archive*/" WHERE id = ?')
+      expect(normalized).not_to include("nested-secret", "outer-secret")
+    end
+
+    it "removes MySQL hash comments" do
+      normalized = described_class.normalize("SELECT `odd#column` FROM users # api_key=private\nWHERE id=2", adapter: "mysql2")
+      expect(normalized).to eq("SELECT `odd#column` FROM users WHERE id=?")
+      expect(normalized).not_to include("private")
+    end
+
+    it "hides Postgres dollar quotes, escape strings, scientific numbers, and hex values" do
+      sql = <<~SQL
+        SELECT $$private$$, $tag$also-private$tag$, E'it\\'s private', 6.02e23, 0xdeadbeef
+      SQL
+      expect(described_class.normalize(sql, adapter: "postgresql"))
+        .to eq("SELECT ?, ?, ?, ?, ?")
+    end
+
+    it "hides PostgreSQL dollar quotes with non-ASCII identifier tags" do
+      sql = "SELECT $é$customer-secret@example.test$é$, $aπ$token=prod-deadbeef$aπ$"
+
+      normalized = described_class.normalize(sql, adapter: "postgresql")
+
+      expect(normalized).to eq("SELECT ?, ?")
+      expect(normalized).not_to include("customer-secret@example.test", "prod-deadbeef")
+    end
+
+    it "masks values inside PostgreSQL arrays and subscripts instead of treating brackets as identifiers" do
+      expect(described_class.normalize("SELECT ARRAY['customer-secret@example.test', 987654321]", adapter: "postgresql"))
+        .to eq("SELECT ARRAY[?, ?]")
+      expect(described_class.normalize("SELECT tags[987654321] FROM users", adapter: "postgresql"))
+        .to eq("SELECT tags[?] FROM users")
+
+      commented = described_class.normalize("SELECT ARRAY[1 /* token=comment-secret */, 2]", adapter: "postgresql")
+      expect(commented).to eq("SELECT ARRAY[? , ?]")
+      expect(commented).not_to include("comment-secret")
+
+      quoted = "SELECT ARRAY[E'it\\'s escape-secret', $tag$dollar-secret$tag$]"
+      expect(described_class.normalize(quoted, adapter: "postgresql"))
+        .to eq("SELECT ARRAY[?, ?]")
+    end
+
+    it "preserves bracket-quoted identifiers only for SQLite" do
+      sql = "SELECT [odd]]column] FROM [users]"
+      expect(described_class.normalize(sql, adapter: "sqlite")).to eq(sql)
+    end
+
+    it "normalizes leading and trailing decimal points" do
+      expect(described_class.normalize("SELECT .5, 1., -2.0"))
+        .to eq("SELECT ?, ?, ?")
+    end
+
+    it "fails closed for unterminated quoted values in rejected SQL" do
+      expect(described_class.normalize("SELECT 'private-to-end", adapter: "sqlite"))
+        .to eq("SELECT ?")
+      expect(described_class.normalize('SELECT "private-to-end', adapter: "mysql2"))
+        .to eq("SELECT ?")
+      expect(described_class.normalize("SELECT $tag$private-to-end", adapter: "postgresql"))
+        .to eq("SELECT ?")
+      expect(described_class.normalize('SELECT "private-identifier-to-end', adapter: "postgresql"))
+        .to eq("SELECT ?")
+      expect(described_class.normalize("SELECT `private-identifier-to-end", adapter: "mysql2"))
+        .to eq("SELECT ?")
+    end
+
+    it "hides MySQL and Trilogy double-quoted and backslash-escaped string values" do
+      sql = 'SELECT "private", \'it\\\'s private\' FROM users WHERE id = 7'
+      expect(described_class.normalize(sql, adapter: "trilogy"))
+        .to eq("SELECT ?, ? FROM users WHERE id = ?")
+    end
+
+    it "preserves unambiguous SQLite double-quoted identifiers while hiding ambiguous strings and blobs" do
+      sql = %(SELECT "users"."email", "private@example.test" FROM "users" WHERE payload = X'736563726574')
+      expect(described_class.normalize(sql, adapter: "sqlite"))
+        .to eq('SELECT "users"."email", ? FROM "users" WHERE payload = ?')
+    end
+
+    it "scans each dialect's default backslash rule rather than abandoning the statement" do
+      slash = "\\"
+      # SQLite and PostgreSQL have no backslash escapes by default, so the
+      # quote after the backslash closes the string and the next literal is
+      # its own value.
+      trailing = "SELECT 'ends#{slash}','private-after@example.test'"
+      expect(described_class.normalize(trailing, adapter: "sqlite")).to eq("SELECT ?,?")
+      expect(described_class.normalize(trailing, adapter: "postgresql")).to eq("SELECT ?,?")
+
+      # MySQL's default is the opposite, and it is the quoting Active Record
+      # emits, so the escaped quote must not end the value.
+      mysql = "SELECT 'it#{slash}'s private'"
+      expect(described_class.normalize(mysql, adapter: "mysql2")).to eq("SELECT ?")
+      expect(described_class.normalize(mysql, adapter: "trilogy")).to eq("SELECT ?")
+    end
+
+    it "keeps statements that differ only after a backslash-escaped quote in different groups" do
+      slash = "\\"
+      by_id = "SELECT * FROM users WHERE name = 'O#{slash}'Brien' AND id = 1"
+      by_state = "SELECT * FROM users WHERE name = 'O#{slash}'Brien' AND state = 'x'"
+
+      expect(described_class.normalize(by_id, adapter: "mysql2"))
+        .to eq("SELECT * FROM users WHERE name = ? AND id = ?")
+      expect(described_class.normalize(by_state, adapter: "mysql2"))
+        .to eq("SELECT * FROM users WHERE name = ? AND state = ?")
+      expect(described_class.group(by_id, adapter: "mysql2"))
+        .not_to eq(described_class.group(by_state, adapter: "mysql2"))
+    end
+
+    it "honors escape strings for PostgreSQL-compatible aliases and absent adapter metadata" do
+      sql = "SELECT E'it\\'s customer-secret@example.test', 42"
+
+      [ "PostGIS", "CockroachDB", nil ].each do |adapter|
+        normalized = described_class.normalize(sql, adapter: adapter)
+        expect(normalized).to eq("SELECT ?, ?")
+        expect(normalized).not_to include("customer-secret@example.test")
+      end
+    end
+
+    it "treats an unknown adapter as backslash-escaping, which masks more rather than less" do
+      slash = "\\"
+      sql = "SELECT 'it#{slash}'s customer-secret@example.test', 42"
+
+      [ nil, "", "AcmeDB" ].each do |adapter|
+        normalized = described_class.normalize(sql, adapter: adapter)
+        expect(normalized).to eq("SELECT ?, ?")
+        expect(normalized).not_to include("customer-secret@example.test")
+      end
+    end
+
+    it "fails closed for MySQL-style values and comments when adapter metadata is unknown" do
+      [ nil, "", "AcmeDB" ].each do |adapter|
+        double_quoted = described_class.normalize(
+          'SELECT "private-dqs@example.test", 42', adapter: adapter
+        )
+        hash_commented = described_class.normalize(
+          "SELECT 1 # token=private-hash-secret\n, 2", adapter: adapter
+        )
+
+        expect(double_quoted).to eq("SELECT ?, ?")
+        expect(double_quoted).not_to include("private-dqs@example.test")
+        expect(hash_commented).to eq("SELECT ? , ?")
+        expect(hash_commented).not_to include("private-hash-secret")
+      end
+
+      postgres = described_class.normalize(
+        'SELECT "users"."email" # \'private-operator-value\' FROM "users"', adapter: "postgresql"
+      )
+      expect(postgres).to eq('SELECT "users"."email" # ? FROM "users"')
+    end
+
+    it "masks underscored and base-prefixed numeric literals" do
+      sql = "SELECT 123_456_789, 0xDEAD_BEEF, 0b0110_0001, 0o123_456"
+      expect(described_class.normalize(sql, adapter: "sqlite")).to eq("SELECT ?, ?, ?, ?")
+    end
+
+    it "preserves numbered placeholders as one placeholder" do
+      expect(described_class.normalize("SELECT * FROM users WHERE id = ?123", adapter: "sqlite"))
+        .to eq("SELECT * FROM users WHERE id = ?")
+    end
+
+    it "scrubs malformed encodings instead of raising" do
+      invalid = ("SELECT ".b + "\xFFprivate".b).force_encoding(Encoding::UTF_8)
+      utf16 = "SELECT 'private'".encode(Encoding::UTF_16LE)
+
+      expect { described_class.normalize(invalid, adapter: "sqlite") }.not_to raise_error
+      expect(described_class.normalize(invalid, adapter: "sqlite")).to be_valid_encoding
+      expect(described_class.normalize(utf16, adapter: "sqlite")).to eq("SELECT ?")
+    end
+
+    it "bounds and marks huge SQL while remaining fast for non-ASCII input" do
+      sql = "SELECT /* #{'é' * (described_class::MAX_NORMALIZE_BYTES * 2)} private-at-end */ 1"
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      normalized = described_class.normalize(sql, adapter: "postgresql")
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      expect(normalized).to end_with(described_class::TRUNCATED)
+      expect(normalized).not_to include("private-at-end")
+      expect(elapsed).to be < 1.0
+
+      described_class.group_and_normalized(sql, adapter: "postgresql", connection_name: "huge")
+      adapter_cache = described_class.instance_variable_get(:@cache).fetch("postgresql", {})
+      expect(adapter_cache).not_to have_key("huge")
+    end
+
     it "returns the same group hash for a repeated exact SQL string, served from cache" do
       a = described_class.group("SELECT * FROM users WHERE id = 1", connection_name: "primary")
       b = described_class.group("SELECT * FROM users WHERE id = 1", connection_name: "primary")
@@ -27,8 +219,32 @@ RSpec.describe Lantern do
       expect(normalized).to eq("SELECT * FROM users WHERE id = ?")
     end
 
+    it "deep-freezes cached values so callers cannot corrupt later cache hits" do
+      sql = "SELECT * FROM users WHERE id = 918273645"
+      first = described_class.group_and_normalized(sql, adapter: "postgresql", connection_name: "mutation-test")
+
+      expect(first).to be_frozen
+      expect(first[0]).to be_frozen
+      expect(first[1]).to be_frozen
+      expect { first[0] << " corrupted" }.to raise_error(FrozenError)
+      expect { first[1] << " corrupted" }.to raise_error(FrozenError)
+
+      cached = described_class.group_and_normalized(sql, adapter: "postgresql", connection_name: "mutation-test")
+      expect(cached).to equal(first)
+      expect(cached[0]).to eq(Lantern::Record.group_hash("mutation-test", cached[1]))
+    end
+
+    it "does not share adapter-sensitive normalized SQL across adapter caches" do
+      sql = 'SELECT "private@example.test"'
+      pg = described_class.group_and_normalized(sql, adapter: "postgresql", connection_name: "primary")[1]
+      mysql = described_class.group_and_normalized(sql, adapter: "mysql2", connection_name: "primary")[1]
+
+      expect(pg).to eq(sql)
+      expect(mysql).to eq("SELECT ?")
+    end
+
     it "bounds its cache instead of growing without limit" do
-      bucket = described_class.instance_variable_get(:@cache)["primary"]
+      bucket = described_class.instance_variable_get(:@cache)[""]["primary"]
       (described_class::CACHE_LIMIT + 5).times { |i| described_class.group("SELECT #{i}", connection_name: "primary") }
       expect(bucket.size).to be <= described_class::CACHE_LIMIT
     end

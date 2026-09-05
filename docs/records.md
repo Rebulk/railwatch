@@ -225,8 +225,8 @@ going through `Lantern.record`.
 
 | Field | Meaning |
 |---|---|
-| `_group` | Hash of the normalized SQL shape + adapter + connection (`SqlNormalizer`). |
-| `sql` | Raw SQL text, truncated to 16,384 chars. |
+| `_group` | Hash of the normalized SQL shape + connection (`SqlNormalizer`); adapter is its own field. |
+| `sql` | Normalized SQL shape, truncated to 16,384 chars — literals and comments removed. Set `capture_sql_values` / `LANTERN_CAPTURE_SQL_VALUES` to send the raw adapter SQL instead. Active Record's separate structured binds are never sent either way. |
 | `name` | ActiveRecord's own query name (e.g. `"User Load"`). |
 | `duration` | Microseconds. |
 | `connection` | Database config name (e.g. `"primary"`). |
@@ -238,7 +238,7 @@ going through `Lantern.record`.
 | `in_transaction` | Whether an open transaction wrapped this statement. |
 | `source` | App-code call site that issued the query (`Backtrace.caller_location`) — resolved once per query shape per process, not per query, except when the query is slow (`config.slow_query_threshold_ms`), where it's always resolved fresh. |
 | `allocations` | Ruby object allocations for this query (`event.allocations`). |
-| `explain` | The adapter's own query plan (Postgres `EXPLAIN`, SQLite `EXPLAIN QUERY PLAN`, ...), truncated to 4000 chars, or nil. Only when `config.capture_query_explain` is on, the statement is a `SELECT`, and it took at least `config.explain_threshold_ms`; then at most once per query shape per process per 10 minutes. The EXPLAIN runs on the same connection the query used, with Lantern paused, so it never becomes a `query` record of its own. |
+| `explain` | The adapter's own query plan (Postgres `EXPLAIN`, SQLite `EXPLAIN QUERY PLAN`, ...), truncated to 4000 chars, or nil. Only when `config.capture_query_explain` is on (its own privacy decision — the plan is produced from the raw statement and can echo literal predicates even though `sql` above is normalized), the statement is a `SELECT`, and it took at least `config.explain_threshold_ms`; then at most once per query shape per process per 10 minutes. The EXPLAIN runs on the same connection the query used, with Lantern paused, so it never becomes a `query` record of its own. |
 
 A cached query (`payload[:cached]`) only increments the execution's
 `cached_queries` counter — it never becomes a `query` record.

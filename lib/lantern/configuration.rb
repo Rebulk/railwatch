@@ -69,6 +69,7 @@ module Lantern
                   :capture_framework_events,
                   :tail_sample_slow_ms, :failure_context, :propagate_traces, :trace_propagation_hosts,
                   :health_interval, :capture_query_explain, :explain_threshold_ms,
+                  :capture_sql_values,
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
                   :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
@@ -143,6 +144,10 @@ module Lantern
       @health_interval = env_float("LANTERN_HEALTH_INTERVAL", 15.0)
       @capture_query_explain = env_bool("LANTERN_CAPTURE_QUERY_EXPLAIN", false)
       @explain_threshold_ms = env_float("LANTERN_EXPLAIN_THRESHOLD_MS", 100.0)
+      # SQL literals routinely carry email addresses, tokens, and other
+      # customer data. Query records therefore carry only the normalized
+      # statement shape unless an application deliberately opts in.
+      @capture_sql_values = env_bool("LANTERN_CAPTURE_SQL_VALUES", false)
       @ignored_exceptions = ENV["LANTERN_IGNORED_EXCEPTIONS"]&.split(",")&.map(&:strip) || DEFAULT_IGNORED_EXCEPTIONS.dup
       @capture_rescued_exceptions = env_bool("LANTERN_CAPTURE_RESCUED_EXCEPTIONS", true)
       # Sampling profiler: profile this fraction of sampled-in requests/jobs

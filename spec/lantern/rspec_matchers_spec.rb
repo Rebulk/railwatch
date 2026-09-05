@@ -51,8 +51,10 @@ RSpec.describe "Lantern RSpec matchers" do
     end
 
     it "truncates each listed statement to 120 characters so CI output stays readable" do
-      names = Array.new(60) { |i| "name-#{i}" }
-      message = failure_from(have_lantern_queries(exactly: 0)) { Widget.where(name: names).to_a }
+      columns = Array.new(20) { |i| "NULL AS deliberately_long_column_alias_#{i}" }.join(", ")
+      message = failure_from(have_lantern_queries(exactly: 0)) do
+        ActiveRecord::Base.connection.select_all("SELECT #{columns}")
+      end
 
       sql_line = message.lines.last.strip.sub(/\A1\. /, "")
       expect(sql_line.length).to eq(120)
