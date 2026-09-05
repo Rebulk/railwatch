@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BUNDLE_GEMFILE: gemfiles/${{ matrix.rails }}.gemfile
+      # ruby/setup-ruby currently resolves 3.5 to a preview build. Native gem
+      # packages do not carry that preview ABI, so compile them for Ruby.
+      BUNDLE_FORCE_RUBY_PLATFORM: ${{ matrix.ruby == '3.5' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
