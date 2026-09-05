@@ -181,4 +181,42 @@ RSpec.describe "request instrumentation", type: :request do
     file.close
     file.unlink
   end
+
+  it "preserves upload metadata nested in hashes and arrays" do
+    files = 3.times.map do |index|
+      Tempfile.new([ "upload-#{index}", ".txt" ]).tap do |file|
+        file.write("file #{index}")
+        file.rewind
+      end
+    end
+    params = {
+      attachments: files.first(2).map { |file| Rack::Test::UploadedFile.new(file.path, "text/plain") },
+      profile: { avatar: Rack::Test::UploadedFile.new(files.last.path, "image/png") }
+    }
+
+    post "/upload", params: params
+
+    uploaded = lantern_records(:request).sole[:files]
+    expect(uploaded.map { |file| file[:name] }).to contain_exactly("attachments", "attachments", "avatar")
+    expect(uploaded.map { |file| file[:size] }).to all(be_positive)
+    expect(uploaded.map { |file| file[:content_type] }).to contain_exactly("text/plain", "text/plain", "image/png")
+  ensure
+    files&.each do |file|
+      file.close
+      file.unlink
+    end
+  end
+
+  it "captures uploads when the multipart media type uses legal mixed casing" do
+    boundary = "AaB03x"
+    body = "--#{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"a.txt\"\r\n" \
+      "Content-Type: text/plain\r\n\r\nhello\r\n--#{boundary}--\r\n"
+
+    post "/upload", params: body, headers: {
+      "CONTENT_TYPE" => "Multipart/Form-Data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s
+    }
+
+    expect(response).to have_http_status(:ok)
+    expect(lantern_records(:request).sole[:files].sole).to include(name: "attachment", size: 5, content_type: "text/plain")
+  end
 end

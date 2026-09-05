@@ -45,14 +45,16 @@ module Lantern
         exe.enter_stage(:middleware_before)
         env["lantern.execution"] = exe
         status = headers = body = nil
+        app_failed = false
         begin
           status, headers, body = @app.call(env)
         rescue Exception => e # rubocop:disable Lint/RescueException
+          app_failed = true
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
           raise
         ensure
           exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          finish(env, exe, status, headers)
+          finish(env, exe, status, headers, app_failed: app_failed)
         end
         [ status, headers, body ]
       end
@@ -91,9 +93,9 @@ module Lantern
         false
       end
 
-      def finish(env, exe, status, headers)
+      def finish(env, exe, status, headers, app_failed:)
         exe.finish_stages
-        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
+        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers, app_failed: app_failed))
         # After the parent, which is where exe.user_id is resolved: a request
         # with no user and no session cookie has no session, and Sessions.touch
         # returns without writing anything.
@@ -103,7 +105,7 @@ module Lantern
         Lantern.finish_execution
       end
 
-      def parent_fields(env, exe, status, headers)
+      def parent_fields(env, exe, status, headers, app_failed:)
         req = ActionDispatch::Request.new(env)
         route = env["lantern.route"] || {}
         pattern = route[:pattern] || (req.respond_to?(:route_uri_pattern) ? (req.route_uri_pattern rescue nil) : nil) || "unmatched"
@@ -114,7 +116,7 @@ module Lantern
         exe.user_id ||= Subscribers::Users.resolve_id(env)
 
         inertia = inertia_fields(env, headers)
-        payload = Lantern.config.capture_request_payload && exe.counters[:exceptions].positive? ? Lantern.redactor.params(req.filtered_parameters.except("controller", "action")) : nil
+        payload = request_payload(env, req, exe, app_failed: app_failed)
 
         {
           group: Record.group_hash(method, pattern),
@@ -126,7 +128,7 @@ module Lantern
           route_domain: req.host,
           controller: controller,
           action: action,
-          format: (req.format&.symbol rescue nil).to_s,
+          format: request_format(env, req, app_failed: app_failed),
           ip: req.remote_ip,
           status_code: status.to_i,
           request_size: req.content_length.to_i,
@@ -142,8 +144,50 @@ module Lantern
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
-          files: env["lantern.files"] || uploaded_files(req.params)
+          files: request_files(env, req, app_failed: app_failed)
         }
+      end
+
+      # A rejected JSON or urlencoded request may never otherwise need its
+      # body parsed. Only multipart forms can contain UploadedFile objects,
+      # so do not make Lantern the component that consumes a hostile body
+      # while the outer middleware is finishing the request.
+      def request_files(env, request, app_failed:)
+        return env["lantern.files"] if env.key?("lantern.files")
+        # If the inner stack raised, Rack::TempfileReaper has already run its
+        # exception cleanup before control reaches this outer ensure. Parsing
+        # now could create upload tempfiles that nobody will close.
+        return [] if app_failed
+        return [] unless RequestMediaType.multipart_form_data?(env["CONTENT_TYPE"])
+
+        uploaded_files(request.params)
+      rescue StandardError => e
+        Lantern.debug { "request upload inspection failed: #{e.class}: #{e.message}" }
+        []
+      end
+
+      # Payload capture is explicitly opt-in and exception-only, so it may
+      # parse a request body. A broken or hostile Rack input must only omit
+      # this optional field, never discard the request's parent record.
+      def request_payload(env, request, exe, app_failed:)
+        return nil unless Lantern.config.capture_request_payload && exe.counters[:exceptions].positive?
+        return nil if app_failed && !env.key?("action_dispatch.request.request_parameters")
+
+        Lantern.redactor.params(request.filtered_parameters.except("controller", "action"))
+      rescue StandardError => e
+        Lantern.debug { "request payload inspection failed: #{e.class}: #{e.message}" }
+        nil
+      end
+
+      # ActionDispatch derives multipart formats through `parameters`, which
+      # parses the body. During exception unwind only use a value Rails has
+      # already cached; Rack's tempfile exception cleanup has already run.
+      def request_format(env, request, app_failed:)
+        return "" if app_failed && !env.key?("action_dispatch.request.formats")
+
+        request.format&.symbol.to_s
+      rescue StandardError
+        ""
       end
 
       # Microseconds this request waited in the proxy/web-server queue before

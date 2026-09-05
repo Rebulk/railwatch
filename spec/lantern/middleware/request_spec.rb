@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "rack/tempfile_reaper"
 
 RSpec.describe Lantern::Middleware::Request do
   def env_for(url, method: "GET", headers: {})
@@ -118,5 +119,80 @@ RSpec.describe Lantern::Middleware::Request do
   ensure
     reporter&.shutdown
     Lantern.config.ingest_url = "http://lantern.test"
+  end
+
+  it "does not read rejected JSON or form bodies while finishing telemetry" do
+    %w[application/json application/x-www-form-urlencoded].each do |content_type|
+      input = Object.new
+      input.define_singleton_method(:read) { |*| raise "request body was parsed" }
+      input.define_singleton_method(:gets) { |*| raise "request body was parsed" }
+      input.define_singleton_method(:each) { |*| raise "request body was parsed" }
+      input.define_singleton_method(:rewind) { raise "request body was parsed" }
+      env = env_for("http://customer.test/rejected", method: "POST", headers: {
+        "CONTENT_TYPE" => content_type, "CONTENT_LENGTH" => "10000000", "rack.input" => input
+      })
+
+      expect { middleware.call(env) }.not_to raise_error
+    end
+
+    expect(lantern_records(:request).map { |request| request[:files] }).to eq([ [], [] ])
+  end
+
+  it "preserves the parent when multipart upload inspection raises" do
+    calls = []
+    input = Object.new
+    %i[read gets each rewind].each do |method|
+      input.define_singleton_method(method) { |*| calls << method; raise IOError, "hostile #{method}" }
+    end
+    env = env_for("http://customer.test/rejected", method: "POST", headers: {
+      "CONTENT_TYPE" => "Multipart/Form-Data; boundary=x", "CONTENT_LENGTH" => "10000000", "rack.input" => input
+    })
+    rejecting = described_class.new(->(_) { [ 413, { "Content-Type" => "text/plain" }, [] ] })
+
+    status, = rejecting.call(env)
+
+    expect(status).to eq(413)
+    expect(calls).not_to be_empty
+    expect(lantern_records(:request).sole).to include(status_code: 413, files: [])
+  end
+
+  it "does not parse multipart uploads after Rack has unwound an app exception" do
+    boundary = "AaB03x"
+    body = "--#{boundary}\r\nContent-Disposition: form-data; name=\"attachment\"; filename=\"a.txt\"\r\n" \
+      "Content-Type: text/plain\r\n\r\nhello\r\n--#{boundary}--\r\n"
+    env = env_for("http://customer.test/boom", method: "POST", headers: {
+      "CONTENT_TYPE" => "multipart/form-data; boundary=#{boundary}", "CONTENT_LENGTH" => body.bytesize.to_s,
+      "rack.input" => StringIO.new(body)
+    })
+    error = Class.new(StandardError)
+    inner = Rack::TempfileReaper.new(->(_) { raise error, "original app error" })
+
+    expect { described_class.new(inner).call(env) }.to raise_error(error, "original app error")
+
+    expect(env.fetch("rack.tempfiles")).to be_empty
+    expect(lantern_records(:request).sole[:files]).to eq([])
+  ensure
+    env&.fetch("rack.tempfiles", [])&.each(&:close!)
+  end
+
+  it "omits a failed opt-in payload without losing the parent or masking the app error" do
+    Lantern.config.capture_request_payload = true
+    input = Object.new
+    %i[read gets each rewind].each do |method|
+      input.define_singleton_method(method) { |*| raise IOError, "hostile #{method}" }
+    end
+    env = env_for("http://customer.test/boom", method: "POST", headers: {
+      "CONTENT_TYPE" => "application/json", "CONTENT_LENGTH" => "10000000", "rack.input" => input
+    })
+    error = Class.new(StandardError)
+
+    expect {
+      described_class.new(->(_) { raise error, "original app error" }).call(env)
+    }.to raise_error(error, "original app error")
+
+    expect(lantern_records(:exception).sole[:message]).to eq("original app error")
+    expect(lantern_records(:request).sole[:payload]).to be_nil
+  ensure
+    Lantern.config.capture_request_payload = false
   end
 end

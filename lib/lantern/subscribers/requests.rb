@@ -27,7 +27,7 @@ module Lantern
           # Captured here, not in the closing middleware, because Rack's
           # TempfileReaper (nested inside us) has already closed and unlinked
           # upload tempfiles by the time the middleware unwinds.
-          env["lantern.files"] = env["CONTENT_TYPE"]&.start_with?("multipart/form-data") ? uploaded_files(p[:request].params) : EMPTY_FILES
+          env["lantern.files"] = RequestMediaType.multipart_form_data?(env["CONTENT_TYPE"]) ? uploaded_files(p[:request].params) : EMPTY_FILES
         end
 
         subscribe("process_action.action_controller") do |event|
