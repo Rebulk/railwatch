@@ -138,8 +138,10 @@ Lantern subscribes to `Rails.error` on install
 (`Rails.error.subscribe`), so any existing `Rails.error.report` or
 `Rails.error.handle` call — which is how Sentry's own Rails integration
 is normally wired in — is captured with no code changes. An unhandled
-exception ships immediately, bypassing sampling and buffering, so a
-crashing process reports even if it never reaches a normal flush.
+exception bypasses the execution buffer: it is enqueued immediately and
+wakes the in-memory reporter without doing network I/O on the application
+thread. Delivery is still asynchronous and memory-only, so a hard kill,
+OOM, or process exit after the shutdown deadline can lose it.
 
 What differs from a dedicated error tracker: exceptions aren't reported in
 isolation — each one is linked (`execution_id`/`trace_id`) to the request,
@@ -173,7 +175,12 @@ and `context` all come from the same `Lantern.configure` block and
 | Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
 | `auto_session_tracking:` (release health) | Automatic: `session` records from the browser client and the request middleware, keyed on `config.deploy` as the release. `config.track_sessions` turns both off. |
 
-Everything above is either covered or replaced by the execution model.
+These mappings cover the Rails-server migration path. Browser Replay,
+native/mobile SDKs, some direct worker and scheduler entry points, and
+Sentry's broader managed integration catalog are not equivalent today.
+Use the supported-workload matrix in
+[`docs/replacing-sentry.md`](docs/replacing-sentry.md) before removing
+Sentry from an application that depends on those capabilities.
 
 To report an exception manually (the `Rails.error.report`-equivalent):
 
