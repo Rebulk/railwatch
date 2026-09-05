@@ -6,6 +6,9 @@ module Lantern
     # lifecycle stages, catches anything that escapes the stack as an
     # unhandled exception, and emits the request record at the end.
     class Request
+      EXECUTOR_CALL_SOURCE = ActionDispatch::Executor.instance_method(:call).source_location&.first
+      private_constant :EXECUTOR_CALL_SOURCE
+
       # Keeps a Rack response body attached to the request execution until the
       # server has consumed it. Rack applications return the body before an
       # Enumerator (or another streaming body) does its work, often on a
@@ -370,8 +373,9 @@ module Lantern
             # Keep the ordinary, already-materialized Rails response on the
             # pre-streaming path. ActionDispatch::Executor normally wraps its
             # RackBody in Rack::BodyProxy, so eager_response_body? looks
-            # through only that known proxy. A RackBody backed by a lazy
-            # stream does not advertise #to_ary and is still wrapped.
+            # through only proxies created by ActionDispatch::Executor. A
+            # generic BodyProxy may run application work from its close
+            # callback and must remain inside the request lifecycle.
             elsif eager_response_body?(body)
               finish(env, exe, status, headers, preserving: nil)
             else
@@ -397,7 +401,7 @@ module Lantern
         return true if body.instance_of?(Array)
 
         candidate = body
-        while candidate.instance_of?(Rack::BodyProxy)
+        while rails_executor_body_proxy?(candidate)
           candidate = candidate.instance_variable_get(:@body)
         end
         return true if candidate.instance_of?(Array)
@@ -408,6 +412,14 @@ module Lantern
 
         stream.instance_variable_get(:@buf).instance_of?(Array) ||
           stream.instance_variable_get(:@str_body).instance_of?(String)
+      end
+
+      def rails_executor_body_proxy?(body)
+        return false unless body.instance_of?(Rack::BodyProxy)
+
+        callback = body.instance_variable_get(:@block)
+        callback.instance_of?(Proc) &&
+          callback.source_location&.first == EXECUTOR_CALL_SOURCE
       end
 
       def streaming_context(env, exe)
