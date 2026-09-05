@@ -14,6 +14,8 @@
   silently turning off buffering; the same applied to timeouts, intervals
   and sample rates.
 
+
+
 - Inbound `traceparent` parsing follows the W3C trace-context validity
   rules: version `ff`, an all-zero trace id, and an all-zero parent id are
   rejected instead of being adopted as a trace, and trailing data after the
