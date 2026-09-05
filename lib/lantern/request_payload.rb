@@ -12,6 +12,9 @@ module Lantern
     MAX_STRING_BYTES = 4_096
     STRING_BYTESIZE = String.instance_method(:bytesize)
     STRING_BYTESLICE = String.instance_method(:byteslice)
+    HASH_EACH = Hash.instance_method(:each)
+    ARRAY_EACH = Array.instance_method(:each)
+    OBJECT_ID = Object.instance_method(:object_id)
     OMIT = Object.new.freeze
     Result = Data.define(:value, :truncated, :failed)
 
@@ -46,13 +49,14 @@ module Lantern
 
     def build_hash(value, budget, depth, state)
       return omitted(state) if depth >= MAX_DEPTH
-      return cyclic(state) if state[:seen].key?(value.object_id)
+      identity = OBJECT_ID.bind_call(value)
+      return cyclic(state) if state[:seen].key?(identity)
 
-      state[:seen][value.object_id] = true
+      state[:seen][identity] = true
       seen = true
       out = {}
       used = 2 # {}
-      value.each do |raw_key, raw_value|
+      HASH_EACH.bind_call(value) do |raw_key, raw_value|
         break truncated(state) if state[:nodes] >= MAX_NODES
         state[:nodes] += 1 # Count the key separately from its value.
 
@@ -87,18 +91,19 @@ module Lantern
       end
       [ out, used ]
     ensure
-      state[:seen].delete(value.object_id) if seen
+      state[:seen].delete(identity) if seen
     end
 
     def build_array(value, budget, depth, state)
       return omitted(state) if depth >= MAX_DEPTH
-      return cyclic(state) if state[:seen].key?(value.object_id)
+      identity = OBJECT_ID.bind_call(value)
+      return cyclic(state) if state[:seen].key?(identity)
 
-      state[:seen][value.object_id] = true
+      state[:seen][identity] = true
       seen = true
       out = []
       used = 2 # []
-      value.each do |raw_value|
+      ARRAY_EACH.bind_call(value) do |raw_value|
         break truncated(state) if state[:nodes] >= MAX_NODES
 
         prefix = out.empty? ? 0 : 1
@@ -115,7 +120,7 @@ module Lantern
       end
       [ out, used ]
     ensure
-      state[:seen].delete(value.object_id) if seen
+      state[:seen].delete(identity) if seen
     end
 
     def build_scalar(value, budget, state)
@@ -178,10 +183,19 @@ module Lantern
           safe = false
           "[#{value.class.name || "Object"}]"
         end
-      strict = String.new(raw).encode(Encoding::UTF_8)
-      if strict.bytesize > MAX_KEY_BYTES
+      # A bounded UTF-8 representation is not enough to prove the original
+      # key was complete. A wider source encoding could otherwise be sliced
+      # before a sensitive suffix and then incorrectly treated as safe.
+      source_oversized = STRING_BYTESIZE.bind_call(raw) > MAX_KEY_BYTES
+      if source_oversized
         truncated(state)
         safe = false
+      else
+        strict = String.new(raw).encode(Encoding::UTF_8)
+        if strict.bytesize > MAX_KEY_BYTES
+          truncated(state)
+          safe = false
+        end
       end
       [ safe_string(raw, MAX_KEY_BYTES, state), safe ]
     rescue StandardError, SystemStackError

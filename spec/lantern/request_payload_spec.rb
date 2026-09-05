@@ -75,8 +75,34 @@ RSpec.describe Lantern::RequestPayload do
     expect(JSON.generate(result.value).bytesize).to be <= described_class::MAX_BYTES
   end
 
+  it "uses core traversal methods for hostile container subclasses" do
+    called = []
+    hostile = silence_warnings do
+      klass = Class.new(Hash) do
+        define_method(:object_id) { called << :object_id }
+        define_method(:each) { called << :each }
+      end
+      klass.new
+    end
+    Hash.instance_method(:[]=).bind_call(hostile, "safe", "shown")
+
+    result = described_class.normalize(hostile)
+
+    expect(called).to be_empty
+    expect(result.value).to eq({ "safe" => "shown" })
+  end
+
   it "fails closed when truncating a key that could hide a sensitive suffix" do
     key = ("x" * described_class::MAX_KEY_BYTES) + "password"
+
+    result = described_class.normalize({ key => "must not leak" })
+
+    expect(result.value.values).to eq([ Lantern::Redactor::FILTERED ])
+    expect(result.truncated).to be(true)
+  end
+
+  it "fails closed before transcoding a wide key that could hide a sensitive suffix" do
+    key = (("a" * 248) + "password").encode(Encoding::UTF_16LE)
 
     result = described_class.normalize({ key => "must not leak" })
 

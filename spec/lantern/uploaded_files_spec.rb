@@ -122,4 +122,47 @@ RSpec.describe Lantern::UploadedFiles do
     expect(normalized.first.values_at(:name, :content_type, :error)).to all(be_valid_encoding)
     expect { JSON.generate(normalized) }.not_to raise_error
   end
+
+  it "does not coerce arbitrary upload metadata to strings" do
+    coerced = false
+    hostile = Object.new
+    hostile.define_singleton_method(:nil?) do
+      coerced = true
+      raise "nil? must not run"
+    end
+    hostile.define_singleton_method(:is_a?) do
+      coerced = true
+      raise "is_a? must not run"
+    end
+    hostile.define_singleton_method(:to_s) do
+      coerced = true
+      "x" * (32 * 1024 * 1024)
+    end
+
+    normalized = described_class.normalize([ { name: hostile, content_type: hostile, error: hostile } ])
+    params = { hostile => { filename: "a.txt", tempfile: StringIO.new("x"), type: hostile } }
+    extracted = described_class.extract(params)
+
+    expect(coerced).to be(false)
+    expect(normalized.sole.values_at(:name, :content_type, :error)).to eq([ nil, nil, nil ])
+    expect(extracted.sole).to include(name: nil, content_type: nil, size: 1)
+  end
+
+  it "uses core traversal methods for hostile container subclasses" do
+    called = []
+    hostile = silence_warnings do
+      klass = Class.new(Hash) do
+        define_method(:object_id) { called << :object_id }
+        define_method(:each) { called << :each }
+      end
+      klass.new
+    end
+    upload = { filename: "a.txt", tempfile: StringIO.new("x"), type: "text/plain" }
+    Hash.instance_method(:[]=).bind_call(hostile, :attachment, upload)
+
+    extracted = described_class.extract(hostile)
+
+    expect(called).to be_empty
+    expect(extracted.sole).to include(name: "attachment", size: 1, content_type: "text/plain")
+  end
 end

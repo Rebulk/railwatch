@@ -94,8 +94,12 @@ module Lantern
 
       # Stops the running profile and folds it into a Profile, or nil when
       # nothing was running or anything at all went wrong on the way.
-      def stop
-        handle = @lock.synchronize { @running.tap { @running = nil } }
+      def stop(expected_handle = nil)
+        handle = @lock.synchronize do
+          next unless !expected_handle || @running.equal?(expected_handle)
+
+          @running.tap { @running = nil }
+        end
         return nil unless handle
 
         duration = Clock.micros_since(handle.started)

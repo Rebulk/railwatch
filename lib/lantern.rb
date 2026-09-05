@@ -140,6 +140,17 @@ module Lantern
       Current.execution = exe&.parent_execution
     end
 
+    # Stops resources owned by an execution without emitting any records.
+    # Used when building its parent record failed before finish_execution
+    # could reach normal profile teardown.
+    def discard_execution(exe)
+      return unless exe&.profiler_handle
+
+      Profiler.stop(exe.profiler_handle)
+    ensure
+      exe.profiler_handle = nil if exe
+    end
+
     # --- record writing --------------------------------------------------------
 
     # Records that make sense without a parent execution (console, boot).

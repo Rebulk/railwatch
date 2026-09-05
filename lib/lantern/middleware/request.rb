@@ -45,23 +45,23 @@ module Lantern
         exe.enter_stage(:middleware_before)
         env["lantern.execution"] = exe
         status = headers = body = nil
+        application_error = nil
         begin
           status, headers, body = @app.call(env)
         rescue Exception => e # rubocop:disable Lint/RescueException
-          begin
-            Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
-          rescue StandardError, SystemStackError => capture_error
-            # Observability must never replace the application's exception.
-            debug_failure("request exception capture failed", capture_error)
-          end
+          application_error = e
+          capture_exception(exe, e)
           raise
         ensure
           begin
             exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          rescue StandardError, SystemStackError => stage_error
-            debug_failure("request stage cleanup failed", stage_error)
+          rescue Exception => stage_error # rubocop:disable Lint/RescueException
+            debug_error = debug_failure("request stage cleanup failed", stage_error)
+            stage_error = prefer_fatal(stage_error, debug_error)
+            raise stage_error if fatal_exception?(stage_error) && !application_error
+          ensure
+            finish(env, exe, status, headers, preserving: application_error)
           end
-          finish(env, exe, status, headers)
         end
         [ status, headers, body ]
       end
@@ -100,28 +100,44 @@ module Lantern
         false
       end
 
-      def finish(env, exe, status, headers)
+      def finish(env, exe, status, headers, preserving:)
+        failure = nil
+        # Application code can open an execution and fail to close it. Request
+        # finalization must still describe and close the execution this
+        # middleware opened, never whichever execution happens to be current.
+        Current.execution = exe
         exe.finish_stages
-        Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
+        fields = parent_fields(env, exe, status, headers)
+        Current.execution = exe
+        Lantern.finish_execution(:request, **fields)
         # After the parent, which is where exe.user_id is resolved: a request
         # with no user and no session cookie has no session, and Sessions.touch
         # returns without writing anything.
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions
-      rescue StandardError, SystemStackError => e
-        debug_failure("request finish failed", e)
-        # finish_execution always restores the execution's parent, even when
-        # building or buffering the request record raised. Only retry cleanup
-        # while this request is still current: otherwise this call would
-        # finish and pop an outer job/command execution instead.
-        if Current.execution.equal?(exe)
-          begin
-            Lantern.finish_execution
-          rescue StandardError, SystemStackError => cleanup_error
-            debug_failure("request execution cleanup failed", cleanup_error)
-          end
-        end
+      rescue Exception => e # rubocop:disable Lint/RescueException
+        failure = prefer_fatal(e, debug_failure("request finish failed", e))
       ensure
-        Current.execution = exe.parent_execution if Current.execution.equal?(exe)
+        begin
+          Lantern.discard_execution(exe)
+        rescue Exception => cleanup_error # rubocop:disable Lint/RescueException
+          cleanup_error = prefer_fatal(cleanup_error, debug_failure("request execution cleanup failed", cleanup_error))
+          failure = prefer_fatal(failure, cleanup_error)
+        ensure
+          Current.execution = exe.parent_execution
+        end
+        raise failure if fatal_exception?(failure) && !preserving
+      end
+
+      def capture_exception(exe, error)
+        # The Rack app may have left a nested execution current before it
+        # raised. Attribute the exception to the request regardless, and do
+        # not let any telemetry failure replace the application's exception.
+        Current.execution = exe
+        Subscribers::Exceptions.capture(error, handled: false, severity: :error, source: "lantern.middleware")
+      rescue Exception => capture_error # rubocop:disable Lint/RescueException
+        debug_failure("request exception capture failed", capture_error)
+      ensure
+        Current.execution = exe
       end
 
       def parent_fields(env, exe, status, headers)
@@ -218,8 +234,19 @@ module Lantern
 
       def debug_failure(message, error)
         Lantern.debug { "#{message}: #{error.class}: #{error.message}" }
-      rescue StandardError, SystemStackError
-        nil
+      rescue Exception => debug_error # rubocop:disable Lint/RescueException
+        debug_error
+      end
+
+      def fatal_exception?(error)
+        SystemExit === error || SignalException === error || NoMemoryError === error
+      end
+
+      def prefer_fatal(current, candidate)
+        return candidate unless current
+        return candidate if !fatal_exception?(current) && fatal_exception?(candidate)
+
+        current
       end
 
       # ActionDispatch derives formats through `parameters`, which can parse

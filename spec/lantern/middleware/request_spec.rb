@@ -91,6 +91,157 @@ RSpec.describe Lantern::Middleware::Request do
     Lantern::Current.clear
   end
 
+  it "never replaces an application error when exception capture raises outside StandardError" do
+    telemetry_error = Class.new(Exception)
+    application_error = Class.new(StandardError)
+    allow(Lantern::Subscribers::Exceptions).to receive(:capture).and_raise(telemetry_error, "telemetry fatal")
+
+    expect do
+      described_class.new(->(_) { raise application_error, "original app error" }).call(
+        env_for("http://customer.test/boom")
+      )
+    end.to raise_error(application_error, "original app error")
+
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "never lets debug logging replace an application error" do
+    telemetry_error = Class.new(Exception)
+    application_error = Class.new(StandardError)
+    allow(Lantern::Subscribers::Exceptions).to receive(:capture).and_raise("capture failed")
+    allow(Lantern).to receive(:debug).and_raise(telemetry_error, "debug fatal")
+
+    expect do
+      described_class.new(->(_) { raise application_error, "original app error" }).call(
+        env_for("http://customer.test/boom")
+      )
+    end.to raise_error(application_error, "original app error")
+
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "never replaces a successful response when request finalization raises outside StandardError" do
+    telemetry_error = Class.new(Exception)
+    allow(Lantern).to receive(:finish_execution).and_raise(telemetry_error, "finish fatal")
+
+    status, headers, body = middleware.call(env_for("http://customer.test/widgets"))
+
+    expect([ status, headers, body ]).to eq(
+      [ 204, { "Content-Type" => "text/plain", "Content-Length" => "0" }, [] ]
+    )
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "does not invoke a telemetry exception's overridden type predicate" do
+    telemetry_error = Class.new(Exception).new("telemetry fatal")
+    telemetry_error.define_singleton_method(:is_a?) { |_| raise "is_a replacement" }
+    allow(Lantern).to receive(:finish_execution).and_raise(telemetry_error)
+
+    status, = middleware.call(env_for("http://customer.test/widgets"))
+
+    expect(status).to eq(204)
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "never replaces an application error when request finalization raises outside StandardError" do
+    telemetry_error = Class.new(Exception)
+    application_error = Class.new(StandardError)
+    allow(Lantern).to receive(:finish_execution).and_raise(telemetry_error, "finish fatal")
+
+    expect do
+      described_class.new(->(_) { raise application_error, "original app error" }).call(
+        env_for("http://customer.test/boom")
+      )
+    end.to raise_error(application_error, "original app error")
+
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "propagates a process signal from finalization when no application error is active" do
+    allow(Lantern).to receive(:finish_execution).and_raise(SignalException.new("TERM"))
+
+    expect do
+      middleware.call(env_for("http://customer.test/widgets"))
+    end.to raise_error(SignalException)
+
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "preserves an application error when finalization also raises a process signal" do
+    application_error = Class.new(StandardError)
+    allow(Lantern).to receive(:finish_execution).and_raise(SignalException.new("TERM"))
+
+    expect do
+      described_class.new(->(_) { raise application_error, "original app error" }).call(
+        env_for("http://customer.test/boom")
+      )
+    end.to raise_error(application_error, "original app error")
+
+    expect(Lantern.execution).to be_nil
+  end
+
+  it "stops a request profile without emitting when parent construction fails" do
+    handle = Object.new
+    Lantern.config.profile_sample = 1.0
+    allow(Lantern::Profiler).to receive(:available?).and_return(true)
+    allow(Lantern::Profiler).to receive(:start).and_return(handle)
+    expect(Lantern::Profiler).to receive(:stop).with(handle).and_return(nil)
+    request_middleware = middleware
+    allow(request_middleware).to receive(:parent_fields).and_raise("parent construction failed")
+
+    status, = request_middleware.call(env_for("http://customer.test/widgets"))
+
+    expect(status).to eq(204)
+    expect(lantern_records).to be_empty
+    expect(Lantern.execution).to be_nil
+  ensure
+    Lantern.config.profile_sample = 0.0
+  end
+
+  it "finishes the request execution when the app leaves an inner execution current" do
+    parent_execution = Lantern.start_execution(source: :job)
+    request_execution = nil
+    inner_execution = nil
+    app = lambda do |env|
+      request_execution = env.fetch("lantern.execution")
+      inner_execution = Lantern.start_execution(source: :job, preview: "inner")
+      [ 204, { "Content-Type" => "text/plain", "Content-Length" => "0" }, [] ]
+    end
+
+    status, = described_class.new(app).call(env_for("http://customer.test/widgets"))
+
+    expect(status).to eq(204)
+    request = lantern_records(:request).sole
+    expect(request[:execution_id]).to eq(request_execution.id)
+    expect(request[:execution_id]).not_to eq(inner_execution.id)
+    expect(request[:execution_preview]).to eq("GET unmatched")
+    expect(Lantern.execution).to equal(parent_execution)
+  ensure
+    Lantern::Current.clear
+  end
+
+  it "captures an app error on the request execution when the app leaves an inner execution current" do
+    application_error = Class.new(StandardError)
+    request_execution = nil
+    inner_execution = nil
+    app = lambda do |env|
+      request_execution = env.fetch("lantern.execution")
+      inner_execution = Lantern.start_execution(source: :job, preview: "inner")
+      raise application_error, "original app error"
+    end
+
+    expect do
+      described_class.new(app).call(env_for("http://customer.test/boom"))
+    end.to raise_error(application_error, "original app error")
+
+    exception = lantern_records(:exception).sole
+    request = lantern_records(:request).sole
+    expect(exception[:execution_id]).to eq(request_execution.id)
+    expect(request[:execution_id]).to eq(request_execution.id)
+    expect(exception[:execution_id]).not_to eq(inner_execution.id)
+    expect(Lantern.execution).to be_nil
+  end
+
   it "does not record the default health path" do
     seen = []
 
