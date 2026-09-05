@@ -62,12 +62,81 @@ RSpec.describe "exception record", type: :request do
 
   it "dedupes the same error object reported twice (middleware catch + Rails.error re-report)" do
     error = ArgumentError.new("dup me")
-    Lantern.start_execution(source: :command, sample_kind: :commands)
+    exe = Lantern.start_execution(source: :command, sample_kind: :commands)
     Lantern.report(error, handled: true)
     Lantern.report(error, handled: true)
     Lantern.finish_execution
 
     expect(lantern_records(:exception).size).to eq(1)
+    expect(exe.counters[:exceptions]).to eq(1)
+    expect(exe.exception_preview).to eq("ArgumentError: dup me")
+  end
+
+  it "does not let a sampled-out handled capture suppress a later unhandled capture" do
+    error = ArgumentError.new("becomes fatal")
+    exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+    exe.sampled = false
+
+    Lantern.report(error, handled: true)
+    Lantern.report(error, handled: false)
+    Lantern.finish_execution
+
+    expect(lantern_records(:exception).sole).to include(message: "becomes fatal", handled: false)
+  end
+
+  it "does not let a paused handled capture suppress a later unhandled capture" do
+    error = ArgumentError.new("visible after resume")
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern.pause
+    Lantern.report(error, handled: true)
+    Lantern.resume
+
+    Lantern.report(error, handled: false)
+    Lantern.finish_execution
+
+    expect(lantern_records(:exception).sole).to include(message: "visible after resume", handled: false)
+  end
+
+  it "captures handled and unhandled observations as distinct dispositions" do
+    error = ArgumentError.new("changed disposition")
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+
+    Lantern.report(error, handled: true)
+    Lantern.report(error, handled: false)
+    Lantern.finish_execution
+
+    expect(lantern_records(:exception).map { |record| record[:handled] }).to contain_exactly(true, false)
+  end
+
+  it "captures a reused exception object once in each execution" do
+    error = ArgumentError.new("reused")
+
+    2.times do
+      Lantern.start_execution(source: :command, sample_kind: :commands)
+      Lantern.report(error, handled: true)
+      Lantern.finish_execution
+    end
+
+    expect(lantern_records(:exception).map { |record| record[:message] }).to eq([ "reused", "reused" ])
+  end
+
+  it "keeps an outer execution deduped across many nested executions" do
+    error = ArgumentError.new("nested reuse")
+    outer = Lantern.start_execution(source: :command, sample_kind: :commands)
+    Lantern.report(error, handled: true)
+
+    5.times do
+      Lantern.start_execution(source: :job, sample_kind: :jobs)
+      Lantern.report(error, handled: true)
+      Lantern.finish_execution
+    end
+
+    Lantern.report(error, handled: true)
+    Lantern.finish_execution
+
+    outer_records = lantern_records(:exception).select { |record| record[:execution_id] == outer.id }
+    expect(outer_records.size).to eq(1)
+    expect(outer.counters[:exceptions]).to eq(1)
   end
 
   it "captures the sql_state from the underlying driver error for a StatementInvalid" do

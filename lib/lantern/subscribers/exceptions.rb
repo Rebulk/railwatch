@@ -87,11 +87,12 @@ module Lantern
       def capture(error, handled:, severity:, context: {}, source: nil, fingerprint: nil)
         return unless Lantern.enabled?
         return if ignored?(error)
-        return if seen?(error)
 
         exe = execution
-        exe&.count(:exceptions)
-        exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255] if exe
+        if exe&.first_exception_observation?(error, handled)
+          exe.count(:exceptions)
+          exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255]
+        end
         # An interactive `rails runner` -- typed, piped, or a script in /tmp --
         # is an engineer at a shell, and their typo is not an issue. Their
         # command record still ships, carrying the exit code and the preview
@@ -111,6 +112,7 @@ module Lantern
         # so a burst of errors doesn't re-roll the dice each time.
         return if exe && !exe.sampled? && (handled || !exception_sampled?(exe))
         return if exe&.paused?
+        return if exe && !exe.first_exception_report?(error, handled)
 
         cause = error.cause
         frames = Backtrace.frames(error, with_source: Lantern.config.capture_exception_source)
@@ -224,14 +226,6 @@ module Lantern
         ignored = Lantern.config.ignored_exceptions
         return false if ignored.empty?
         error.class.ancestors.any? { |ancestor| (name = ancestor.name) && ignored.include?(name) }
-      end
-
-      def seen?(error)
-        return true if error.instance_variable_get(:@__lantern_seen)
-        error.instance_variable_set(:@__lantern_seen, true)
-        false
-      rescue StandardError
-        false
       end
 
       # Variable data that would otherwise split one issue into thousands of

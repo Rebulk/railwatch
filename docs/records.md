@@ -253,13 +253,15 @@ the request middleware or command patches catch directly, plus anything a
 controller swallows with `rescue_from`
 (`lib/lantern/subscribers/exceptions.rb`). Standalone-capable — reports
 even with no execution open (console, boot). Deduplicated per error
-object (`error.instance_variable_get(:@__lantern_seen)`), so a re-raised
-error is only captured once. Unhandled exceptions bypass the execution
-buffer: `Lantern.record_now` enqueues the record and wakes the in-memory
-reporter immediately, without network I/O on the application thread. This
-improves the chance of delivery before a normal exit but is not a durable
-crash spool; a hard kill, OOM, or exit after the shutdown deadline can lose
-the record.
+object, execution, and handled/unhandled disposition, so Rails.error plus
+outer middleware report a re-raised error only once without suppressing the
+same object when it is reused in another execution. A capture discarded by
+sampling or `Lantern.pause` does not mark the object as seen. Unhandled
+exceptions bypass the execution buffer: `Lantern.record_now` enqueues the
+record and wakes the in-memory reporter immediately, without network I/O on
+the application thread. This improves the chance of delivery before a normal
+exit but is not a durable crash spool; a hard kill, OOM, or exit after the
+shutdown deadline can lose the record.
 
 | Field | Meaning |
 |---|---|

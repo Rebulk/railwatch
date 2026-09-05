@@ -204,6 +204,18 @@ module Lantern
       @counters[counter] += by
     end
 
+    # Rails.error and an outer middleware can observe the same error. Count
+    # that occurrence once even when sampling or pause prevents its report.
+    # Reporting has separate flags so a suppressed observation can still be
+    # captured after those gates change.
+    def first_exception_observation?(error, handled)
+      mark_exception(error, handled ? 1 : 2)
+    end
+
+    def first_exception_report?(error, handled)
+      mark_exception(error, handled ? 4 : 8)
+    end
+
     def track_query_group(group)
       @query_groups[group] += 1
     end
@@ -258,6 +270,25 @@ module Lantern
         user: @user_id,
         tenant: @tenant
       }.freeze
+    end
+
+    private
+
+    # Exception deduplication belongs to an execution, not to the Exception
+    # object. Weak identity keys avoid retaining every reported error for the
+    # full lifetime of a long-running execution, and the map is allocated on
+    # the first exception so an execution that never sees one pays nothing.
+    def mark_exception(error, flag)
+      states = (@exception_states ||= ObjectSpace::WeakMap.new)
+      state = states[error].to_i
+      return false if state.anybits?(flag)
+
+      states[error] = state | flag
+      true
+    rescue StandardError
+      # Telemetry must never interfere with the application. If an unusual
+      # exception cannot be used as a weak key, fail open and report it.
+      true
     end
   end
 end

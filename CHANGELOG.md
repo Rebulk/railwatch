@@ -2,6 +2,12 @@
 
 ## 0.1.0 (unreleased)
 
+- Exception deduplication is now scoped to the current execution and to the
+  handled/unhandled disposition, and only marks an error after sampling and
+  pause checks pass. A sampled-out or paused handled report can no longer
+  suppress a later unhandled raise of the same object, while Rails.error and
+  middleware still collapse duplicate observations in one execution.
+
 - Header masking no longer depends on an app enumerating every vendor
   header name. A header whose name has a credential-shaped segment
   (`api-key`/`apikey`, `auth`/`authentication`/`authorization`, `token`,
