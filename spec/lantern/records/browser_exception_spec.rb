@@ -38,9 +38,9 @@ RSpec.describe "browser exception record", type: :request do
     frames = post_error({})[:frames]
 
     expect(frames).to eq([
-      { file: "assets/index-Bq1x9K.js", line: 41, function: "IssueRow", in_app: true },
-      { file: "assets/vendor-a1b2.js", line: 12, function: "renderWithHooks", in_app: false },
-      { file: "https://cdn.other.test/widget.js", line: 3, function: "track", in_app: false }
+      { file: "assets/index-Bq1x9K.js", line: 41, column: 2210, function: "IssueRow", in_app: true },
+      { file: "assets/vendor-a1b2.js", line: 12, column: 3, function: "renderWithHooks", in_app: false },
+      { file: "https://cdn.other.test/widget.js", line: 3, column: 9, function: "track", in_app: false }
     ])
   end
 

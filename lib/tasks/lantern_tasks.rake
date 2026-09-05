@@ -54,6 +54,15 @@ module Lantern
 end
 
 namespace :lantern do
+  desc "Upload build source maps privately: lantern:sourcemaps[directory,delete] (directory defaults to public; delete defaults to false)"
+  task :sourcemaps, [ :directory, :delete ] => :environment do |_task, args|
+    require "lantern/source_maps"
+    directory = args[:directory] || ENV["LANTERN_SOURCEMAPS_DIR"] || "public"
+    delete = (args[:delete] || ENV["LANTERN_SOURCEMAPS_DELETE"]) == "true"
+    count = Lantern::SourceMaps.new(Lantern.config).upload(directory: directory, delete: delete)
+    puts "Uploaded #{count} source maps for #{Lantern.config.deploy}#{' and deleted acknowledged files' if delete}"
+  end
+
   desc "Check that the app can reach Lantern with the configured token"
   task status: :environment do
     unless Lantern.config.token.present?
