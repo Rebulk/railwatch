@@ -347,7 +347,7 @@ database.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `buffer_size` | `LANTERN_BUFFER_SIZE` | `5000` | Max buffered records (`Lantern::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. |
+| `buffer_size` | `LANTERN_BUFFER_SIZE` | `10000` | Max buffered records (`Lantern::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. Keep it at or above `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
 | `flush_interval` | `LANTERN_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |

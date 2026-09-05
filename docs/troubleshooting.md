@@ -176,8 +176,12 @@ decision can't be made until it ends.
   (10,000). Past that, records are dropped and counted, and the count is
   added to the reporter's drop counter so the loss is visible on the
   platform rather than silent.
-- `c.buffer_size` (default 5,000) caps the process-wide queue between
-  the app and the reporter thread. Oldest-dropped-first, also counted.
+- `c.buffer_size` (default 10,000, the same as `MAX_RECORDS`) caps the
+  process-wide queue between the app and the reporter thread.
+  Oldest-dropped-first, also counted. Do not set it below `MAX_RECORDS`:
+  an execution's tree is written to the queue in one go when it ends, so
+  a tree larger than the queue loses its own first records -- typically
+  the outgoing requests a long job made before it started writing.
   Keeping far more executions than before means far more records
   arriving at this queue; raise it, or lower what you keep.
 - `c.profile_slow_ms` compounds it: it profiles every tail-buffering

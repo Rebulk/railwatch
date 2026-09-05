@@ -22,7 +22,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
       "LANTERN_CAPTURE_REQUEST_PAYLOAD" => [ :capture_request_payload, "1", true, false ],
       "LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE" => [ :capture_exception_source, "0", false, true ],
-      "LANTERN_BUFFER_SIZE" => [ :buffer_size, "9999", 9_999, 5_000 ],
+      "LANTERN_BUFFER_SIZE" => [ :buffer_size, "9999", 9_999, 10_000 ],
       "LANTERN_FLUSH_INTERVAL" => [ :flush_interval, "7.5", 7.5, 2.0 ],
       "LANTERN_FLUSH_THRESHOLD" => [ :flush_threshold, "50", 50, 500 ],
       "LANTERN_CONNECT_TIMEOUT" => [ :connect_timeout, "0.5", 0.5, 1.0 ],
