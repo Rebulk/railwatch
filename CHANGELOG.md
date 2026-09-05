@@ -46,9 +46,10 @@
 
 - Header masking no longer depends on an app enumerating every vendor
   header name. A header whose name has a credential-shaped segment
-  (`api-key`/`apikey`, `auth`/`authentication`/`authorization`, `token`,
-  `secret`, `signature`) is masked as `[FILTERED]` on top of the exact
-  `redact_headers` denylist, so `X-Api-Key`, `X-Auth-Token`,
+  (`api-key`/`apikey`, `access-key`, `private-key`,
+  `auth`/`authentication`/`authorization`, `bearer`, `credential`, `hmac`,
+  `jwt`, `token`, `secret`, `signature`) is masked as `[FILTERED]` on top of
+  the exact `redact_headers` denylist, so `X-Api-Key`, `X-Auth-Token`,
   `Stripe-Signature` and `X-Hub-Signature-256` are private by default.
   Ordinary diagnostic headers are untouched.
 
