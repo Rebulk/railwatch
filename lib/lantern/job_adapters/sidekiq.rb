@@ -7,11 +7,15 @@ module Lantern
 
       module CronEnqueueHook
         def enqueue!(time = Time.now.utc)
-          task_name = respond_to?(:name) ? name : instance_variable_get(:@name)
-          task_namespace = respond_to?(:namespace) ? namespace : instance_variable_get(:@namespace)
-          task_key = [ task_namespace, task_name ].compact.reject { |part| part.to_s.empty? || part.to_s == "default" }.join(":")
-          task_schedule = respond_to?(:cron) ? cron : instance_variable_get(:@cron)
-          JobAdapters.with_schedule(task_key: task_key, schedule: task_schedule, run_at: time) { super }
+          Sidekiq.instrument_cron_enqueue(self, time) { super }
+        end
+      end
+
+      # sidekiq-cron used this misspelling through 1.12. Version 2 renamed it
+      # to enqueue!, so both hooks intentionally share the metadata path.
+      module LegacyCronEnqueueHook
+        def enque!(time = Time.now.utc)
+          Sidekiq.instrument_cron_enqueue(self, time) { super }
         end
       end
 
@@ -88,9 +92,18 @@ module Lantern
 
       def install_cron_hook!
         return unless defined?(::Sidekiq::Cron::Job)
-        return if ::Sidekiq::Cron::Job < CronEnqueueHook
 
-        ::Sidekiq::Cron::Job.prepend(CronEnqueueHook)
+        job = ::Sidekiq::Cron::Job
+        job.prepend(CronEnqueueHook) if job.method_defined?(:enqueue!) && !(job < CronEnqueueHook)
+        job.prepend(LegacyCronEnqueueHook) if job.method_defined?(:enque!) && !(job < LegacyCronEnqueueHook)
+      end
+
+      def instrument_cron_enqueue(job, time)
+        task_name = job.respond_to?(:name) ? job.name : job.instance_variable_get(:@name)
+        task_namespace = job.respond_to?(:namespace) ? job.namespace : job.instance_variable_get(:@namespace)
+        task_key = [ task_namespace, task_name ].compact.reject { |part| part.to_s.empty? || part.to_s == "default" }.join(":")
+        task_schedule = job.respond_to?(:cron) ? job.cron : job.instance_variable_get(:@cron)
+        JobAdapters.with_schedule(task_key: task_key, schedule: task_schedule, run_at: time) { yield }
       end
 
       def add_client_middleware(config)

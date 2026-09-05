@@ -299,7 +299,7 @@ RSpec.describe Lantern::JobAdapters::Sidekiq do
       task_key: "billing:nightly", schedule: "0 2 * * *", name: "WidgetJob")
   end
 
-  it "wraps sidekiq-cron enqueue with isolated scheduler metadata" do
+  def cron_job_class(enqueue_method)
     cron_class = Class.new do
       attr_reader :name, :namespace, :cron, :observed
       def initialize
@@ -307,20 +307,31 @@ RSpec.describe Lantern::JobAdapters::Sidekiq do
         @namespace = "billing"
         @cron = "0 2 * * *"
       end
-
-      def enqueue!(time = Time.now.utc)
+      define_method(enqueue_method) do |time = Time.now.utc|
         @observed = Lantern::JobAdapters.current_schedule
         "jid"
       end
     end
-    stub_const("Sidekiq::Cron::Job", cron_class)
+    cron_class
+  end
+
+  def expect_cron_enqueue_metadata(enqueue_method)
+    stub_const("Sidekiq::Cron::Job", cron_job_class(enqueue_method))
     described_class.install_cron_hook!
     run_at = Time.utc(2026, 9, 5, 2)
     cron = Sidekiq::Cron::Job.new
 
-    expect(cron.enqueue!(run_at)).to eq("jid")
+    expect(cron.public_send(enqueue_method, run_at)).to eq("jid")
     expect(cron.observed).to eq(task_key: "billing:nightly", schedule: "0 2 * * *", run_at: run_at)
     expect(Lantern::JobAdapters.current_schedule).to be_nil
+  end
+
+  it "wraps sidekiq-cron 2.x enqueue! with isolated scheduler metadata" do
+    expect_cron_enqueue_metadata(:enqueue!)
+  end
+
+  it "wraps sidekiq-cron 1.x enque! with isolated scheduler metadata" do
+    expect_cron_enqueue_metadata(:enque!)
   end
 
   it "captures and redacts direct arguments only when explicitly enabled" do
