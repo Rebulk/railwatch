@@ -1,14 +1,51 @@
 # Replacing Sentry
 
-A step-by-step migration from `sentry-ruby` / `sentry-rails` to Lantern,
-in the order you'd actually do it: rip out the gem, port the initializer,
-rewrite the call sites, then pick up the things Sentry has no equivalent
-for. Nothing here needs a compatibility shim — every Sentry concept
-either has a named counterpart or is subsumed by the execution model.
+A step-by-step migration from `sentry-ruby` / `sentry-rails` to Lantern.
+Lantern is a genuine alternative for the Rails server workloads in the
+matrix below; it is not a drop-in replacement for every product Sentry
+sells. Keep both SDKs enabled during an evaluation if your application
+depends on a conditional row.
 
 Install Lantern first ([`getting-started.md`](getting-started.md)); you
 can run both for a day if you want to compare, since neither knows about
 the other.
+
+## Decide whether Lantern covers your workload
+
+Nightwatch parity and Sentry parity are different targets. Laravel
+Nightwatch is an application-monitoring product built around framework
+executions; Lantern deliberately maps that model onto Rails. Sentry is a
+broader, multi-language managed platform with browser replay, native/mobile
+SDKs, a large integration catalog, and generic tracing. Those broader
+capabilities are not implied by Rails/Nightwatch parity.
+
+| Workload or capability | Status | Boundary |
+|---|---|---|
+| Rails HTML/API request performance and errors | Supported | Controller/action, route, SQL, cache, render, mail, HTTP, storage, logs, and exceptions share one execution. Work performed while a streaming Rack body enumerates is tracked by [#22](https://github.com/Rebulk/lantern/issues/22). |
+| Handled and unhandled Ruby exceptions | Supported | Rails.error, Rack, Active Job, manual `Lantern.report`, grouping, context, attachments, issue lifecycle, and regression detection. Delivery is memory-buffered, not a durable crash spool. |
+| Active Job | Supported | Works above Solid Queue, Sidekiq, GoodJob, and other Active Job adapters. Direct `Sidekiq::Worker` and non-Solid Queue schedulers are tracked by [#29](https://github.com/Rebulk/lantern/issues/29). |
+| Recurring/scheduled work | Conditional | Solid Queue recurring tasks include schedule and drift. Other schedulers need [#29](https://github.com/Rebulk/lantern/issues/29). |
+| Action Cable channel actions | Conditional | Broadcast/transmit records exist; a complete action parent and child lifecycle is tracked by [#15](https://github.com/Rebulk/lantern/issues/15). |
+| Distributed Rails traces | Conditional | Outgoing propagation and request/job linking exist. Upstream-sampled W3C continuity is tracked by [#16](https://github.com/Rebulk/lantern/issues/16). This is not a general OpenTelemetry collector. |
+| Ruby profiling | Conditional | Requires `vernier` or `stackprof`; there is no profiler bundled into the SDK. |
+| Browser monitoring | Partial | The optional Inertia client reports visits, Web Vitals, browser errors, and breadcrumbs. Session Replay, native/mobile SDKs, and Sentry's full browser/source-map workflow are outside the currently released Rails-server replacement. |
+| Runtime compatibility | Narrow today | The currently proved pair is Ruby 3.4 + Rails 8.1. A maintained compatibility matrix and any safe lowering of requirements are tracked by [#26](https://github.com/Rebulk/lantern/issues/26). |
+| Managed integrations and operations | Partial | Lantern Cloud supports its documented email/Slack/webhook paths and self-hosting. It does not promise Sentry's integration catalog; Linear completion is [Cloud #40](https://github.com/Rebulk/lantern-cloud/issues/40) and a versioned webhook contract is [Cloud #42](https://github.com/Rebulk/lantern-cloud/issues/42). |
+| SQL value privacy | Conditional | The current release records raw SQL text, including literals, by default. Use parameterized queries plus `Lantern.redact_queries` until private-by-default SQL capture in [#28](https://github.com/Rebulk/lantern/issues/28) ships. Query plans can also contain values; keep `capture_query_explain` off unless that output is acceptable. |
+
+For a Rails 8.1 application whose work enters through Rack and Active Job,
+and which does not require Replay, native/mobile monitoring, or Sentry's
+managed integration catalog, Lantern is a useful and valid server-side
+replacement. Evaluate the conditional rows against your own production
+entry points before removing Sentry.
+
+Exception delivery has the same process boundary as the rest of Lantern's
+reporter. `Lantern.record_now` skips the execution buffer, enqueues the
+record, and wakes the reporter immediately; it does not synchronously POST
+on the application thread. The reporter retries during graceful shutdown,
+but its buffer is memory-only. A hard kill, OOM, or exit after the shutdown
+deadline can lose records. See [Buffering, flushing, and
+transport](configuration.md#buffering-flushing-transport).
 
 ## 1. Remove the gem
 

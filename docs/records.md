@@ -255,8 +255,11 @@ controller swallows with `rescue_from`
 even with no execution open (console, boot). Deduplicated per error
 object (`error.instance_variable_get(:@__lantern_seen)`), so a re-raised
 error is only captured once. Unhandled exceptions bypass the execution
-buffer (`Lantern.record_now`) so a crashing process still reports even if
-it never reaches the point where buffered records would flush.
+buffer: `Lantern.record_now` enqueues the record and wakes the in-memory
+reporter immediately, without network I/O on the application thread. This
+improves the chance of delivery before a normal exit but is not a durable
+crash spool; a hard kill, OOM, or exit after the shutdown deadline can lose
+the record.
 
 | Field | Meaning |
 |---|---|
