@@ -7,6 +7,7 @@ module Lantern
   module Context
     LIMIT = 65_536
     EMPTY_JSON = "{}".freeze
+    EXECUTION_CONTEXT_KEY = :active_support_execution_context
     # Present, and true, on a context that did not fit in LIMIT bytes.
     TRUNCATION_KEY = "_lantern_truncated"
     TRUNCATION_MARKER = "[TRUNCATED]"
@@ -45,6 +46,54 @@ module Lantern
     rescue StandardError
       EMPTY_JSON
     end
+
+    # Run deferred Rack body work under a bounded, already-redacted copy of
+    # the originating request context. Rack servers may consume a body on a
+    # different thread/fiber, or reuse the original carrier for unrelated
+    # work after Rails has cleared its logical execution context. Swapping the
+    # complete ExecutionContext record keeps that consumer's CurrentAttributes
+    # and private ambient context out of Lantern records, then restores it
+    # exactly when consumption ends.
+    def with_serialized(serialized)
+      attributes = JSON.parse(serialized, symbolize_names: true)
+      attributes = {} unless attributes.is_a?(Hash)
+      state = ActiveSupport::IsolatedExecutionState
+      previous_record = state[EXECUTION_CONTEXT_KEY]
+      event = Rails.event if defined?(Rails) && Rails.respond_to?(:event)
+      previous_event_context = event.context if event&.respond_to?(:context)
+
+      state.delete(EXECUTION_CONTEXT_KEY)
+      event.clear_context if event&.respond_to?(:clear_context)
+      ActiveSupport::ExecutionContext.set(**attributes)
+      event.set_context(attributes) if event&.respond_to?(:set_context)
+      yield
+    ensure
+      restore_safely do
+        if previous_record
+          state[EXECUTION_CONTEXT_KEY] = previous_record
+        else
+          state&.delete(EXECUTION_CONTEXT_KEY)
+        end
+      end
+      # ExecutionContext callbacks (for example tagged logging) need to see
+      # the restored record even though the record itself is restored whole.
+      restore_safely { ActiveSupport::ExecutionContext.set if state }
+      restore_safely do
+        if event&.respond_to?(:clear_context)
+          event.clear_context
+          event.set_context(previous_event_context) if previous_event_context&.any?
+        end
+      end
+    end
+
+    # A failing application callback during cleanup must not replace a body
+    # exception or prevent the remaining consumer context from being restored.
+    def restore_safely
+      yield
+    rescue StandardError => e
+      Lantern.debug { "streaming context restoration failed: #{e.class}: #{e.message}" }
+    end
+    private_class_method :restore_safely
 
     # Context is application data -- an app that puts an API token or a
     # password in it should get the same treatment request params get, rather

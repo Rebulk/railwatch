@@ -6,6 +6,176 @@ module Lantern
     # lifecycle stages, catches anything that escapes the stack as an
     # unhandled exception, and emits the request record at the end.
     class Request
+      # A Rack server consumes an enumerable response after the application has
+      # returned it. Keep only those genuinely lazy bodies inside the request
+      # execution; arrays and Rails' buffered RackBody advertise #to_ary and
+      # stay on the allocation-free eager path below.
+      class ResponseBody
+        def initialize(body, middleware, env, execution, status, headers, context)
+          @body = body
+          @middleware = middleware
+          @env = env
+          @execution = execution
+          @status = status
+          @headers = headers
+          @context = context
+          # The record, unlike Thread/Fiber identity, represents one logical
+          # Rails execution context. It is only used when it remains current;
+          # another carrier or a reused carrier gets the safe serialized copy.
+          @context_record = ActiveSupport::IsolatedExecutionState[Context::EXECUTION_CONTEXT_KEY]
+          @closed = false
+        end
+
+        private
+
+        def consume
+          failure = nil
+          with_request_context do
+            Current.with(@execution) do
+              begin
+                yield
+              rescue Exception => e # rubocop:disable Lint/RescueException
+                failure = e
+                capture(e) unless yield_failure?(e)
+                raise
+              ensure
+                complete(failure)
+              end
+            end
+          end
+        end
+
+        def yield_failure?(_error)
+          false
+        end
+
+        def complete(preserving = nil)
+          return if @closed
+
+          @closed = true
+          failure = nil
+          preserve_context
+          Current.with(@execution) do
+            begin
+              @body.close if @body.respond_to?(:close)
+            rescue Exception => e # rubocop:disable Lint/RescueException
+              failure = e
+              capture(e) unless preserving
+            ensure
+              preserve_context
+              @middleware.__send__(:finish, @env, @execution, @status, @headers, @context)
+            end
+          end
+          raise failure if failure && !preserving
+        end
+
+        def close
+          with_request_context { complete }
+        end
+
+        def closed?
+          @closed
+        end
+
+        def with_request_context(&block)
+          current = ActiveSupport::IsolatedExecutionState[Context::EXECUTION_CONTEXT_KEY]
+          if current.equal?(@context_record)
+            yield
+          else
+            Context.with_serialized(@context, &block)
+          end
+        end
+
+        def preserve_context
+          current = Context.serialized
+          @context = current unless current == Context::EMPTY_JSON
+        end
+
+        public :close, :closed?
+
+        def capture(error)
+          Subscribers::Exceptions.capture(error, handled: false, severity: :error,
+                                                   source: "lantern.middleware")
+        rescue StandardError => capture_error
+          Lantern.debug { "streaming exception capture failed: #{capture_error.class}: #{capture_error.message}" }
+        end
+      end
+
+      # Rack gives Enumerable Bodies a block and requires servers to prefer
+      # #each when a body advertises both protocols. Keep this method off the
+      # call-only wrapper below so its protocol classification remains intact.
+      class EnumerableResponseBody < ResponseBody
+        def each
+          return enum_for(:each) unless block_given?
+
+          @downstream_failure = nil
+          consume do
+            @body.each do |chunk|
+              begin
+                yield chunk
+              rescue Exception => e # rubocop:disable Lint/RescueException
+                @downstream_failure = e
+                raise
+              end
+            end
+          end
+        end
+
+        private
+
+        def yield_failure?(error)
+          error.equal?(@downstream_failure)
+        end
+      end
+
+      # Rack 3 call-only Streaming Bodies receive an IO-like stream rather
+      # than yielding chunks. A distinct wrapper is required: adding #each
+      # here would make a conforming server choose the wrong protocol.
+      class StreamingResponseBody < ResponseBody
+        def call(stream)
+          @downstream_failure = nil
+          observed = ResponseStream.new(stream) { |error| @downstream_failure = error }
+          consume { @body.call(observed) }
+        end
+
+        private
+
+        def yield_failure?(error)
+          error.equal?(@downstream_failure)
+        end
+      end
+
+      # Preserve the complete Rack streaming IO contract while remembering
+      # the exact exception raised by the downstream connection. That boundary
+      # prevents a client disconnect from being filed as an application error.
+      class ResponseStream
+        def initialize(stream, &on_error)
+          @stream = stream
+          @on_error = on_error
+        end
+
+        def read(...) = forward(:read, ...)
+        def write(...) = forward(:write, ...)
+
+        def <<(value) = forward(:<<, value)
+
+        def flush(...) = forward(:flush, ...)
+        def close(...) = forward(:close, ...)
+        def close_read(...) = forward(:close_read, ...)
+        def close_write(...) = forward(:close_write, ...)
+        def closed?(...) = forward(:closed?, ...)
+
+        private
+
+        def forward(method, ...)
+          result = @stream.public_send(method, ...)
+          result.equal?(@stream) ? self : result
+        rescue Exception => e # rubocop:disable Lint/RescueException
+          @on_error.call(e)
+          raise
+        end
+      end
+
       # Env keys repeat request after request (same client/proxy headers), so
       # the Rack key -> "Header-Name" conversion is cached instead of
       # split/map/capitalize/join-ing on every request.
@@ -56,19 +226,44 @@ module Lantern
         exe.enter_stage(:middleware_before)
         env["lantern.execution"] = exe
         status = headers = body = nil
+        deferred = false
         begin
           status, headers, body = @app.call(env)
+          if (wrapper = response_body_wrapper(body))
+            exe.enter_stage(:middleware_after)
+            exe.user_id ||= Subscribers::Users.resolve_id(env)
+            exe.tenant ||= Context.current_tenant
+            body = wrapper.new(body, self, env, exe, status, headers, Context.serialized)
+            deferred = true
+          end
         rescue Exception => e # rubocop:disable Lint/RescueException
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "lantern.middleware")
           raise
         ensure
-          exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          finish(env, exe, status, headers)
+          if deferred
+            # The body may be consumed later or on another thread. Do not leak
+            # this request into whatever the server does between call and each.
+            Current.execution = exe.parent_execution
+          else
+            exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
+            finish(env, exe, status, headers)
+          end
         end
         [ status, headers, body ]
       end
 
       private
+
+      # #to_ary is Rack's materialized-body protocol and covers both literal
+      # Arrays and ordinary ActionDispatch::Response::RackBody instances. A
+      # path body must retain #to_path so Rack::Sendfile can handle it.
+      def response_body_wrapper(body)
+        return if body.respond_to?(:to_ary) || body.respond_to?(:to_path)
+        return EnumerableResponseBody if body.respond_to?(:each)
+        StreamingResponseBody if body.respond_to?(:call)
+      rescue StandardError
+        nil
+      end
 
       def ignored_request?(env)
         path = env["PATH_INFO"].to_s
@@ -102,7 +297,7 @@ module Lantern
         false
       end
 
-      def finish(env, exe, status, headers)
+      def finish(env, exe, status, headers, context = nil)
         exe.finish_stages
         # Resolved here, once, for both the request record and the session
         # key below (the start_processing subscriber ran before the app's
@@ -111,7 +306,11 @@ module Lantern
         # The block is only called when the request record is going to ship;
         # a head-sampled-out request nothing rescued skips the
         # ActionDispatch::Request and the header walk entirely.
-        Lantern.finish_execution(:request) { parent_fields(env, exe, status, headers) }
+        Lantern.finish_execution(:request) do
+          fields = parent_fields(env, exe, status, headers)
+          fields[:context] = context if context
+          fields
+        end
         # A request with no user and no session cookie has no session, and
         # Sessions.touch returns without writing anything.
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions

@@ -11,6 +11,12 @@
   exception still ships within the window; a buffer that crosses
   `flush_threshold` flushes at once as before.
 
+- Enumerable and Rack 3 call-only streaming responses now remain inside their
+  request execution through consumption and close. Their duration, child
+  telemetry, and application exceptions are no longer lost after the Rack app
+  returns the response body, while a different or reused consumer context is
+  isolated from the request; buffered and sendfile responses keep the existing
+  eager path.
 - `POST /lantern/beacon` is rate limited per client IP: 120 requests a
   minute by default (`beacon_rate_limit`, `LANTERN_BEACON_RATE_LIMIT`; `0`
   disables), answered with 429 and `Retry-After` past that. The beacon takes
