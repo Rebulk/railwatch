@@ -1,30 +1,30 @@
 # Configuration
 
-Everything below lives on `Lantern::Configuration` (`lib/lantern/configuration.rb`),
-set via `Lantern.configure { |c| ... }` in `config/initializers/lantern.rb`
-(created by `bin/rails generate lantern:install`). Every setting has a
-`LANTERN_*` env var default; explicit values set in the initializer always
+Everything below lives on `Nightrail::Configuration` (`lib/nightrail/configuration.rb`),
+set via `Nightrail.configure { |c| ... }` in `config/initializers/nightrail.rb`
+(created by `bin/rails generate nightrail:install`). Every setting has a
+`NIGHTRAIL_*` env var default; explicit values set in the initializer always
 win over the env var.
 
 ## Core
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `enabled` | `LANTERN_ENABLED` | `true` | Master switch. `Lantern.enabled?` is also `false` whenever `token` is blank, so setting only `LANTERN_TOKEN` is enough to turn Lantern on. |
-| `token` | `LANTERN_TOKEN` | nil | Bearer token for `/ingest`. Required. |
-| `ingest_url` | `LANTERN_INGEST_URL` | `https://lantern.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
-| `allow_http` | `LANTERN_ALLOW_HTTP` | `false` | Permit a non-loopback plain HTTP ingest URL. HTTPS is required by default; `localhost`, `127.0.0.1`, and `::1` remain available for local self-hosted development. |
-| `deploy` | `LANTERN_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `lantern:deploy`. Full 40-character SHAs are shortened to 12 characters. |
-| `detect_deploy` | `LANTERN_DETECT_DEPLOY` | `true` | Detect deploys beyond `LANTERN_DEPLOY` and `KAMAL_VERSION`. Set false when the app deliberately reports no inferred deploy. |
-| `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
+| `enabled` | `NIGHTRAIL_ENABLED` | `true` | Master switch. `Nightrail.enabled?` is also `false` whenever `token` is blank, so setting only `NIGHTRAIL_TOKEN` is enough to turn Nightrail on. |
+| `token` | `NIGHTRAIL_TOKEN` | nil | Bearer token for `/ingest`. Required. |
+| `ingest_url` | `NIGHTRAIL_INGEST_URL` | `https://nightrail.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
+| `allow_http` | `NIGHTRAIL_ALLOW_HTTP` | `false` | Permit a non-loopback plain HTTP ingest URL. HTTPS is required by default; `localhost`, `127.0.0.1`, and `::1` remain available for local self-hosted development. |
+| `deploy` | `NIGHTRAIL_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `nightrail:deploy`. Full 40-character SHAs are shortened to 12 characters. |
+| `detect_deploy` | `NIGHTRAIL_DETECT_DEPLOY` | `true` | Detect deploys beyond `NIGHTRAIL_DEPLOY` and `KAMAL_VERSION`. Set false when the app deliberately reports no inferred deploy. |
+| `server` | `NIGHTRAIL_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
-| `ignored_request_paths` | `LANTERN_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/lantern/beacon` | Exact request paths that bypass Lantern's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
-| `beacon_rate_limit` | `LANTERN_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /lantern/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
+| `ignored_request_paths` | `NIGHTRAIL_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/nightrail/beacon` | Exact request paths that bypass Nightrail's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
+| `beacon_rate_limit` | `NIGHTRAIL_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /nightrail/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
-`Lantern.enabled?` delegates to `config.enabled?`, which is `@enabled &&
+`Nightrail.enabled?` delegates to `config.enabled?`, which is `@enabled &&
 token.present?` — there is no separate "is configured" check elsewhere.
 
-Deploy detection stops at the first value found: `LANTERN_DEPLOY`,
+Deploy detection stops at the first value found: `NIGHTRAIL_DEPLOY`,
 `KAMAL_VERSION`, `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
 `HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
 `VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, `GITHUB_SHA`, a Capistrano
@@ -43,7 +43,7 @@ TLS-terminating proxy with `Forwarded` or `X-Forwarded-*` headers.
 ## Sampling
 
 `sample` is a hash of rate per execution kind, each `0.0`–`1.0`, decided
-once per execution (`Lantern::Sampler.decide`, `lib/lantern/sampler.rb`) —
+once per execution (`Nightrail::Sampler.decide`, `lib/nightrail/sampler.rb`) —
 not per record. A sampled-in execution ships every child record it
 buffered; a sampled-out one ships nothing except an unhandled exception
 (governed by its own `exceptions` rate, decided once and memoized per
@@ -51,30 +51,30 @@ execution — see `docs/records.md`'s `exception` section).
 
 | Key | Env var | Default |
 |---|---|---|
-| `requests` | `LANTERN_REQUEST_SAMPLE_RATE` | `1.0` |
-| `jobs` | `LANTERN_JOB_SAMPLE_RATE` | `1.0` |
-| `commands` | `LANTERN_COMMAND_SAMPLE_RATE` | `1.0` |
-| `scheduled_tasks` | `LANTERN_SCHEDULED_TASK_SAMPLE_RATE` | `1.0` |
-| `channels` | `LANTERN_CHANNEL_SAMPLE_RATE` | `1.0` |
-| `exceptions` | `LANTERN_EXCEPTION_SAMPLE_RATE` | `1.0` |
+| `requests` | `NIGHTRAIL_REQUEST_SAMPLE_RATE` | `1.0` |
+| `jobs` | `NIGHTRAIL_JOB_SAMPLE_RATE` | `1.0` |
+| `commands` | `NIGHTRAIL_COMMAND_SAMPLE_RATE` | `1.0` |
+| `scheduled_tasks` | `NIGHTRAIL_SCHEDULED_TASK_SAMPLE_RATE` | `1.0` |
+| `channels` | `NIGHTRAIL_CHANNEL_SAMPLE_RATE` | `1.0` |
+| `exceptions` | `NIGHTRAIL_EXCEPTION_SAMPLE_RATE` | `1.0` |
 
 Set as a whole hash: `c.sample = { requests: 0.1, jobs: 1.0 }` — keys you
 omit keep their default (`config.sample_rate` falls back to `1.0` for an
 unset kind).
 
 **Per-route overrides**, from `ControllerHelpers`
-(`lib/lantern/controller_helpers.rb`), included into every controller:
+(`lib/nightrail/controller_helpers.rb`), included into every controller:
 
 ```ruby
 class ReportsController < ApplicationController
-  lantern_sample 0.01, only: :index      # before_action wrapping Lantern.sample(rate)
-  lantern_never_sample only: :health     # before_action wrapping Lantern.dont_sample
+  nightrail_sample 0.01, only: :index      # before_action wrapping Nightrail.sample(rate)
+  nightrail_never_sample only: :health     # before_action wrapping Nightrail.dont_sample
 end
 ```
 
 Both accept the same options as `before_action` (`only:`, `except:`, ...).
-Programmatically: `Lantern.sample(rate)` re-rolls the current execution's
-sampling decision; `Lantern.dont_sample` forces it off; `Lantern.sampling?`
+Programmatically: `Nightrail.sample(rate)` re-rolls the current execution's
+sampling decision; `Nightrail.dont_sample` forces it off; `Nightrail.sampling?`
 reads the current decision.
 
 ### Tail-based sampling
@@ -87,11 +87,11 @@ outcome are known.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `tail_sample_slow_ms` | `LANTERN_TAIL_SAMPLE_SLOW_MS` | nil (off) | Keep a head-sampled-out execution that ran at least this many milliseconds. |
+| `tail_sample_slow_ms` | `NIGHTRAIL_TAIL_SAMPLE_SLOW_MS` | nil (off) | Keep a head-sampled-out execution that ran at least this many milliseconds. |
 
-With it set (or after `Lantern.keep!`), a head-sampled-out execution
+With it set (or after `Nightrail.keep!`), a head-sampled-out execution
 ships its whole tree when it ran at least `tail_sample_slow_ms`, when
-`Lantern.keep!` was called, or when it raised an unhandled exception
+`Nightrail.keep!` was called, or when it raised an unhandled exception
 (subject to the `exceptions` rate); otherwise the buffered records are
 discarded at the end and nothing ships. Such a tree's parent record
 carries `tail_sampled: true`, so a tail-kept execution is
@@ -100,7 +100,7 @@ distinguishable from a head-sampled one.
 ```ruby
 c.sample = { requests: 0.05 }   # keep 5% of requests...
 c.tail_sample_slow_ms = 500     # ...plus every request slower than 500ms
-Lantern.keep!                   # keep this one, whatever the head decision was
+Nightrail.keep!                   # keep this one, whatever the head decision was
 ```
 
 **The trade-off is memory**: with tail sampling on, every sampled-out
@@ -109,7 +109,7 @@ for its lifetime instead of discarding them as they happen, capped at
 `Execution::MAX_RECORDS` (10,000) per execution. With it off — the
 default — `Execution#recording?` is false for a sampled-out execution and
 nothing is built or buffered at all, which is the cheapest path and
-exactly the behaviour Lantern had before. `Lantern.keep!` can only keep
+exactly the behaviour Nightrail had before. `Nightrail.keep!` can only keep
 records made *after* the call unless tail sampling was already on: what
 was never buffered can't be resurrected.
 
@@ -123,7 +123,7 @@ execution reports an unhandled exception.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `failure_context` | `LANTERN_FAILURE_CONTEXT` | `0` (off) | How many child records a head-sampled-out execution keeps, so an unhandled exception can ship what led up to it. |
+| `failure_context` | `NIGHTRAIL_FAILURE_CONTEXT` | `0` (off) | How many child records a head-sampled-out execution keeps, so an unhandled exception can ship what led up to it. |
 
 ```ruby
 c.sample = { requests: 0.05 }   # keep 5% of requests...
@@ -140,13 +140,13 @@ it completes normally the ring is discarded at the end and nothing ships,
 exactly as before.
 
 Nothing else promotes a ring. `exceptions: 0`, an exception in
-`ignored_exceptions`, an exception `Lantern.report`s as handled or that a
+`ignored_exceptions`, an exception `Nightrail.report`s as handled or that a
 controller's `rescue_from` swallowed, one reported inside
-`Lantern.ignore` / between `Lantern.pause` and `Lantern.resume`, and an
+`Nightrail.ignore` / between `Nightrail.pause` and `Nightrail.resume`, and an
 interactive `bin/rails runner`'s error all leave the sampled-out
 execution shipping exactly what it shipped before the ring existed
 (nothing, or the lone parent record that gives an unhandled exception
-somewhere to hang). `Lantern.sample(1.0)` and `Lantern.keep!` still work
+somewhere to hang). `Nightrail.sample(1.0)` and `Nightrail.keep!` still work
 from inside the execution, and now ship the ring's contents with it
 rather than only what followed the call.
 
@@ -179,15 +179,15 @@ gem "vernier"    # Ruby >= 3.2, preferred
 gem "stackprof"  # anywhere else
 ```
 
-With neither installed, `Lantern::Profiler.available?` is false and every
+With neither installed, `Nightrail::Profiler.available?` is false and every
 option below is inert.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `profile_sample` | `LANTERN_PROFILE_SAMPLE_RATE` | `0.0` (off) | Fraction of sampled-in executions to profile, rolled once per execution. |
-| `profile_slow_ms` | `LANTERN_PROFILE_SLOW_MS` | nil (off) | Also ship a profile for any tail-buffering execution that ran at least this many milliseconds. |
-| `profile_interval_us` | `LANTERN_PROFILE_INTERVAL_US` | `1000` | Sampling interval in microseconds. |
-| `profiler` | `LANTERN_PROFILER` | nil (auto) | Pin a backend: `vernier` or `stackprof`. Auto prefers vernier when both are installed. |
+| `profile_sample` | `NIGHTRAIL_PROFILE_SAMPLE_RATE` | `0.0` (off) | Fraction of sampled-in executions to profile, rolled once per execution. |
+| `profile_slow_ms` | `NIGHTRAIL_PROFILE_SLOW_MS` | nil (off) | Also ship a profile for any tail-buffering execution that ran at least this many milliseconds. |
+| `profile_interval_us` | `NIGHTRAIL_PROFILE_INTERVAL_US` | `1000` | Sampling interval in microseconds. |
+| `profiler` | `NIGHTRAIL_PROFILER` | nil (auto) | Pin a backend: `vernier` or `stackprof`. Auto prefers vernier when both are installed. |
 
 The two triggers are different bargains:
 
@@ -216,18 +216,18 @@ Both backends are process-global, so there is one profiler per process:
 an execution that starts while another is being profiled simply isn't
 profiled. In the Rails `test` env profiling is skipped entirely unless
 `profile_sample` is explicitly non-zero, so a suite that inherits the
-app's `LANTERN_*` environment doesn't start a real profiler on every
+app's `NIGHTRAIL_*` environment doesn't start a real profiler on every
 example.
 
 ## Distributed tracing
 
-Lantern propagates W3C trace context, so a request that fans out to
-other Lantern-instrumented services shows up as one trace.
+Nightrail propagates W3C trace context, so a request that fans out to
+other Nightrail-instrumented services shows up as one trace.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `propagate_traces` | `LANTERN_PROPAGATE_TRACES` | `true` | Send a `traceparent` header on outgoing Net::HTTP and `Lantern::Faraday` requests. |
-| `trace_propagation_hosts` | `LANTERN_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.services.example.com` matches `api.services.example.com`); anything else must match the host exactly. |
+| `propagate_traces` | `NIGHTRAIL_PROPAGATE_TRACES` | `true` | Send a `traceparent` header on outgoing Net::HTTP and `Nightrail::Faraday` requests. |
+| `trace_propagation_hosts` | `NIGHTRAIL_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.services.example.com` matches `api.services.example.com`); anything else must match the host exactly. |
 
 Outgoing: `traceparent: 00-<trace_id>-<execution_id[0,16]>-<flags>`, with
 flags `01` when the execution is sampled and `00` when it isn't — a
@@ -243,7 +243,7 @@ future version may append fields after the flags, which are accepted and
 never interpreted as long as they are dash-delimited, so a newer upstream
 still links to this service instead of losing the trace. If the upstream
 flags say the trace is sampled, the downstream execution is kept
-(`Lantern.keep!`, above) whatever its own head decision was — otherwise
+(`Nightrail.keep!`, above) whatever its own head decision was — otherwise
 the trace would have a hole exactly where this service should be.
 
 ## Ignoring whole record types
@@ -254,18 +254,18 @@ types (`query`, `cache_event`, `log`) at the source.
 
 | Value | Env var |
 |---|---|
-| `:queries` | `LANTERN_IGNORE_QUERIES` |
-| `:cache_events` | `LANTERN_IGNORE_CACHE_EVENTS` |
-| `:mail` | `LANTERN_IGNORE_MAIL` |
-| `:broadcasts` | `LANTERN_IGNORE_BROADCASTS` |
-| `:notifications` | `LANTERN_IGNORE_NOTIFICATIONS` |
-| `:outgoing_requests` | `LANTERN_IGNORE_OUTGOING_REQUESTS` |
-| `:storage_ops` | `LANTERN_IGNORE_STORAGE_OPS` |
-| `:view_renders` | `LANTERN_IGNORE_VIEW_RENDERS` |
-| `:logs` | `LANTERN_IGNORE_LOGS` |
-| `:transactions` | `LANTERN_IGNORE_TRANSACTIONS` |
-| `:deprecations` | `LANTERN_IGNORE_DEPRECATIONS` |
-| `:sessions` | `LANTERN_IGNORE_SESSIONS` |
+| `:queries` | `NIGHTRAIL_IGNORE_QUERIES` |
+| `:cache_events` | `NIGHTRAIL_IGNORE_CACHE_EVENTS` |
+| `:mail` | `NIGHTRAIL_IGNORE_MAIL` |
+| `:broadcasts` | `NIGHTRAIL_IGNORE_BROADCASTS` |
+| `:notifications` | `NIGHTRAIL_IGNORE_NOTIFICATIONS` |
+| `:outgoing_requests` | `NIGHTRAIL_IGNORE_OUTGOING_REQUESTS` |
+| `:storage_ops` | `NIGHTRAIL_IGNORE_STORAGE_OPS` |
+| `:view_renders` | `NIGHTRAIL_IGNORE_VIEW_RENDERS` |
+| `:logs` | `NIGHTRAIL_IGNORE_LOGS` |
+| `:transactions` | `NIGHTRAIL_IGNORE_TRANSACTIONS` |
+| `:deprecations` | `NIGHTRAIL_IGNORE_DEPRECATIONS` |
+| `:sessions` | `NIGHTRAIL_IGNORE_SESSIONS` |
 
 ```ruby
 c.ignore = [:cache_events, :transactions]
@@ -274,7 +274,7 @@ c.ignore = [:cache_events, :transactions]
 Setting an unknown type raises `ArgumentError` immediately (this is
 validated at assignment, not silently dropped). Note `query` and
 `n_plus_one` records both key off `:queries`; `notification` off
-`:notifications`; see `Lantern::PLURALS` in `lib/lantern.rb` for the full
+`:notifications`; see `Nightrail::PLURALS` in `lib/nightrail.rb` for the full
 singular-to-plural mapping used everywhere ignore/redact/reject hooks key
 by plural.
 
@@ -285,11 +285,11 @@ already hides:
 
 | Attribute | Env var | Default |
 |---|---|---|
-| `redact_headers` | `LANTERN_REDACT_HEADERS` (comma-separated) | `Authorization,Cookie,Set-Cookie,Proxy-Authorization,X-CSRF-Token,X-XSRF-TOKEN` |
-| `redact_params` | `LANTERN_REDACT_PARAMS` (comma-separated) | `password,password_confirmation,authenticity_token,_token` |
+| `redact_headers` | `NIGHTRAIL_REDACT_HEADERS` (comma-separated) | `Authorization,Cookie,Set-Cookie,Proxy-Authorization,X-CSRF-Token,X-XSRF-TOKEN` |
+| `redact_params` | `NIGHTRAIL_REDACT_PARAMS` (comma-separated) | `password,password_confirmation,authenticity_token,_token` |
 
 `redact_params` is merged with `Rails.application.config.filter_parameters`
-at first use (`Lantern::Redactor#param_filter`), so anything the app
+at first use (`Nightrail::Redactor#param_filter`), so anything the app
 already scrubs from its own logs is scrubbed here too, with no extra
 config. Request params are only captured at all when
 `capture_request_payload` is on, and even then only for a request that
@@ -307,18 +307,18 @@ aliases to `redact_headers`; ordinary diagnostic headers remain available.
 buffered — the block receives and can mutate the record hash in place:
 
 ```ruby
-Lantern.redact_queries    { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
-Lantern.redact_requests   { |r| ... }
-Lantern.redact_exceptions { |e| ... }
-Lantern.redact_cache_events { |c| ... }
-Lantern.redact_commands   { |c| ... }
-Lantern.redact_mail       { |m| ... }
-Lantern.redact_outgoing_requests { |o| ... }
-Lantern.redact_logs       { |l| ... }
+Nightrail.redact_queries    { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
+Nightrail.redact_requests   { |r| ... }
+Nightrail.redact_exceptions { |e| ... }
+Nightrail.redact_cache_events { |c| ... }
+Nightrail.redact_commands   { |c| ... }
+Nightrail.redact_mail       { |m| ... }
+Nightrail.redact_outgoing_requests { |o| ... }
+Nightrail.redact_logs       { |l| ... }
 ```
 
 A redactor that raises drops the record entirely (logged via
-`Lantern.debug`, never raised into app code).
+`Nightrail.debug`, never raised into app code).
 
 ## Rejection
 
@@ -326,29 +326,29 @@ Drop a record entirely based on its content — for the record types that
 don't have a matching `redact_*`:
 
 ```ruby
-Lantern.reject_queries            { |q| q[:sql].include?("solid_queue") }
-Lantern.reject_cache_events       { |c| ... }
-Lantern.reject_mail               { |m| ... }
-Lantern.reject_notifications      { |n| ... }
-Lantern.reject_broadcasts         { |b| ... }
-Lantern.reject_outgoing_requests  { |r| r[:host] == "127.0.0.1" }
-Lantern.reject_enqueued_jobs      { |j| ... }
-Lantern.reject_logs               { |l| ... }
+Nightrail.reject_queries            { |q| q[:sql].include?("solid_queue") }
+Nightrail.reject_cache_events       { |c| ... }
+Nightrail.reject_mail               { |m| ... }
+Nightrail.reject_notifications      { |n| ... }
+Nightrail.reject_broadcasts         { |b| ... }
+Nightrail.reject_outgoing_requests  { |r| r[:host] == "127.0.0.1" }
+Nightrail.reject_enqueued_jobs      { |j| ... }
+Nightrail.reject_logs               { |l| ... }
 ```
 
-`Lantern.reject_cache_keys(prefixes)` is a shortcut that appends to
+`Nightrail.reject_cache_keys(prefixes)` is a shortcut that appends to
 `config.ignored_cache_key_prefixes`, matched by `Configuration.match_cache_key?`:
 a `Regexp` matches as-is; a `String` starting with `^` (or containing
 another regex metacharacter) is compiled as one; a `String` ending in `*`
 matches as a prefix; anything else must match the key exactly.
 
 ```ruby
-Lantern.reject_cache_keys %w[session: rack::attack* ^feature_flag_\d+$]
+Nightrail.reject_cache_keys %w[session: rack::attack* ^feature_flag_\d+$]
 ```
 
 A rejector block returning truthy drops the record before it's buffered;
 a raising rejector is treated as "don't reject" (fails open, logged via
-`Lantern.debug`).
+`Nightrail.debug`).
 
 ## before_ingest
 
@@ -357,39 +357,39 @@ inspect or drop records as a group (redact/reject hooks above run
 per-record, earlier, at record-build time):
 
 ```ruby
-Lantern.before_ingest { |batch| batch.size < 10_000 }   # return false to drop the whole batch
-Lantern.before_ingest { |batch| batch.reject { |r| r[:t] == "log" } }  # return an Array to replace it
+Nightrail.before_ingest { |batch| batch.size < 10_000 }   # return false to drop the whole batch
+Nightrail.before_ingest { |batch| batch.reject { |r| r[:t] == "log" } }  # return an Array to replace it
 ```
 
 Multiple hooks chain; any hook returning `false` drops the batch and
-skips remaining hooks (`Lantern.run_before_ingest`, `lib/lantern.rb`).
+skips remaining hooks (`Nightrail.run_before_ingest`, `lib/nightrail.rb`).
 
 ## Buffering, flushing, transport
 
-One background thread per process (`Lantern::Reporter`,
-`lib/lantern/reporter.rb`), re-armed after fork so each Puma cluster
+One background thread per process (`Nightrail::Reporter`,
+`lib/nightrail/reporter.rb`), re-armed after fork so each Puma cluster
 worker / Solid Queue forked worker gets its own. Never touches the app
 database.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `buffer_size` | `LANTERN_BUFFER_SIZE` | `10000` | Max buffered records (`Lantern::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. Keep it at or above `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
-| `buffer_bytes` | `LANTERN_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
-| `execution_buffer_bytes` | `LANTERN_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
-| `batch_bytes` | `LANTERN_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
-| `backpressure` | `LANTERN_BACKPRESSURE` | `true` | Adapt every execution kind's effective sample rate when the reporter buffer reaches its high-water mark or ingest is in retry backoff. |
-| `backpressure_high_water` | `LANTERN_BACKPRESSURE_HIGH_WATER` | `0.8` | Fraction of either `buffer_size` or `buffer_bytes` that signals pressure. Values must be greater than `0.0` and at most `1.0`; invalid values use the default. |
-| `flush_interval` | `LANTERN_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
-| `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
-| `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
-| `timeout` | `LANTERN_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
-| `shutdown_timeout` | `LANTERN_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. A deployment drain timeout must be longer than this. |
+| `buffer_size` | `NIGHTRAIL_BUFFER_SIZE` | `10000` | Max buffered records (`Nightrail::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. Keep it at or above `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
+| `buffer_bytes` | `NIGHTRAIL_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
+| `execution_buffer_bytes` | `NIGHTRAIL_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
+| `batch_bytes` | `NIGHTRAIL_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
+| `backpressure` | `NIGHTRAIL_BACKPRESSURE` | `true` | Adapt every execution kind's effective sample rate when the reporter buffer reaches its high-water mark or ingest is in retry backoff. |
+| `backpressure_high_water` | `NIGHTRAIL_BACKPRESSURE_HIGH_WATER` | `0.8` | Fraction of either `buffer_size` or `buffer_bytes` that signals pressure. Values must be greater than `0.0` and at most `1.0`; invalid values use the default. |
+| `flush_interval` | `NIGHTRAIL_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
+| `flush_threshold` | `NIGHTRAIL_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
+| `connect_timeout` | `NIGHTRAIL_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
+| `timeout` | `NIGHTRAIL_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
+| `shutdown_timeout` | `NIGHTRAIL_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. A deployment drain timeout must be longer than this. |
 
-Delivery (`Lantern::Transport::Http`, `lib/lantern/transport/http.rb`):
+Delivery (`Nightrail::Transport::Http`, `lib/nightrail/transport/http.rb`):
 gzip NDJSON POST to `{ingest_url}/ingest`, one retry on a raised error or
 a 5xx within each delivery attempt. If that still fails — or ingest returns
 402, 408, or 429 — the immutable batch and its prior drop count are retained
-for retry. Every newly formed batch gets an `X-Lantern-Batch-Id` UUID which is
+for retry. Every newly formed batch gets an `X-Nightrail-Batch-Id` UUID which is
 reused for the immediate HTTP retry and every later reporter retry; the
 platform can therefore return the first committed result without inserting
 the payload twice. Records written while a request is in flight collect in a
@@ -403,7 +403,7 @@ lifetime); it and other permanent client rejections are reported through
 
 HTTPS connections explicitly use OpenSSL `VERIFY_PEER`, and redirects are not
 followed. Plain HTTP is refused unless the host is loopback or
-`LANTERN_ALLOW_HTTP=true`; `lantern:doctor` reports the policy and boot logs a
+`NIGHTRAIL_ALLOW_HTTP=true`; `nightrail:doctor` reports the policy and boot logs a
 warning when an insecure URL is refused.
 
 On every reporter flush tick, adaptive backpressure doubles a process-local
@@ -415,12 +415,12 @@ The sampler reads the reporter's Float without locking the request path; the
 reporter is its only writer, an ivar assignment is atomic, and one stale read
 only affects one probabilistic decision. Set `backpressure` false to keep the
 factor at 1. The current value is sent as
-`X-Lantern-Backpressure-Factor` whenever it is greater than 1.
+`X-Nightrail-Backpressure-Factor` whenever it is greater than 1.
 
-`Lantern.flush` forces an immediate flush (also called by the `command`
+`Nightrail.flush` forces an immediate flush (also called by the `command`
 patches after a rake task/runner invocation finishes, so short-lived
 processes don't lose their last batch to the flush interval). An unhandled
-exception (`Lantern.record_now` → `Reporter#write_now`) enqueues the record
+exception (`Nightrail.record_now` → `Reporter#write_now`) enqueues the record
 and asks for an urgent flush; it never performs network I/O or a timeout
 cycle on the application thread. Urgent means within a quarter of a second
 (`Reporter::URGENT_FLUSH_DELAY`), not instantly: during an exception storm
@@ -440,20 +440,20 @@ process exit after that deadline cannot preserve records for the next boot.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `slow_query_threshold_ms` | `LANTERN_SLOW_QUERY_MS` | `5.0` | Above this, a query's source location is resolved fresh instead of reused from the group cache (see `query` in `docs/records.md`). |
-| `n_plus_one_threshold` | `LANTERN_N_PLUS_ONE_THRESHOLD` | `5` | Same query group repeating this many times in one execution fires one `n_plus_one` record. |
+| `slow_query_threshold_ms` | `NIGHTRAIL_SLOW_QUERY_MS` | `5.0` | Above this, a query's source location is resolved fresh instead of reused from the group cache (see `query` in `docs/records.md`). |
+| `n_plus_one_threshold` | `NIGHTRAIL_N_PLUS_ONE_THRESHOLD` | `5` | Same query group repeating this many times in one execution fires one `n_plus_one` record. |
 | `max_view_renders_per_execution` | — (code only) | `20` | Caps stored `view_render` records per execution; all renders still count toward the parent's `view_renders` counter regardless of the cap. |
-| `capture_query_explain` | `LANTERN_CAPTURE_QUERY_EXPLAIN` | `false` | Attach the adapter's own query plan to slow `SELECT`s as the `query` record's `explain` field. **Its own privacy decision, independent of `capture_sql_values`:** the EXPLAIN runs on the raw statement (a plan of normalized SQL would be meaningless), and a plan can echo literal predicate values — Postgres prints them in `Filter` and `Index Cond` lines. Leave it off if that matters. The EXPLAIN runs on the same connection the query just used, with Lantern paused so it never records itself, and is rate-limited to one per query shape per process per 10 minutes. Off by default: it doubles the round trips for the queries it fires on. |
-| `explain_threshold_ms` | `LANTERN_EXPLAIN_THRESHOLD_MS` | `100.0` | Minimum query duration before `capture_query_explain` will explain it. |
-| `capture_sql_values` | `LANTERN_CAPTURE_SQL_VALUES` | `false` | Send the raw adapter SQL in `query.sql`. Off by default: a `query` record carries the normalized statement shape — placeholders and structure kept, string/numeric/hex/dollar-quoted literals and SQL comments removed — because SQL literals routinely contain email addresses, tokens, and other customer data. Active Record's separate structured binds are never sent in either mode. Normalization follows each dialect's *default* backslash-escaping rule (MySQL escapes, PostgreSQL does not, `E''` does, SQLite does not); a session running `NO_BACKSLASH_ESCAPES` or `standard_conforming_strings = off` is not visible in the notification, and a hand-written statement mixing that mode with a backslash before a quote can leave part of the statement's text in the shape. |
+| `capture_query_explain` | `NIGHTRAIL_CAPTURE_QUERY_EXPLAIN` | `false` | Attach the adapter's own query plan to slow `SELECT`s as the `query` record's `explain` field. **Its own privacy decision, independent of `capture_sql_values`:** the EXPLAIN runs on the raw statement (a plan of normalized SQL would be meaningless), and a plan can echo literal predicate values — Postgres prints them in `Filter` and `Index Cond` lines. Leave it off if that matters. The EXPLAIN runs on the same connection the query just used, with Nightrail paused so it never records itself, and is rate-limited to one per query shape per process per 10 minutes. Off by default: it doubles the round trips for the queries it fires on. |
+| `explain_threshold_ms` | `NIGHTRAIL_EXPLAIN_THRESHOLD_MS` | `100.0` | Minimum query duration before `capture_query_explain` will explain it. |
+| `capture_sql_values` | `NIGHTRAIL_CAPTURE_SQL_VALUES` | `false` | Send the raw adapter SQL in `query.sql`. Off by default: a `query` record carries the normalized statement shape — placeholders and structure kept, string/numeric/hex/dollar-quoted literals and SQL comments removed — because SQL literals routinely contain email addresses, tokens, and other customer data. Active Record's separate structured binds are never sent in either mode. Normalization follows each dialect's *default* backslash-escaping rule (MySQL escapes, PostgreSQL does not, `E''` does, SQLite does not); a session running `NO_BACKSLASH_ESCAPES` or `standard_conforming_strings = off` is not visible in the notification, and a hand-written statement mixing that mode with a backslash before a quote can leave part of the statement's text in the shape. |
 
 ## Process health
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `health_interval` | `LANTERN_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
+| `health_interval` | `NIGHTRAIL_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
 
-Lantern re-arms the reporter, sampler, and profiler after `fork` (one
+Nightrail re-arms the reporter, sampler, and profiler after `fork` (one
 `ActiveSupport::ForkTracker` callback, Rails' own `Process._fork` hook), so
 clustered Puma workers and forked Solid Queue workers each get a fresh
 buffer, transport policy state, process record, health thread, and profiler
@@ -471,7 +471,7 @@ the ones the fork callback replaces in every worker. The Rake and
 and `runner` hooks, which only a rake or runner process fires, so a web or
 worker boot does not require rake or railties' runner command.
 
-A numeric `LANTERN_*` value that is not a number (`LANTERN_BUFFER_SIZE=12px`)
+A numeric `NIGHTRAIL_*` value that is not a number (`NIGHTRAIL_BUFFER_SIZE=12px`)
 falls back to the default documented in the tables above rather than being
 coerced to `0`.
 
@@ -483,20 +483,20 @@ crash-free session and crash-free user rates are computed from — the
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `track_sessions` | `LANTERN_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
-| `session_flush_interval` | `LANTERN_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
-| `session_timeout` | `LANTERN_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
+| `track_sessions` | `NIGHTRAIL_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
+| `session_flush_interval` | `NIGHTRAIL_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
+| `session_timeout` | `NIGHTRAIL_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
 
 There are two sources, and they meet on the same id:
 
-- **The browser client** (`app/frontend/lib/lantern.ts`, installed by
-  `lantern:install`) mints one id per tab in `sessionStorage` and mirrors it
-  into a `lantern_session` cookie. It rides along on the beacon flushes the
+- **The browser client** (`app/frontend/lib/nightrail.ts`, installed by
+  `nightrail:install`) mints one id per tab in `sessionStorage` and mirrors it
+  into a `nightrail_session` cookie. It rides along on the beacon flushes the
   client already sends for visits, so this costs no extra requests. This is
   the primary source for a web app, and it is what makes session duration
   mean "how long the tab was open".
 - **The request middleware** aggregates, in memory, every request that either
-  resolves a user or carries that cookie (or an `X-Lantern-Session` header) —
+  resolves a user or carries that cookie (or an `X-Nightrail-Session` header) —
   the only source for an API-only app, and the only one that can see an
   unhandled exception, which is what makes a session `crashed`.
 
@@ -510,24 +510,24 @@ dominated by Rails' own housekeeping:
 
 | Attribute | Env var | Default | Affects |
 |---|---|---|---|
-| `capture_default_vendor_commands` | `LANTERN_CAPTURE_DEFAULT_VENDOR_COMMANDS` | `false` | `Configuration::DEFAULT_VENDOR_COMMANDS`: `db:migrate`, `db:schema:load`, `db:schema:dump`, `db:seed`, `db:prepare`, `assets:precompile`, `assets:clobber`, `tmp:cache:clear`, `log:clear`. |
-| `capture_default_vendor_cache_keys` | `LANTERN_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS` | `false` | `Configuration::DEFAULT_VENDOR_CACHE_KEYS`: `rack::attack`, `flipper`, `solid_cable`, `active_storage`, `migration_`, `schema_cache` prefixes. |
-| `capture_framework_events` | `LANTERN_CAPTURE_FRAMEWORK_EVENTS` | `false` | Rails 8.1 structured `Rails.event` events under `action_controller.*`, `active_record.*`, etc. — already redundant with the `request`/`job_attempt` records, so off by default. |
+| `capture_default_vendor_commands` | `NIGHTRAIL_CAPTURE_DEFAULT_VENDOR_COMMANDS` | `false` | `Configuration::DEFAULT_VENDOR_COMMANDS`: `db:migrate`, `db:schema:load`, `db:schema:dump`, `db:seed`, `db:prepare`, `assets:precompile`, `assets:clobber`, `tmp:cache:clear`, `log:clear`. |
+| `capture_default_vendor_cache_keys` | `NIGHTRAIL_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS` | `false` | `Configuration::DEFAULT_VENDOR_CACHE_KEYS`: `rack::attack`, `flipper`, `solid_cable`, `active_storage`, `migration_`, `schema_cache` prefixes. |
+| `capture_framework_events` | `NIGHTRAIL_CAPTURE_FRAMEWORK_EVENTS` | `false` | Rails 8.1 structured `Rails.event` events under `action_controller.*`, `active_record.*`, etc. — already redundant with the `request`/`job_attempt` records, so off by default. |
 
 `ignored_cache_key_prefixes` (code only, no env var — use
-`Lantern.reject_cache_keys` above) is separate from these vendor
+`Nightrail.reject_cache_keys` above) is separate from these vendor
 defaults and always applies.
 
 ## Interactive sessions: console and runner
 
 An engineer poking at production from a shell is not the application failing.
-Sentry never hooked `bin/rails console` at all, and Lantern keeps that
+Sentry never hooked `bin/rails console` at all, and Nightrail keeps that
 behaviour — while making sure a deployed script still reports.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `capture_console` | `LANTERN_CAPTURE_CONSOLE` | `false` | When `false`, a `bin/rails console` process captures nothing — no exceptions, queries, or logs — starts no reporter/health/session thread, and sends no `process` or `health` record. Set it to `true` for the rare "trace what I'm about to do in here" session. Detected from `Rails::Console`, which railties defines before the app boots (`lib/lantern/console.rb`). |
-| `interactive_runner_paths` | `LANTERN_INTERACTIVE_RUNNER_PATHS` (comma-separated) | `Configuration::DEFAULT_INTERACTIVE_RUNNER_PATHS`: `/tmp/`, `/var/tmp/` | Scratch roots. A `bin/rails runner` given a `.rb` file under one of these is treated as hand-written (typed in a shell inside a container) rather than deployed. |
+| `capture_console` | `NIGHTRAIL_CAPTURE_CONSOLE` | `false` | When `false`, a `bin/rails console` process captures nothing — no exceptions, queries, or logs — starts no reporter/health/session thread, and sends no `process` or `health` record. Set it to `true` for the rare "trace what I'm about to do in here" session. Detected from `Rails::Console`, which railties defines before the app boots (`lib/nightrail/console.rb`). |
+| `interactive_runner_paths` | `NIGHTRAIL_INTERACTIVE_RUNNER_PATHS` (comma-separated) | `Configuration::DEFAULT_INTERACTIVE_RUNNER_PATHS`: `/tmp/`, `/var/tmp/` | Scratch roots. A `bin/rails runner` given a `.rb` file under one of these is treated as hand-written (typed in a shell inside a container) rather than deployed. |
 
 `bin/rails runner` is classified by **where the code came from**, which is
 the only thing that separates a typo from a cron job:
@@ -548,14 +548,14 @@ and Solid Queue jobs are never interactive.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Send source snippet lines surrounding each in-application exception frame to Lantern Cloud. This is on by default for crash context; disable it when source disclosure is outside the application's telemetry policy. |
-| `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
-| `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
-| `capture_job_arguments` | `LANTERN_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
-| `capture_job_retry_errors` | `LANTERN_CAPTURE_JOB_RETRY_ERRORS` | `false` | Capture the exception that caused an Active Job `retry_on` retry as handled, warning-level exception telemetry. Off by default because retries are usually expected and capturing them can flood the issues list. The retry log line is recorded either way. |
-| `capture_response_body_on_error` | `LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR` | `false` | Add the first 4 KiB of the response body to an `outgoing_request` record when the response was an error (status ≥ 400, or the call raised). A JSON object body is filtered like request params and re-serialized; anything else is stored as it arrived. Off by default — a third party's error body is arbitrary data you didn't write. |
-| `ignored_exceptions` | `LANTERN_IGNORED_EXCEPTIONS` (comma-separated) | `Configuration::DEFAULT_IGNORED_EXCEPTIONS` | Class names never captured, handled or not. The default list is Sentry's Rails-relevant exclusions plus `SignalException` (a SIGTERM/SIGINT ending a process is a shutdown, not an error; rake and runner also close their command record with exit code 128+signal instead of reporting). Matched against the error's class *and every named ancestor*, so your own subclass of a listed error is ignored too. Setting the env var replaces the default list; append instead with `c.ignored_exceptions += ["MyApp::Expected"]`. |
-| `capture_rescued_exceptions` | `LANTERN_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |
+| `capture_exception_source` | `NIGHTRAIL_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Send source snippet lines surrounding each in-application exception frame to Nightrail Cloud. This is on by default for crash context; disable it when source disclosure is outside the application's telemetry policy. |
+| `capture_exception_locals` | `NIGHTRAIL_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
+| `capture_request_payload` | `NIGHTRAIL_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
+| `capture_job_arguments` | `NIGHTRAIL_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
+| `capture_job_retry_errors` | `NIGHTRAIL_CAPTURE_JOB_RETRY_ERRORS` | `false` | Capture the exception that caused an Active Job `retry_on` retry as handled, warning-level exception telemetry. Off by default because retries are usually expected and capturing them can flood the issues list. The retry log line is recorded either way. |
+| `capture_response_body_on_error` | `NIGHTRAIL_CAPTURE_RESPONSE_BODY_ON_ERROR` | `false` | Add the first 4 KiB of the response body to an `outgoing_request` record when the response was an error (status ≥ 400, or the call raised). A JSON object body is filtered like request params and re-serialized; anything else is stored as it arrived. Off by default — a third party's error body is arbitrary data you didn't write. |
+| `ignored_exceptions` | `NIGHTRAIL_IGNORED_EXCEPTIONS` (comma-separated) | `Configuration::DEFAULT_IGNORED_EXCEPTIONS` | Class names never captured, handled or not. The default list is Sentry's Rails-relevant exclusions plus `SignalException` (a SIGTERM/SIGINT ending a process is a shutdown, not an error; rake and runner also close their command record with exit code 128+signal instead of reporting). Matched against the error's class *and every named ancestor*, so your own subclass of a listed error is ignored too. Setting the env var replaces the default list; append instead with `c.ignored_exceptions += ["MyApp::Expected"]`. |
+| `capture_rescued_exceptions` | `NIGHTRAIL_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |
 
 `DEFAULT_IGNORED_EXCEPTIONS` is the Rails-relevant subset of Sentry's own
 `excluded_exceptions` defaults — routine 4xx plumbing rather than
@@ -573,22 +573,22 @@ application bugs:
 Note that Rails never reports an exception that has a `rescue_response`
 (`ActiveRecord::RecordNotFound` → 404) to `Rails.error` in the first
 place, so several of these are belt-and-braces for the paths that *do*
-reach Lantern — jobs, `Lantern.report`, and `rescue_from`.
+reach Nightrail — jobs, `Nightrail.report`, and `rescue_from`.
 
 ## Logging
 
 | Attribute | Env var | Default |
 |---|---|---|
-| `log_level` | `LANTERN_LOG_LEVEL` | `:info` |
+| `log_level` | `NIGHTRAIL_LOG_LEVEL` | `:info` |
 
 Only `Rails.logger` lines at or above this level become `log` records.
 Rails' own per-request/job noise (`"Started GET"`, `"Processing by"`,
 `"Rendered"`, etc.) is filtered regardless of level, since the
 `request`/`job_attempt` records already carry that information.
 Message text is otherwise shipped as written and is not parsed for embedded
-secrets. Keep secrets out of logs, use `Lantern.redact_logs` for an
+secrets. Keep secrets out of logs, use `Nightrail.redact_logs` for an
 application-specific scrub, or disable log records with
-`LANTERN_IGNORE_LOGS=true`.
+`NIGHTRAIL_IGNORE_LOGS=true`.
 
 ## User resolution
 
@@ -599,7 +599,7 @@ c.user { |user| { id: user.id, name: user.name, email: user.email } }
 Default (no block set): reads `Current.user` (authentication-zero /
 Rails 8 auth generator convention) if defined, else Warden's `env["warden"].user`
 (Devise). The resolved id is memoized per user per process-hour so a
-`user` record ships once, not once per request (`Lantern::Subscribers::Users`,
+`user` record ships once, not once per request (`Nightrail::Subscribers::Users`,
 `docs/records.md`'s `user` section).
 
 Ids are tenant-scoped: with a tenant bound, `1` is recorded as `acme:1`. It
@@ -612,7 +612,7 @@ external id, or `"#{org.slug}:#{user.id}"`) and it is left alone.
 A request resolves its user at the end, but a job enqueued mid-action needs
 one immediately, so `JobTracing#serialize` resolves the enqueuing
 execution's user and tenant and puts those two identifier strings into the
-Active Job payload (`lantern_user`/`lantern_tenant`). The worker restores
+Active Job payload (`nightrail_user`/`nightrail_tenant`). The worker restores
 them before the attempt records anything, so a `job_attempt` and every
 child record under it are attributed to the person whose request enqueued
 the job rather than to a worker process that has no signed-in user — and a
@@ -631,19 +631,19 @@ Who is behind a browser beacon (visits, browser sessions, JavaScript
 errors). The beacon is handled by the gem's engine controller, outside your
 `ApplicationController`, so an app that authenticates in a `before_action`
 -- a signed session cookie looked up per request -- has not run it when the
-beacon arrives, and `Current.user` is nil there. Give Lantern the same
+beacon arrives, and `Current.user` is nil there. Give Nightrail the same
 lookup; it hands the result to the `user` block above. Not needed when
 `Current.user` is set in middleware or by Warden.
 
 ## Tenant / context
 
 ```ruby
-Lantern.context(tenant: org.slug, plan: org.plan)
+Nightrail.context(tenant: org.slug, plan: org.plan)
 ```
 
 Writes through to `ActiveSupport::ExecutionContext`, `Rails.error.set_context`,
-and `Rails.event.set_context` in one call (`Lantern::Context.set`,
-`lib/lantern/context.rb`) — so context set for Lantern also shows up
+and `Rails.event.set_context` in one call (`Nightrail::Context.set`,
+`lib/nightrail/context.rb`) — so context set for Nightrail also shows up
 anywhere else Rails' own context stores are read. Serialized onto every
 record's `context` field, through the same `ActiveSupport::ParameterFilter`
 that redacts request params (`c.redact_params` plus Rails'
@@ -652,39 +652,39 @@ that redacts request params (`c.redact_params` plus Rails'
 it was set. A context over 64KB is rebuilt smaller rather than cut: whole
 values are kept while they fit, an oversized string value ends with
 `[TRUNCATED]`, anything that still does not fit is dropped, and the result
-carries `"_lantern_truncated": true`. It is always parseable JSON — the
+carries `"_nightrail_truncated": true`. It is always parseable JSON — the
 previous behaviour sliced the encoded string at 64KB, which produced a
 fragment the platform could not read at all. `tenant` specifically is
-auto-detected with no explicit `Lantern.context` call needed when the app
+auto-detected with no explicit `Nightrail.context` call needed when the app
 uses `activerecord-tenanted` (`ActiveRecord::Base.current_tenant`) or
 `TenantRecord` (`TenantRecord.current_tenant`) — `Context.current_tenant`
 checks both. The tenant is re-read while it is still nil, so a tenant bound
 *inside* the execution (activerecord-tenanted's `TenantSelector` middleware
-sits under Lantern's, as do `around_action`s and a job's `with_tenant`
+sits under Nightrail's, as do `around_action`s and a job's `with_tenant`
 block) still lands on the request/job record and every child made after
 the bind. Records made before the bind (a `before_action` that loads the
 user, say) keep `tenant: nil`.
 
 ## Inertia: beacon and SSR
 
-`beacon_enabled` (`LANTERN_BEACON`, default `true`) gates
-`POST /lantern/beacon`, mounted by the install generator
-(`mount Lantern::Engine, at: "/lantern"`) — see `visit` and `exception` in
+`beacon_enabled` (`NIGHTRAIL_BEACON`, default `true`) gates
+`POST /nightrail/beacon`, mounted by the install generator
+(`mount Nightrail::Engine, at: "/nightrail"`) — see `visit` and `exception` in
 `docs/records.md` for the full field lists and client batching behavior.
 The same beacon carries visit timing, Core Web Vitals, browser sessions,
 and every JavaScript error the page throws; turning `beacon_enabled` off
 turns off all four. The endpoint takes no credential, so it is throttled
 per client IP (`beacon_rate_limit`, default 120 a minute, `0` to disable);
 a client past the limit gets a 429 with `Retry-After` and nothing from that
-POST is recorded. Client setup: call `startLantern()` (generated at
-`app/frontend/lib/lantern.ts`) from your Inertia entrypoint.
+POST is recorded. Client setup: call `startNightrail()` (generated at
+`app/frontend/lib/nightrail.ts`) from your Inertia entrypoint.
 
-`startLantern` takes three optional settings, none of which has a
+`startNightrail` takes three optional settings, none of which has a
 server-side equivalent — they are decisions about the browser the code is
 running in:
 
 ```ts
-startLantern({
+startNightrail({
   // Messages never worth an issue, added to the defaults (both
   // "ResizeObserver loop ..." messages). Strings match anywhere in the
   // message; regexes are tested against it.
@@ -695,16 +695,16 @@ startLantern({
   // other than the app's own is dropped regardless.
   denyUrls: [/analytics\./],
   // Only for apps that scope tenants by path or subdomain: the beacon
-  // posts to /lantern/beacon, outside that scoping, so the server cannot
+  // posts to /nightrail/beacon, outside that scoping, so the server cannot
   // resolve the tenant itself. Read on every flush. A tenant the server
   // does resolve (`Context.current_tenant`) always wins.
   tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
 })
 ```
 
-The same file exports two more things. `lanternRootOptions()` returns
+The same file exports two more things. `nightrailRootOptions()` returns
 React 19's `onCaughtError`/`onUncaughtError` root options —
-`createRoot(el, lanternRootOptions())` — which is what reports an error a
+`createRoot(el, nightrailRootOptions())` — which is what reports an error a
 boundary caught, since React only sends those to `console.error` outside
 a development build. `reportError(error, context?)` reports an error the
 app caught itself, and is how a React 18 boundary's `componentDidCatch`
@@ -712,7 +712,7 @@ does the same thing. See
 [`docs/replacing-sentry.md`](replacing-sentry.md) for what is and is not
 captured versus `@sentry/react`.
 
-SSR timing needs no configuration: `Lantern::Patches::Inertia` prepends
+SSR timing needs no configuration: `Nightrail::Patches::Inertia` prepends
 `InertiaRails::Renderer#ssr_render` whenever `inertia_rails` SSR is
 enabled, and the resulting `ssr_ms` lands on the `request` record's
 `inertia` field automatically.
@@ -720,17 +720,17 @@ enabled, and the resulting `ssr_ms` lands on the `request` record's
 ## Manual reporting and instrumentation
 
 ```ruby
-Lantern.report(error, handled: true, context: { order_id: order.id })
-Lantern.ignore { ExpensiveSync.run }          # pause recording for the block, restored after
-Lantern.instrument_outgoing(:get, url) { http_client.get(url) }  # for HTTP clients without a dedicated patch
+Nightrail.report(error, handled: true, context: { order_id: order.id })
+Nightrail.ignore { ExpensiveSync.run }          # pause recording for the block, restored after
+Nightrail.instrument_outgoing(:get, url) { http_client.get(url) }  # for HTTP clients without a dedicated patch
 ```
 
-`Lantern.report` defaults `severity` to `:warning` when `handled: true`,
-`:error` otherwise, and tags `source: "lantern.manual"`.
-`Lantern.instrument_outgoing` records an `outgoing_request` only if the
+`Nightrail.report` defaults `severity` to `:warning` when `handled: true`,
+`:error` otherwise, and tags `source: "nightrail.manual"`.
+`Nightrail.instrument_outgoing` records an `outgoing_request` only if the
 block's return value responds to `#status` — for Faraday-alike client
 objects that aren't Net::HTTP and don't already go through
-`Lantern::Faraday` middleware.
+`Nightrail::Faraday` middleware.
 
 ### Fingerprinting
 
@@ -741,21 +741,21 @@ normalization removes). Three ways to override it, in precedence order:
 
 ```ruby
 # 1. Per call, when you already know the bucket.
-Lantern.report(error, fingerprint: [ "payments", gateway.name ])
+Nightrail.report(error, fingerprint: [ "payments", gateway.name ])
 
 # 2. On your own error class, so every raise site agrees.
 class PaymentError < StandardError
-  def lantern_fingerprint = [ "payments", gateway ]
+  def nightrail_fingerprint = [ "payments", gateway ]
 end
 
 # 3. Globally, in an initializer (one block; Sentry's before_send fingerprint).
-Lantern.fingerprint do |error, default|
+Nightrail.fingerprint do |error, default|
   error.is_a?(Faraday::Error) ? [ "upstream", error.response_status, :default ] : nil
 end
 ```
 
 The block is called with the error and `default` — the Array of parts
-Lantern would have hashed (`[class, file, line, normalized message]`). It
+Nightrail would have hashed (`[class, file, line, normalized message]`). It
 returns an Array of strings/symbols/numbers; the literal `:default`
 splices those default parts in wherever you put it (Sentry's
 `{{ default }}`). Parts are stringified, empty ones dropped, and the
@@ -763,7 +763,7 @@ result capped at 10 parts of 200 chars. Returning nil or an empty Array —
 or raising — falls back to the default, so a bad resolver can never lose
 an exception. Every `exception` record carries the parts it was hashed on
 (`fingerprint`) and where they came from (`fingerprint_source`), and an
-attachment filed against the error (`Lantern.attach(..., exception:)`)
+attachment filed against the error (`Nightrail.attach(..., exception:)`)
 follows the same rule, so it lands on the same issue.
 
 ### Attachments
@@ -773,11 +773,11 @@ the webhook body a customer swears they sent — as its own `attachment`
 record (Sentry's `Sentry.add_attachment`):
 
 ```ruby
-Lantern.attach("payload.json", request.raw_post)                  # a String
-Lantern.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf")) # a Pathname, or any IO
-Lantern.attach("payload.json", body, content_type: "text/plain")  # override the guessed type
-Lantern.attach("payload.json", body, exception: error)            # file it against an issue
-Lantern.report(error, attachments: { "payload.json" => body })    # capture + attach in one call
+Nightrail.attach("payload.json", request.raw_post)                  # a String
+Nightrail.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf")) # a Pathname, or any IO
+Nightrail.attach("payload.json", body, content_type: "text/plain")  # override the guessed type
+Nightrail.attach("payload.json", body, exception: error)            # file it against an issue
+Nightrail.report(error, attachments: { "payload.json" => body })    # capture + attach in one call
 ```
 
 `content_type` defaults to whatever Marcel makes of the name's extension
@@ -786,23 +786,23 @@ the record's `exception_group_hash` to the same group hash the `exception`
 record is filed under, so the platform shows the attachment on that issue.
 An attachment made inside a recording execution belongs to it; made with
 nothing executing, it ships standalone. Returns nil and records nothing
-when Lantern is disabled or the payload is empty.
+when Nightrail is disabled or the payload is empty.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `max_attachment_bytes` | `LANTERN_MAX_ATTACHMENT_BYTES` | `1048576` (1 MiB) | Payloads longer than this are cut to the cap and the record is flagged `truncated: true`. Files and IOs are read with at most cap + 1 bytes rather than read whole and then sliced. `bytes` on the record is always the stored size. Data is gzipped and base64-encoded on the wire, so the cap is on the *original* bytes, not what ships. |
+| `max_attachment_bytes` | `NIGHTRAIL_MAX_ATTACHMENT_BYTES` | `1048576` (1 MiB) | Payloads longer than this are cut to the cap and the record is flagged `truncated: true`. Files and IOs are read with at most cap + 1 bytes rather than read whole and then sliced. `bytes` on the record is always the stored size. Data is gzipped and base64-encoded on the wire, so the cap is on the *original* bytes, not what ships. |
 
 ## on_unrecoverable
 
 ```ruby
-Lantern.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
+Nightrail.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 ```
 
-Called whenever Lantern rescues one of its own internal errors, ingest
+Called whenever Nightrail rescues one of its own internal errors, ingest
 permanently rejects a batch, or shutdown expires with retained records that
 could not be sent. Retryable delivery failures stay buffered and do not fire
 the callback on every attempt. With no callback registered, this falls back
-to `Lantern.debug` (stderr, gated on `LANTERN_DEBUG`, never `Rails.logger` —
+to `Nightrail.debug` (stderr, gated on `NIGHTRAIL_DEBUG`, never `Rails.logger` —
 so gem-internal failures can never themselves become `log` records).
 
 ## Faraday
@@ -811,23 +811,23 @@ Opt in per connection (only needed for a non-default Faraday adapter;
 the default adapter is Net::HTTP, already covered globally):
 
 ```ruby
-Faraday.new(url) { |f| f.use Lantern::Faraday }
+Faraday.new(url) { |f| f.use Nightrail::Faraday }
 ```
 
 ## debug
 
 | Attribute | Env var | Default |
 |---|---|---|
-| `debug` | `LANTERN_DEBUG` | `false` |
+| `debug` | `NIGHTRAIL_DEBUG` | `false` |
 
-Internal diagnostics to stderr (`warn`, prefixed `[lantern]`) — deliberately
+Internal diagnostics to stderr (`warn`, prefixed `[nightrail]`) — deliberately
 not `Rails.logger`, so turning this on can't create a feedback loop of
-`log` records about Lantern's own failures.
+`log` records about Nightrail's own failures.
 
 ## Public facade — full method list
 
-Mirrors Laravel Nightwatch's facade shape. All on the `Lantern` module
-(`lib/lantern.rb`) unless noted:
+Mirrors Laravel Nightwatch's facade shape. All on the `Nightrail` module
+(`lib/nightrail.rb`) unless noted:
 
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
 `keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
@@ -840,20 +840,20 @@ are the ignore block's building blocks — nestable), `record(type, **fields)`,
 ## Rake tasks
 
 Ship with the gem via Rails::Engine's default `lib/tasks` convention
-(`lib/tasks/lantern_tasks.rake`):
+(`lib/tasks/nightrail_tasks.rake`):
 
-- **`lantern:status`** — pings `{ingest_url}/ingest/ping` with the
-  configured token; aborts if `LANTERN_TOKEN` is unset or the ping fails.
-- **`lantern:doctor`** — prints a ✓/✗ checklist of the whole install: token,
-  ingest URL, `GET /ingest/ping`, `Lantern::Middleware::Request` in the
+- **`nightrail:status`** — pings `{ingest_url}/ingest/ping` with the
+  configured token; aborts if `NIGHTRAIL_TOKEN` is unset or the ping fails.
+- **`nightrail:doctor`** — prints a ✓/✗ checklist of the whole install: token,
+  ingest URL, `GET /ingest/ping`, `Nightrail::Middleware::Request` in the
   middleware stack, the mounted engine's beacon route, `config.deploy` and
   its environment, `REVISION`, Git, or initializer source, sample rates,
   ignored record types, the Kamal
-  `post-deploy` hook, `app/frontend/lib/lantern.ts`, and whether
-  `lantern/rspec` (or `lantern/minitest`) is required by the test helper.
+  `post-deploy` hook, `app/frontend/lib/nightrail.ts`, and whether
+  `nightrail/rspec` (or `nightrail/minitest`) is required by the test helper.
   The last five are informational; it exits non-zero only when the token is
   missing or the ping fails.
-- **`lantern:deploy[ref,name,url]`** — POSTs `{deploy, ref, name, url,
+- **`nightrail:deploy[ref,name,url]`** — POSTs `{deploy, ref, name, url,
   server, timestamp, performer, destination, service, commits}` to
   `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`; aborts
   if that's unset. `ref` defaults to `git rev-parse HEAD` when not passed.
@@ -865,8 +865,8 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention
 
 ## Kamal integration
 
-`bin/rails generate lantern:install` writes `.kamal/hooks/post-deploy` (only
-if `config/deploy.yml` already exists). It no-ops when `LANTERN_TOKEN` isn't
+`bin/rails generate nightrail:install` writes `.kamal/hooks/post-deploy` (only
+if `config/deploy.yml` already exists). It no-ops when `NIGHTRAIL_TOKEN` isn't
 set, and never fails a deploy — every network call ends in `|| true`.
 
 The hook runs on the **deployer machine**, not in a container, which is the
@@ -874,24 +874,24 @@ whole point: that's where the git history lives and where Kamal exports its
 [`KAMAL_*` variables](https://kamal-deploy.org/docs/hooks/overview/)
 (`KAMAL_VERSION`, `KAMAL_HOSTS`, `KAMAL_PERFORMER`, `KAMAL_DESTINATION`,
 `KAMAL_SERVICE`, `KAMAL_RECORDED_AT`, `KAMAL_COMMAND`, `KAMAL_SUBCOMMAND`,
-`KAMAL_ROLE`). With `curl`, `ruby`, and `LANTERN_INGEST_URL` all present it
+`KAMAL_ROLE`). With `curl`, `ruby`, and `NIGHTRAIL_INGEST_URL` all present it
 POSTs directly, twice:
 
-1. `POST $LANTERN_INGEST_URL/ingest/deploys` — `{deploy, ref, name, url,
+1. `POST $NIGHTRAIL_INGEST_URL/ingest/deploys` — `{deploy, ref, name, url,
    server, timestamp, performer, destination, service, commits}`, where
    `commits` is up to 50 `{sha, author, message, at}` objects built from
    `git log -n 50 --format='%H%x1f%an%x1f%s%x1f%cI'` piped through a one-line
    `ruby -rjson -e`. This is what lets the platform show a diff of what
    actually shipped. `name` is `KAMAL_SERVICE_VERSION`; set the optional
-   `LANTERN_DEPLOY_URL` to link the marker at a CI run or release page.
-2. `POST $LANTERN_INGEST_URL/ingest/kamal` — `{version, hosts, roles,
+   `NIGHTRAIL_DEPLOY_URL` to link the marker at a CI run or release page.
+2. `POST $NIGHTRAIL_INGEST_URL/ingest/kamal` — `{version, hosts, roles,
    performer, destination, service, recorded_at, command, subcommand}`, with
    `hosts` split out of the comma-separated `KAMAL_HOSTS`. The platform uses
    this to know which servers should be reporting.
 
-Without `curl`/`ruby`, or without `LANTERN_INGEST_URL`, it falls back to the
+Without `curl`/`ruby`, or without `NIGHTRAIL_INGEST_URL`, it falls back to the
 original behaviour — `bin/kamal app exec --primary --reuse "bin/rails
-lantern:deploy[$KAMAL_VERSION]"` — which records the same deploy minus the
+nightrail:deploy[$KAMAL_VERSION]"` — which records the same deploy minus the
 commit list.
 
 `config.deploy` itself auto-detects `KAMAL_VERSION` (and the other release
@@ -903,7 +903,7 @@ inventory.
 
 `bench/overhead.rb` boots the dummy app on SQLite, drives three request
 shapes (no queries; 20 uncached queries; the N+1 widgets page) with
-Lantern's subscribers unsubscribed and then subscribed, alternating every
+Nightrail's subscribers unsubscribed and then subscribed, alternating every
 batch, and fails (exit 1) if instrumentation adds more than the per-shape
 budget in `LIMITS` (CPU time on the request thread, not wall — stable
 under CI load — plus an allocation count). It also fails if the log
@@ -913,19 +913,19 @@ request plus 40–80µs per real query; the limits leave headroom for slower
 CI hosts without letting a real regression through unnoticed. The numbers
 and how they were taken are in [`docs/faq.md`](faq.md).
 
-## Testing your own app against Lantern
+## Testing your own app against Nightrail
 
 ```ruby
 # spec/rails_helper.rb
-require "lantern/rspec"
+require "nightrail/rspec"
 ```
 
-`lantern_records(type = nil)` flushes and returns buffered records (as
+`nightrail_records(type = nil)` flushes and returns buffered records (as
 built hashes, filtered to `type` if given) without a real network call —
-backed by `Lantern::SpecHelper::MemoryTransport`, swapped in for
-`Lantern.reporter` on first use. `require "lantern/rspec"` also includes
-`Lantern::SpecHelper` everywhere and adds the block matchers
-(`have_lantern_queries`, `have_lantern_n_plus_one`, ...) documented in
-[`testing.md`](testing.md); `require "lantern/minitest"` is the Minitest
-equivalent. `require "lantern/spec_helper"` on its own, plus your own
-`config.include Lantern::SpecHelper`, still works.
+backed by `Nightrail::SpecHelper::MemoryTransport`, swapped in for
+`Nightrail.reporter` on first use. `require "nightrail/rspec"` also includes
+`Nightrail::SpecHelper` everywhere and adds the block matchers
+(`have_nightrail_queries`, `have_nightrail_n_plus_one`, ...) documented in
+[`testing.md`](testing.md); `require "nightrail/minitest"` is the Minitest
+equivalent. `require "nightrail/spec_helper"` on its own, plus your own
+`config.include Nightrail::SpecHelper`, still works.

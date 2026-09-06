@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # A stand-in ingest endpoint for load tests: reads each batch, counts
-# records, bytes, and the X-Lantern-Dropped header, answers 200.
+# records, bytes, and the X-Nightrail-Dropped header, answers 200.
 #
 #   bundle exec puma -p 9393 -t 2:2 -q bench/load/sink.ru
 #   curl http://127.0.0.1:9393/stats          # {"batches":..,"bytes":..,"dropped":..,"records":..}
@@ -19,7 +19,7 @@ run lambda { |env|
   else
     counts[:batches] += 1
     counts[:bytes] += body.bytesize
-    counts[:dropped] += env["HTTP_X_LANTERN_DROPPED"].to_i
+    counts[:dropped] += env["HTTP_X_NIGHTRAIL_DROPPED"].to_i
     counts[:records] += (env["HTTP_CONTENT_ENCODING"] == "gzip" ? Zlib.gunzip(body) : body).count("\n")
     [ 200, { "content-type" => "application/json" }, [ '{"accepted":0,"rejected":0}' ] ]
   end

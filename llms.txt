@@ -1,37 +1,37 @@
-# Lantern
+# Nightrail
 
-> Lantern is a Ruby gem that instruments a Rails application end to end —
+> Nightrail is a Ruby gem that instruments a Rails application end to end —
 > requests, jobs, scheduled tasks, rake/runner commands, database queries and
 > N+1s, exceptions, cache, mail, notifications, broadcasts, outgoing HTTP,
 > Active Storage, view renders, and logs — links every one of them into a
 > single execution tree by `execution_id`/`trace_id`, and ships them to
-> Lantern Cloud from a background thread. It replaces a separate APM and a
+> Nightrail Cloud from a background thread. It replaces a separate APM and a
 > separate error tracker with one gem and one configuration block, costs
 > under a millisecond of CPU per request, and never writes to the
-> application's own database. Install is `bundle add lantern-observability` followed by
-> `bin/rails generate lantern:install`, which writes the initializer, mounts
+> application's own database. Install is `bundle add nightrail` followed by
+> `bin/rails generate nightrail:install`, which writes the initializer, mounts
 > the beacon engine, adds a Kamal post-deploy hook and the Inertia browser
 > client where the app has them, wires the test matchers, and then runs
-> `bin/rails lantern:doctor` to print a ✓/✗ line for every piece.
+> `bin/rails nightrail:doctor` to print a ✓/✗ line for every piece.
 
 ## Docs
 
-- [README](README.md): what Lantern is, the install, sampling, spans, profiling, tail sampling, and the Sentry option mapping table.
+- [README](README.md): what Nightrail is, the install, sampling, spans, profiling, tail sampling, and the Sentry option mapping table.
 - [Getting started](docs/getting-started.md): five-minute install for a Rails 8 app, where the token comes from, the three optional lines, and deploying under Kamal, Docker/Heroku/Render, or no deploy tool at all.
-- [Configuration](docs/configuration.md): every configuration option and its `LANTERN_*` environment variable, plus the full public facade, redaction, rejection, transport and buffering behaviour, and the rake tasks.
+- [Configuration](docs/configuration.md): every configuration option and its `NIGHTRAIL_*` environment variable, plus the full public facade, redaction, rejection, transport and buffering behaviour, and the rake tasks.
 - [Record types](docs/records.md): every record type the gem ships and every attribute on it, sourced from the code that builds it.
-- [Testing](docs/testing.md): the RSpec and Minitest matchers (`have_lantern_queries`, `have_lantern_n_plus_one`, `record_lantern_span`, `record_lantern_exception`, `have_lantern_outgoing_requests`) and a CI performance-gate recipe.
+- [Testing](docs/testing.md): the RSpec and Minitest matchers (`have_nightrail_queries`, `have_nightrail_n_plus_one`, `record_nightrail_span`, `record_nightrail_exception`, `have_nightrail_outgoing_requests`) and a CI performance-gate recipe.
 - [Production source maps](docs/source-maps.md): hidden Vite maps, private upload before publishing assets, safe opt-in deletion, resolved browser stacks and default issue grouping.
 - [AI assistants and MCP](docs/ai-and-mcp.md): the MCP endpoint, how to get a token, paste-ready client configuration for Claude Code, Claude Desktop, Cursor, VS Code, and Zed, and every tool, prompt, and resource the server exposes.
 - [Replacing Sentry](docs/replacing-sentry.md): a step-by-step migration — removing the gems, porting each option, rewriting each call site, breadcrumbs, spans, profiling, attachments, `before_send`, fingerprints, and release health.
-- [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md): the record-type mapping, what "execution" means in Lantern, sampling parity, and the facade method names in Ruby.
-- [Self-hosting](docs/self-hosting.md): pointing the gem at a self-hosted Lantern Cloud, creating a token there, and checking the connection.
-- [Troubleshooting](docs/troubleshooting.md): every failure mode paired with the `lantern:doctor` line it shows up as — no records, doubled scheduled tasks, WebMock in specs, Puma fork, tail-sampling memory, missing profiler, missing deploy marker, Kamal hook, log search, empty tenants.
+- [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md): the record-type mapping, what "execution" means in Nightrail, sampling parity, and the facade method names in Ruby.
+- [Self-hosting](docs/self-hosting.md): pointing the gem at a self-hosted Nightrail Cloud, creating a token there, and checking the connection.
+- [Troubleshooting](docs/troubleshooting.md): every failure mode paired with the `nightrail:doctor` line it shows up as — no records, doubled scheduled tasks, WebMock in specs, Puma fork, tail-sampling memory, missing profiler, missing deploy marker, Kamal hook, log search, empty tenants.
 - [FAQ](docs/faq.md): overhead numbers and how they are measured, retention, what is redacted by default versus opt-in, SQLite, and what happens when the platform is unreachable.
 
 ## For coding agents
 
-- [AGENTS.md](AGENTS.md): how to install and use Lantern from inside a Rails app — the facade methods, the spec matchers, `lantern:doctor`, and the MCP hookup. Duplicated verbatim as [CLAUDE.md](CLAUDE.md).
+- [AGENTS.md](AGENTS.md): how to install and use Nightrail from inside a Rails app — the facade methods, the spec matchers, `nightrail:doctor`, and the MCP hookup. Duplicated verbatim as [CLAUDE.md](CLAUDE.md).
 
 ## Optional
 

@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 Rails.application.routes.draw do
-  mount Lantern::Engine, at: "/lantern"
+  mount Nightrail::Engine, at: "/nightrail"
   get "widgets", to: "widgets#index"
   get "widgets/:id", to: "widgets#show", as: :widget
   get "boom", to: "widgets#boom"

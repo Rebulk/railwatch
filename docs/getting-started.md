@@ -7,89 +7,89 @@ nothing else has to be wired by hand.
 ## 1. Add the gem
 
 ```sh
-bundle add lantern-observability
+bundle add nightrail
 ```
 
-The distribution name is `lantern-observability`. Its Ruby namespace and
-explicit require paths remain `Lantern::*` and `require "lantern"`.
+The distribution name is `nightrail`. Its Ruby namespace and
+explicit require paths remain `Nightrail::*` and `require "nightrail"`.
 
 ## 2. Run the installer
 
 ```sh
-bin/rails generate lantern:install
+bin/rails generate nightrail:install
 ```
 
 With the token already in hand, let the generator read it without placing the
 secret in shell history or process arguments:
 
 ```sh
-bin/rails generate lantern:install \
+bin/rails generate nightrail:install \
   --prompt-token \
-  --url=https://lantern.rebulk.com \
+  --url=https://nightrail.rebulk.com \
   --kamal-secrets
 ```
 
 - `--prompt-token` reads without echo. `--token-stdin` is available for a
-  secret-manager pipe; an already exported `LANTERN_TOKEN` is also detected.
+  secret-manager pipe; an already exported `NIGHTRAIL_TOKEN` is also detected.
   The legacy `--token=` flag warns because command arguments can be visible in
   shell history and process listings.
 - A token is written to `.env` only when Git confirms that `.env` is ignored.
   A tracked or non-ignored dotenv file is refused; use Rails credentials, a
   deployment secret manager, or add `.env` to `.gitignore first. Token values
   are never printed by the generator.
-- `--url=` sets `LANTERN_INGEST_URL`, for a self-hosted platform. Leave
-  it off to use the default, `https://lantern.rebulk.com`.
-- `--kamal-secrets` appends `LANTERN_TOKEN=$LANTERN_TOKEN` to
-  `.kamal/secrets` and adds `LANTERN_TOKEN` under `env: secret:` in
+- `--url=` sets `NIGHTRAIL_INGEST_URL`, for a self-hosted platform. Leave
+  it off to use the default, `https://nightrail.rebulk.com`.
+- `--kamal-secrets` appends `NIGHTRAIL_TOKEN=$NIGHTRAIL_TOKEN` to
+  `.kamal/secrets` and adds `NIGHTRAIL_TOKEN` under `env: secret:` in
   `config/deploy.yml`, which is the pair of edits Kamal needs to pass a
   secret through to the containers.
 
 What the generator writes, in every case:
 
-- `config/initializers/lantern.rb`, with every option commented out at
+- `config/initializers/nightrail.rb`, with every option commented out at
   its default.
-- `mount Lantern::Engine, at: "/lantern"` in `config/routes.rb` (the
+- `mount Nightrail::Engine, at: "/nightrail"` in `config/routes.rb` (the
   beacon endpoint the browser client posts to).
 - `.kamal/hooks/post-deploy` — only if `config/deploy.yml` already
   exists.
-- `app/frontend/lib/lantern.ts` plus the `startLantern()` call in your
+- `app/frontend/lib/nightrail.ts` plus the `startNightrail()` call in your
   Inertia entrypoint — only if `app/frontend/` exists. If it can't find
   an entrypoint it prints the two lines to add.
-- `require "lantern/rspec"` in `spec/rails_helper.rb`, or
-  `require "lantern/minitest"` in `test/test_helper.rb`.
+- `require "nightrail/rspec"` in `spec/rails_helper.rb`, or
+  `require "nightrail/minitest"` in `test/test_helper.rb`.
 
-It finishes by running `lantern:doctor` for you, so the install either
+It finishes by running `nightrail:doctor` for you, so the install either
 ends in a clean checklist or tells you what is still missing.
 
 ## 3. Where the token comes from
 
-In Lantern Cloud, create an application, then an environment inside it
+In Nightrail Cloud, create an application, then an environment inside it
 (`production`, `staging`, one token each). The token is shown once, on
 the page you land on right after creating the environment — copy it
 then. If you lose it, rotate it from the environment's settings and
-update `LANTERN_TOKEN`.
+update `NIGHTRAIL_TOKEN`.
 
 ```sh
-bin/rails lantern:token   # prints the URL to create/copy a token
+bin/rails nightrail:token   # prints the URL to create/copy a token
 ```
 
 A token looks like `lt_` followed by 40 characters. The gem is
-completely inert without one: `Lantern.enabled?` is `config.enabled &&
+completely inert without one: `Nightrail.enabled?` is `config.enabled &&
 token.present?`, so an app with no token installs no subscribers and
 ships nothing.
 
 ## 4. Check the wiring
 
 ```sh
-bin/rails lantern:doctor
+bin/rails nightrail:doctor
 ```
 
 ```
 ✓ token: lt_9Qv... (43 chars)
-✓ ingest url: https://lantern.rebulk.com
-✓ ingest reachable: GET https://lantern.rebulk.com/ingest/ping
-✓ request middleware: Lantern::Middleware::Request at position 0
-✓ engine mounted: POST /lantern/beacon -> lantern/beacon#create
+✓ ingest url: https://nightrail.rebulk.com
+✓ ingest reachable: GET https://nightrail.rebulk.com/ingest/ping
+✓ request middleware: Nightrail::Middleware::Request at position 0
+✓ engine mounted: POST /nightrail/beacon -> nightrail/beacon#create
 ✓ deploy: 8f31c0a42e91 (from GIT_REV)
 ✓ sample rates: requests=1.0 jobs=1.0 commands=1.0 scheduled_tasks=1.0 exceptions=1.0
 ✓ ignored record types: none
@@ -100,7 +100,7 @@ unreachable; the rest of the checklist is informational. Every line and
 what to do about a `✗` is in
 [`troubleshooting.md`](troubleshooting.md).
 
-`bin/rails lantern:status` is the one-line version: it pings
+`bin/rails nightrail:status` is the one-line version: it pings
 `{ingest_url}/ingest/ping` and prints the ingest URL, deploy, and server.
 
 ## 5. Make one request
@@ -126,9 +126,9 @@ JavaScript errors. The generator adds both lines to your entrypoint when
 it finds one:
 
 ```ts
-import { startLantern } from "@/lib/lantern"
+import { startNightrail } from "@/lib/nightrail"
 
-startLantern()
+startNightrail()
 ```
 
 Errors ride the same beacon as visit timing — uncaught errors, unhandled
@@ -143,14 +143,14 @@ render error out of production:
 
 ```tsx
 import { createRoot } from "react-dom/client"
-import { lanternRootOptions } from "@/lib/lantern"
+import { nightrailRootOptions } from "@/lib/nightrail"
 
-createRoot(el, lanternRootOptions()).render(<App {...props} />)
+createRoot(el, nightrailRootOptions()).render(<App {...props} />)
 ```
 
 On React 18, whose roots take no error options, call
 `reportError(error, { componentStack: info.componentStack })` from the
-boundary's `componentDidCatch` instead. `startLantern` also takes optional
+boundary's `componentDidCatch` instead. `startNightrail` also takes optional
 `ignoreErrors`, `denyUrls`, and `tenant` settings; see
 [`docs/configuration.md`](configuration.md) and
 [`docs/replacing-sentry.md`](replacing-sentry.md).
@@ -163,12 +163,12 @@ between deploys. Generated at `.kamal/hooks/post-deploy` when
 
 ```ruby
 # spec/rails_helper.rb
-require "lantern/rspec"
+require "nightrail/rspec"
 ```
 
 ```ruby
-expect { get "/widgets" }.to have_lantern_queries(at_most: 6)
-expect { get "/widgets" }.not_to have_lantern_n_plus_one
+expect { get "/widgets" }.to have_nightrail_queries(at_most: 6)
+expect { get "/widgets" }.not_to have_nightrail_n_plus_one
 ```
 
 Full matcher list and a CI recipe: [`testing.md`](testing.md).
@@ -200,14 +200,14 @@ Two edits, both of which `--kamal-secrets` makes for you:
 
 ```sh
 # .kamal/secrets
-LANTERN_TOKEN=$LANTERN_TOKEN
+NIGHTRAIL_TOKEN=$NIGHTRAIL_TOKEN
 ```
 
 ```yaml
 # config/deploy.yml
 env:
   secret:
-    - LANTERN_TOKEN
+    - NIGHTRAIL_TOKEN
 ```
 
 `config.deploy` picks up `KAMAL_VERSION` on its own, so every record is
@@ -221,10 +221,10 @@ history and Kamal's `KAMAL_*` variables — and POSTs twice: the deploy
 service, commits}`, with up to 50 commits, which is what gives the
 Deploys page a diff of what actually shipped) and the Kamal host list
 (`{version, hosts, roles, ...}`, so the platform knows which servers
-should be reporting). It exits immediately when `LANTERN_TOKEN` isn't
+should be reporting). It exits immediately when `NIGHTRAIL_TOKEN` isn't
 set and never fails a deploy — every network call ends in `|| true`.
 
-Set the optional `LANTERN_DEPLOY_URL` to link the deploy marker at a CI
+Set the optional `NIGHTRAIL_DEPLOY_URL` to link the deploy marker at a CI
 run or a release page.
 
 ### Docker, Heroku, Render
@@ -232,19 +232,19 @@ run or a release page.
 Environment variables only:
 
 ```sh
-LANTERN_TOKEN=lt_...
-LANTERN_INGEST_URL=https://lantern.rebulk.com   # only when self-hosting
-LANTERN_DEPLOY=<release identifier>
+NIGHTRAIL_TOKEN=lt_...
+NIGHTRAIL_INGEST_URL=https://nightrail.rebulk.com   # only when self-hosting
+NIGHTRAIL_DEPLOY=<release identifier>
 ```
 
-`LANTERN_DEPLOY` is the explicit override. Without it, `config.deploy` checks,
+`NIGHTRAIL_DEPLOY` is the explicit override. Without it, `config.deploy` checks,
 in order: `KAMAL_VERSION`; `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
 `HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
 `VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, and `GITHUB_SHA`; a Capistrano
 `REVISION` file; then `.git/HEAD` through loose or packed refs. It never runs
 Git during boot. Full 40-character SHAs are shortened to 12 characters. Set
-`LANTERN_DETECT_DEPLOY=false` to disable inferred sources while retaining
-`LANTERN_DEPLOY` and `KAMAL_VERSION`.
+`NIGHTRAIL_DETECT_DEPLOY=false` to disable inferred sources while retaining
+`NIGHTRAIL_DEPLOY` and `KAMAL_VERSION`.
 
 ### No Kamal
 
@@ -252,7 +252,7 @@ Run the deploy task as a release or post-deploy step, so charts still
 get deploy markers:
 
 ```sh
-bin/rails "lantern:deploy[$GIT_SHA,v42,https://ci.example.com/runs/42]"
+bin/rails "nightrail:deploy[$GIT_SHA,v42,https://ci.example.com/runs/42]"
 ```
 
 All three arguments are optional: `ref` defaults to `git rev-parse HEAD`,
@@ -273,7 +273,7 @@ one — the deploy is still recorded.
   coming from Laravel.
 - [`self-hosting.md`](self-hosting.md) — pointing the gem at your own
   platform install.
-- [`troubleshooting.md`](troubleshooting.md) — every `lantern:doctor`
+- [`troubleshooting.md`](troubleshooting.md) — every `nightrail:doctor`
   line and what a failure means.
 - [`faq.md`](faq.md) — overhead, retention, PII, unreachable platform.
 - [`ai-and-mcp.md`](ai-and-mcp.md) — asking an AI assistant what broke.

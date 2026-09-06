@@ -1,5 +1,5 @@
 class WidgetsController < ApplicationController
-  lantern_sample 0.0, only: :sampled
+  nightrail_sample 0.0, only: :sampled
 
   def index
     # N+1 on purpose: each widget loads its gadget.
@@ -44,7 +44,7 @@ class WidgetsController < ApplicationController
   end
 
   def inertia
-    request.env["lantern.inertia_component"] = "widgets/index"
+    request.env["nightrail.inertia_component"] = "widgets/index"
     response.set_header("X-Inertia", "true")
     render json: { component: "widgets/index", props: { a: 1 } }
   end
@@ -54,7 +54,7 @@ class WidgetsController < ApplicationController
   end
 
   def ignored
-    Lantern.ignore { Widget.count }
+    Nightrail.ignore { Widget.count }
     render plain: "ok"
   end
 
@@ -74,8 +74,8 @@ class WidgetsController < ApplicationController
   end
 
   def override_sample
-    Lantern.dont_sample if params[:mode] == "dont"
-    Lantern.sample(1.0) if params[:mode] == "on"
+    Nightrail.dont_sample if params[:mode] == "dont"
+    Nightrail.sample(1.0) if params[:mode] == "on"
     Widget.count
     render plain: "ok"
   end
