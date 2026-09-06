@@ -13,6 +13,7 @@ require "active_support/parameter_filter"
 
 require "lantern/version"
 require "lantern/clock"
+require "lantern/release_detector"
 require "lantern/configuration"
 require "lantern/secret_safety"
 require "lantern/execution"

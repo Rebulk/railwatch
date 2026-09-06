@@ -13,7 +13,8 @@ win over the env var.
 | `enabled` | `LANTERN_ENABLED` | `true` | Master switch. `Lantern.enabled?` is also `false` whenever `token` is blank, so setting only `LANTERN_TOKEN` is enough to turn Lantern on. |
 | `token` | `LANTERN_TOKEN` | nil | Bearer token for `/ingest`. Required. |
 | `ingest_url` | `LANTERN_INGEST_URL` | `https://lantern.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
-| `deploy` | `LANTERN_DEPLOY` | `KAMAL_VERSION`, then `GIT_REV`, then nil | Version tag stamped on every record and used by `lantern:deploy`. |
+| `deploy` | `LANTERN_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `lantern:deploy`. Full 40-character SHAs are shortened to 12 characters. |
+| `detect_deploy` | `LANTERN_DETECT_DEPLOY` | `true` | Detect deploys beyond `LANTERN_DEPLOY` and `KAMAL_VERSION`. Set false when the app deliberately reports no inferred deploy. |
 | `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
 | `ignored_request_paths` | `LANTERN_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/lantern/beacon` | Exact request paths that bypass Lantern's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
@@ -21,6 +22,14 @@ win over the env var.
 
 `Lantern.enabled?` delegates to `config.enabled?`, which is `@enabled &&
 token.present?` — there is no separate "is configured" check elsewhere.
+
+Deploy detection stops at the first value found: `LANTERN_DEPLOY`,
+`KAMAL_VERSION`, `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
+`HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
+`VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, `GITHUB_SHA`, a Capistrano
+`REVISION` file, then `.git/HEAD` (including loose and packed refs). Git is
+never run as a subprocess. An initializer assignment to `config.deploy`
+always wins.
 
 The request middleware also recognizes the reporter's own `POST /ingest`
 when Lantern Cloud monitors itself. It bypasses that request only when the
@@ -827,7 +836,8 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention
 - **`lantern:doctor`** — prints a ✓/✗ checklist of the whole install: token,
   ingest URL, `GET /ingest/ping`, `Lantern::Middleware::Request` in the
   middleware stack, the mounted engine's beacon route, `config.deploy` and
-  which env var it came from, sample rates, ignored record types, the Kamal
+  its environment, `REVISION`, Git, or initializer source, sample rates,
+  ignored record types, the Kamal
   `post-deploy` hook, `app/frontend/lib/lantern.ts`, and whether
   `lantern/rspec` (or `lantern/minitest`) is required by the test helper.
   The last five are informational; it exits non-zero only when the token is
@@ -873,9 +883,10 @@ original behaviour — `bin/kamal app exec --primary --reuse "bin/rails
 lantern:deploy[$KAMAL_VERSION]"` — which records the same deploy minus the
 commit list.
 
-`config.deploy` itself auto-detects `KAMAL_VERSION` with no configuration
-needed even without this hook — the hook's job is the deploy marker, the
-commit diff, and the server inventory.
+`config.deploy` itself auto-detects `KAMAL_VERSION` (and the other release
+sources listed under Core) with no configuration needed even without this
+hook — the hook's job is the deploy marker, the commit diff, and the server
+inventory.
 
 ## Overhead gate
 

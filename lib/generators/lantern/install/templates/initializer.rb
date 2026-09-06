@@ -5,7 +5,8 @@
 Lantern.configure do |c|
   # c.token = ENV["LANTERN_TOKEN"]                    # LANTERN_TOKEN (required)
   # c.ingest_url = "https://lantern.rebulk.com"     # LANTERN_INGEST_URL
-  # c.deploy = ENV["KAMAL_VERSION"]                 # LANTERN_DEPLOY; auto-detected from Kamal
+  # c.deploy = "release-name"                       # LANTERN_DEPLOY; platform/Git auto-detected
+  # c.detect_deploy = false                         # LANTERN_DETECT_DEPLOY; default true
 
   # Sampling is decided once per execution; a sampled-in request ships its
   # whole tree of queries, cache events, jobs, mail, and logs.

@@ -75,9 +75,11 @@ where every option from `Sentry.init` lands. The mapping:
   also the on/off switch: with it blank, Lantern installs nothing.
 - **`environment:`** becomes `c.environment`, which defaults to
   `Rails.env` — set it only to report under a different name.
-- **`release:`** becomes `c.deploy`, which auto-detects `LANTERN_DEPLOY`,
-  then `KAMAL_VERSION`, then `GIT_REV`. It is stamped on every record,
-  and it is also the release for release health, below.
+- **`release:`** becomes `c.deploy`, which auto-detects the release from
+  `LANTERN_DEPLOY`, the deploy platform, `REVISION`, or the Git checkout in
+  the order documented in [`configuration.md`](configuration.md#core). It is
+  stamped on every record, and it is also the release for release health,
+  below.
 - **`traces_sample_rate:`** becomes `c.sample`, a rate per execution kind
   rather than one global number: `requests`, `jobs`, `commands`,
   `scheduled_tasks`, `exceptions`. The decision is made once per

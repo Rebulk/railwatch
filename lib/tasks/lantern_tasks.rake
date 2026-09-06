@@ -113,11 +113,14 @@ namespace :lantern do
     check.call(!mount.nil? && beacon, "engine mounted",
                mount ? "POST #{mount.path.spec}/beacon -> lantern/beacon#create" : %(add `mount Lantern::Engine, at: "/lantern"` to config/routes.rb))
 
-    # Reported honestly: the env var is only credited when it is the value
-    # config.deploy actually ended up with.
-    source = %w[LANTERN_DEPLOY KAMAL_VERSION GIT_REV].find { |key| ENV[key] == config.deploy } || "config/initializers/lantern.rb"
+    source = config.deploy_source
+    if source == "config/initializers/lantern.rb"
+      detected_source = nil
+      detected = Lantern::ReleaseDetector.detect(project_root: Rails.root) { |found| detected_source = found }
+      source = detected_source if detected == config.deploy
+    end
     check.call(config.deploy.present?, "deploy",
-               config.deploy.present? ? "#{config.deploy} (from #{source})" : "unset -- charts will have no deploy markers")
+               config.deploy.present? ? "#{config.deploy} (from #{source})" : "none: set LANTERN_DEPLOY")
 
     check.call(true, "sample rates", config.sample.map { |kind, rate| "#{kind}=#{rate}" }.join(" "))
     check.call(true, "ignored record types", config.ignore.empty? ? "none" : config.ignore.join(", "))

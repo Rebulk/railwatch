@@ -44,6 +44,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_CAPTURE_RESCUED_EXCEPTIONS" => [ :capture_rescued_exceptions, "0", false, true ],
       "LANTERN_BEACON" => [ :beacon_enabled, "0", false, true ],
       "LANTERN_CAPTURE_CONSOLE" => [ :capture_console, "1", true, false ],
+      "LANTERN_DETECT_DEPLOY" => [ :detect_deploy, "0", false, true ],
       "LANTERN_DEBUG" => [ :debug, "1", true, false ]
     }.each do |env_key, (attr, raw, expected, default)|
       it "maps #{env_key} to config.#{attr}, defaulting to #{default.inspect}" do
@@ -94,11 +95,35 @@ RSpec.describe Lantern::Configuration do
       end
     end
 
-    it "maps LANTERN_DEPLOY, falling back to KAMAL_VERSION then GIT_REV then nil" do
+    it "maps LANTERN_DEPLOY, falling back to KAMAL_VERSION then GIT_REV, then whatever the platform or checkout exposes" do
       with_env("LANTERN_DEPLOY" => "v1", "KAMAL_VERSION" => "kamal-v", "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("v1") }
       with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => "kamal-v", "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("kamal-v") }
       with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => nil, "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("git-v") }
-      with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => nil, "GIT_REV" => nil) { |c| expect(c.deploy).to be_nil }
+      # With every env source cleared the value is whatever the checkout
+      # itself exposes (a CI runner sets GITHUB_SHA; a plain clone has
+      # .git/HEAD), so only the source is asserted, not the value.
+      cleared = Lantern::ReleaseDetector::ENV_KEYS.to_h { |key| [ key, nil ] }
+      with_env(cleared) { |c| expect([ nil, "git", "REVISION" ]).to include(c.deploy_source) }
+    end
+
+    it "uses only explicit and Kamal releases when deploy detection is disabled" do
+      with_env("LANTERN_DETECT_DEPLOY" => "0", "LANTERN_DEPLOY" => nil,
+               "KAMAL_VERSION" => nil, "GIT_REV" => "git-v") do |config|
+        expect(config.deploy).to be_nil
+      end
+      with_env("LANTERN_DETECT_DEPLOY" => "0", "LANTERN_DEPLOY" => nil,
+               "KAMAL_VERSION" => "kamal-v", "GIT_REV" => "git-v") do |config|
+        expect(config.deploy).to eq("kamal-v")
+      end
+    end
+
+    it "keeps an initializer deploy override when detection is toggled" do
+      config = described_class.new
+      config.deploy = "manual"
+      config.detect_deploy = false
+
+      expect(config.deploy).to eq("manual")
+      expect(config.deploy_source).to eq("config/initializers/lantern.rb")
     end
 
     it "splits LANTERN_REDACT_HEADERS on commas, defaulting to the documented header list" do

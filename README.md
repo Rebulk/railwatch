@@ -163,7 +163,7 @@ and `context` all come from the same `Lantern.configure` block and
 |---|---|
 | `dsn:` | `LANTERN_TOKEN` (+ `LANTERN_INGEST_URL` for a self-hosted platform). |
 | `environment:` | `config.environment` — defaults to `Rails.env`, set it only to report under a different name. |
-| `release:` | `config.deploy` — `LANTERN_DEPLOY`, else `KAMAL_VERSION`, else `GIT_REV`. Stamped on every record. |
+| `release:` | `config.deploy` — auto-detected from the deploy platform or Git checkout. Stamped on every record. |
 | `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `lantern_sample 0.01, only: :index`. |
 | `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
 | `before_send:` / `before_send_transaction:` | `Lantern.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Lantern.redact_queries`/`redact_logs`/... to scrub one record type in place; `Lantern.reject_queries`/`reject_logs`/... to drop records by predicate. |
@@ -188,6 +188,12 @@ Sentry's broader managed integration catalog are not equivalent today.
 Use the supported-workload matrix in
 [`docs/replacing-sentry.md`](docs/replacing-sentry.md) before removing
 Sentry from an application that depends on those capabilities.
+
+`config.deploy` checks `LANTERN_DEPLOY`, `KAMAL_VERSION`, common Git and
+platform environment variables, `REVISION`, then `.git/HEAD`. Full 40-character
+SHAs are consistently shortened to 12 characters. Set
+`LANTERN_DETECT_DEPLOY=false` (or `c.detect_deploy = false`) to keep only the
+explicit `LANTERN_DEPLOY` and Kamal defaults.
 
 To report an exception manually (the `Rails.error.report`-equivalent):
 
