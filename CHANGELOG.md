@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- `health` records carry the recurring task schedule Solid Queue is
+  running (`detail.recurring_tasks`, key => schedule), so the platform can
+  tell a task that was removed from `config/recurring.yml` apart from one
+  that stopped running. Lantern Cloud used to flag a removed task as
+  missed every ten minutes for thirty days after its last run. Left out,
+  not sent empty, when there are no tasks or the table could not be read.
+
 - The browser client reports a dropped Inertia request (`networkError` on
   Inertia 3, `exception` on 2) only while the user is waiting on a visit,
   meaning one that shows Inertia's progress bar. A visit the page started by

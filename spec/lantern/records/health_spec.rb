@@ -92,6 +92,23 @@ RSpec.describe "health record" do
     expect(detail["max_threads_reached"]).to be(true) # pool_capacity was 0
   end
 
+  it "packs the recurring task schedule into detail, so the platform knows which tasks are still configured" do
+    allow(Lantern::Subscribers::Jobs).to receive(:recurring_tasks).and_return(
+      keys: %w[nightly_cleanup], classes: %w[CleanupJob], schedules: { "nightly_cleanup" => "0 2 * * *" })
+
+    Lantern::Health.sample
+
+    expect(JSON.parse(lantern_records(:health).sole[:detail])["recurring_tasks"]).to eq("nightly_cleanup" => "0 2 * * *")
+  end
+
+  it "leaves recurring_tasks out of detail entirely when none are configured or the table could not be read" do
+    allow(Lantern::Subscribers::Jobs).to receive(:recurring_tasks).and_return(keys: [], classes: [], schedules: {})
+
+    Lantern::Health.sample
+
+    expect(JSON.parse(lantern_records(:health).sole[:detail])).not_to have_key("recurring_tasks")
+  end
+
   it "leaves every Puma stat nil when no Puma::Server has been booted" do
     Lantern::Health.sample
 
