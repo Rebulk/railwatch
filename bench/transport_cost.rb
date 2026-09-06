@@ -13,8 +13,7 @@ require "zlib"
 require "objspace"
 
 captured = []
-Lantern.reporter.define_singleton_method(:write) { |r, _bytes = nil| captured << r }
-Lantern.reporter.define_singleton_method(:write_now) { |r| captured << r }
+stub_reporter_writes!(captured)
 
 10.times do
   DRIVER.get "/widgets"
@@ -70,7 +69,7 @@ puts format("=> %.1f µs of background CPU per record, %.0f µs per request's re
 
 GC.start
 before = ObjectSpace.memsize_of_all
-copies = captured.map { |r| r.transform_values { |v| v.dup rescue v } }
+copies = captured.map { |r| r.transform_values(&:dup) }
 GC.start
 per_rec = (ObjectSpace.memsize_of_all - before) / copies.size.to_f
 puts format("\nheap per buffered record: ~%.0f bytes => a full buffer of %d records holds ~%.1f MB",

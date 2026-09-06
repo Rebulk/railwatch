@@ -26,17 +26,17 @@ curl -sf -o /dev/null "$SINK/stats" || { echo "no sink at $SINK; start it with: 
 rm -f spec/dummy/storage/test${TEST_ENV_NUMBER}.sqlite3 spec/dummy/storage/test_queue${TEST_ENV_NUMBER}.sqlite3
 bundle exec ruby bench/load/seed.rb
 
-thread_cpu() { # pid, thread name prefix -> utime+stime ticks of matching threads
-  local total=0
-  for t in /proc/$1/task/*; do
-    if [[ "$(cat "$t/comm" 2>/dev/null)" == "$2"* ]]; then
-      local st; st=$(cut -d')' -f2 "$t/stat"); set -- $st
-      total=$((total + ${12} + ${13}))
-    fi
+# utime+stime ticks from a /proc stat line, read past the ")" that ends the
+# comm field (fields 14 and 15 of the full line are 12 and 13 after it).
+stat_ticks() { local -a f; read -ra f <<< "$(cut -d')' -f2 "$1")"; echo $((f[11] + f[12])); }
+thread_cpu() { # pid, thread name prefix -> ticks of every matching thread
+  local pid=$1 prefix=$2 total=0
+  for t in /proc/$pid/task/*; do
+    [[ "$(cat "$t/comm" 2>/dev/null)" == "$prefix"* ]] && total=$((total + $(stat_ticks "$t/stat")))
   done
   echo $total
 }
-proc_cpu() { local st; st=$(cut -d')' -f2 /proc/$1/stat); set -- $st; echo $((${12} + ${13})); }
+proc_cpu() { stat_ticks /proc/$1/stat; }
 
 run_config() {
   local label="$1"; shift

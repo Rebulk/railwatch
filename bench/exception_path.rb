@@ -7,12 +7,11 @@
 #   bundle exec ruby bench/exception_path.rb
 require_relative "support"
 
-Lantern.reporter.define_singleton_method(:write_now) { |_r| nil }
-Lantern.reporter.define_singleton_method(:write) { |_r, _bytes = nil| nil }
+stub_reporter_writes!
 
 # The error subscriber is not a Notifications subscriber, so support.rb's
 # lantern_off!/on! do not cover it.
-def error_subscriber_off! = Rails.error.instance_variable_get(:@subscribers).reject! { |s| s.class.name.to_s.start_with?("Lantern") }
+def error_subscriber_off! = Rails.error.unsubscribe(Lantern::Subscribers::Exceptions::ErrorSubscriber)
 def error_subscriber_on! = Rails.error.subscribe(Lantern::Subscribers::Exceptions::ErrorSubscriber.new)
 
 rows = []

@@ -104,19 +104,16 @@ module Lantern
 
       def finish(env, exe, status, headers)
         exe.finish_stages
-        if exe.may_ship?
-          Lantern.finish_execution(:request, **parent_fields(env, exe, status, headers))
-        else
-          # A head-sampled-out request with nothing to rescue it: skip the
-          # request record (ActionDispatch::Request, header walk) that
-          # finish_execution would only throw away. Sessions.touch below
-          # still needs the user, which parent_fields would have resolved.
-          exe.user_id ||= Subscribers::Users.resolve_id(env) if Lantern.config.track_sessions
-          Lantern.finish_execution
-        end
-        # After the parent, which is where exe.user_id is resolved: a request
-        # with no user and no session cookie has no session, and Sessions.touch
-        # returns without writing anything.
+        # Resolved here, once, for both the request record and the session
+        # key below (the start_processing subscriber ran before the app's
+        # before_actions, so it usually found no user yet).
+        exe.user_id ||= Subscribers::Users.resolve_id(env)
+        # The block is only called when the request record is going to ship;
+        # a head-sampled-out request nothing rescued skips the
+        # ActionDispatch::Request and the header walk entirely.
+        Lantern.finish_execution(:request) { parent_fields(env, exe, status, headers) }
+        # A request with no user and no session cookie has no session, and
+        # Sessions.touch returns without writing anything.
         Sessions.touch(exe, env, status) if Lantern.config.track_sessions
       rescue StandardError => e
         Lantern.debug { "request finish failed: #{e.class}: #{e.message}" }
@@ -131,7 +128,6 @@ module Lantern
         action = route[:action]
         method = req.request_method
         exe.preview ||= "#{method} #{pattern}"
-        exe.user_id ||= Subscribers::Users.resolve_id(env)
 
         inertia = inertia_fields(env, headers)
         payload = Lantern.config.capture_request_payload && exe.counters[:exceptions].positive? ? Lantern.redactor.params(req.filtered_parameters.except("controller", "action")) : nil

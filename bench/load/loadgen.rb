@@ -27,17 +27,23 @@ workers = Array.new(conc) do
     latencies = []
     errors = 0
     non200 = 0
-    Net::HTTP.start(uri.host, uri.port) do |http|
-      while now < deadline
-        t0 = now
-        begin
-          non200 += 1 unless http.get(uri.request_uri).is_a?(Net::HTTPOK)
-          latencies << (now - t0) * 1000
-        rescue StandardError
-          errors += 1
-        end
+    http = nil
+    while now < deadline
+      t0 = now
+      begin
+        # A dropped keep-alive connection is counted once and replaced, not
+        # reused for every request after it.
+        http ||= Net::HTTP.start(uri.host, uri.port)
+        non200 += 1 unless http.get(uri.request_uri).is_a?(Net::HTTPOK)
+        latencies << (now - t0) * 1000
+      rescue StandardError
+        errors += 1
+        http&.finish rescue nil
+        http = nil
+        sleep 0.05
       end
     end
+    http&.finish
     [ latencies, errors, non200 ]
   end
 end

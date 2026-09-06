@@ -23,6 +23,20 @@ RSpec.describe "transaction record" do
     expect(txn[:_group]).to be_a(String)
   end
 
+  it "keeps no per-transaction statement counts once a sampled-out execution's transactions end" do
+    # Statements are counted for every execution, so the count must also be
+    # taken back for every execution: a sampled-out job looping over
+    # transactions would otherwise hold one entry per transaction until it
+    # finished.
+    exe = Lantern.start_execution(source: :command, sample_kind: :commands)
+    exe.sampled = false
+    3.times { ActiveRecord::Base.transaction { Widget.create!(name: "a") } }
+    expect(exe.instance_variable_get(:@transaction_statement_counts)).to be_empty
+    finish!
+
+    expect(lantern_records(:transaction)).to be_empty
+  end
+
   it "reports outcome rollback when the block raises" do
     Lantern.start_execution(source: :command, sample_kind: :commands)
     expect do

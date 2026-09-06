@@ -9,6 +9,7 @@ module Lantern
 
       # A process renders a small, fixed set of templates, so the identifier
       # -> group hash is computed once per template rather than per render.
+      # Frozen because the same string goes out on every record as _group.
       GROUP_CACHE_LIMIT = 2_048
       @group_cache = {}
       @group_mutex = Mutex.new
@@ -19,7 +20,7 @@ module Lantern
         cached = @group_cache[identifier]
         return cached if cached
 
-        group = Record.group_hash(identifier)
+        group = Record.group_hash(identifier).freeze
         @group_mutex.synchronize do
           @group_cache.clear if @group_cache.size >= GROUP_CACHE_LIMIT
           @group_cache[identifier] = group

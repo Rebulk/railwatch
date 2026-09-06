@@ -151,11 +151,15 @@ module Lantern
         subscribe("transaction.active_record") do |event|
           exe = execution
           exe&.count(:transactions)
-          next unless recording?
           p = event.payload
+          # Taken (and removed) whether or not a record is built: the
+          # statement counter above runs for every execution, so this is what
+          # keeps a sampled-out execution from holding one entry per
+          # transaction for its whole lifetime.
+          statement_count = p[:transaction] ? exe&.transaction_statement_count(p[:transaction].object_id) : nil
+          next unless recording?
           connection_name = (p[:connection]&.pool&.db_config&.name rescue nil)
           outcome = p[:outcome].to_s
-          statement_count = p[:transaction] ? exe&.transaction_statement_count(p[:transaction].object_id) : nil
           Lantern.record(:transaction, group: Record.group_hash(connection_name, outcome),
                          timestamp: started_at(event), duration: micros(event), outcome: outcome,
                          connection: connection_name, statement_count: statement_count)

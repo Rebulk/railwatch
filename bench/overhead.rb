@@ -34,40 +34,8 @@ SHAPES = {
 ROUNDS = 9
 BATCH = 15
 
-def sample(path)
-  GC.start
-  GC.disable
-  a0 = GC.stat(:total_allocated_objects)
-  t0 = cpu_us
-  BATCH.times { DRIVER.get(path) }
-  [ (cpu_us - t0) / BATCH.to_f, (GC.stat(:total_allocated_objects) - a0) / BATCH ]
-ensure
-  GC.enable
-end
-
-def summarize(samples)
-  times = samples.map(&:first).sort
-  { p50: times[times.size / 2], min: times.first, allocs: samples.map(&:last).min }
-end
-
-# Off and on alternate every batch so background load lands on both
-# equally; the median of the rounds is what the gate judges. Allocations
-# are deterministic and taken as the minimum.
-def measure(path)
-  lantern_off!
-  20.times { DRIVER.get(path) }
-  lantern_on!
-  20.times { DRIVER.get(path) }
-  off = []
-  on = []
-  ROUNDS.times do
-    lantern_off!
-    off << sample(path)
-    lantern_on!
-    on << sample(path)
-  end
-  [ summarize(off), summarize(on) ]
-end
+# The median of the interleaved rounds is what the gate judges.
+def measure(path) = interleaved_measure(path, rounds: ROUNDS, batch: BATCH)
 
 failures = []
 puts format("%-34s %9s %9s %9s %9s | %7s %7s %7s", "added by Lantern (sampled in)", "off p50", "on p50", "Δ p50 µs", "Δ min µs", "off al", "on al", "Δ al")

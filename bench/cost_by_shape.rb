@@ -30,33 +30,7 @@ SHAPES = {
 ROUNDS = Integer(ENV.fetch("ROUNDS", 9))
 BATCH = 15
 
-def batch(path)
-  GC.start
-  GC.disable
-  a0 = GC.stat(:total_allocated_objects)
-  t0 = cpu_us
-  BATCH.times { DRIVER.get(path) }
-  [ (cpu_us - t0) / BATCH.to_f, (GC.stat(:total_allocated_objects) - a0) / BATCH ]
-ensure
-  GC.enable
-end
-
-def measure(path)
-  lantern_off!
-  20.times { DRIVER.get(path) }
-  lantern_on!
-  20.times { DRIVER.get(path) }
-  off = []
-  on = []
-  ROUNDS.times do
-    lantern_off!
-    off << batch(path)
-    lantern_on!
-    on << batch(path)
-  end
-  stat = lambda { |rows| t = rows.map(&:first).sort; { min: t.first, p50: t[t.size / 2], allocs: rows.map(&:last).min } }
-  [ stat.call(off), stat.call(on) ]
-end
+def measure(path) = interleaved_measure(path, rounds: ROUNDS, batch: BATCH)
 
 label = Lantern.config.sample[:requests].zero? ? "sampled out" : "sampled in"
 puts "Lantern #{label}: per-request CPU µs on the request thread (off = gem unsubscribed), #{ROUNDS} interleaved rounds x #{BATCH}"

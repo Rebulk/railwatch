@@ -7,7 +7,7 @@
 #   bundle exec ruby bench/request_path.rb
 require_relative "support"
 
-Lantern.reporter.define_singleton_method(:write) { |_r, _bytes = nil| nil }
+stub_reporter_writes!
 
 env = Rack::MockRequest.env_for("/widgets?x=1", "HTTP_USER_AGENT" => "bench/1.0", "HTTP_ACCEPT" => "text/html", "HTTP_COOKIE" => "a=b", "HTTP_X_FORWARDED_FOR" => "10.0.0.1", "HTTP_ACCEPT_ENCODING" => "gzip", "HTTP_ACCEPT_LANGUAGE" => "en", "HTTP_HOST" => "example.org")
 mw = Lantern::Middleware::Request.new(->(_e) { [ 200, { "Content-Length" => "2" }, [ "ok" ] ] })

@@ -148,15 +148,6 @@ module Lantern
       (sampled? || @tail_buffering) && !paused?
     end
 
-    # Whether finish_execution could ship a parent record for this
-    # execution: it was sampled in, it is buffering for a tail decision, an
-    # unhandled exception already rolled the exceptions sample in, or a
-    # profile is running and must be stopped. When none of these hold the
-    # parent would be built and then discarded, so callers skip building it.
-    def may_ship?
-      sampled? || @tail_buffering || exception_sampled || !profiler_handle.nil?
-    end
-
     # Ship this execution's whole tree regardless of the head sampling
     # decision (Lantern.keep!), buffering child records from here on.
     def keep!

@@ -36,11 +36,12 @@ Rails.logger.stop_broadcasting_to(CAPTURE)
 rows << [ "  Lantern log Capture detached (Rails.logger.debug? => #{Rails.logger.debug?})", per_call(&notify) ]
 Rails.logger.broadcast_to(CAPTURE)
 rows << [ "  Capture attached at its level (Rails.logger.debug? => #{Rails.logger.debug?})", per_call(&notify) ]
-# The Capture reports config.log_level as its level, so this is what an
-# app that sets config.log_level = :debug pays per query.
-Lantern.config.log_level = :debug
-rows << [ "  config.log_level = :debug (Rails.logger.debug? => #{Rails.logger.debug?}): AR formats every SQL line", per_call(&notify) ]
-Lantern.config.log_level = :info
+# The Capture starts at config.log_level and is an ordinary Logger from
+# then on, so this is what an app running its logger at DEBUG pays per
+# query with Lantern attached.
+CAPTURE.level = ::Logger::DEBUG
+rows << [ "  Capture at DEBUG (Rails.logger.debug? => #{Rails.logger.debug?}): AR formats every SQL line", per_call(&notify) ]
+CAPTURE.level = ::Logger::INFO
 
 sql_subs.each { |p, s, how| ActiveSupport::Notifications.public_send(how, p, s.instance_variable_get(:@delegate)) }
 rows << [ "Lantern sql subscribers, no execution (query outside a request/job): builds and drops", per_call(&notify) ]

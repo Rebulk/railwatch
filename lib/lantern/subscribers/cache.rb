@@ -22,14 +22,10 @@ module Lantern
         "cache_exist?.active_support" => ->(_p) { "exist" }
       }.freeze
 
-      # Bounded cache of key => shape, so a given cache key's id-stripping
-      # regexes only run once. Keys repeat heavily (same fetch in a loop).
-      # The group hash of (store, shape) is cached the same way, per store,
-      # so the MD5 also runs once per shape rather than once per event.
-      KEY_SHAPE_CACHE_LIMIT = 2_048
-      @key_shape_cache = {}
-      @key_shape_mutex = Mutex.new
+      # Bounded cache of store -> key -> group hash (see group_for).
+      GROUP_CACHE_LIMIT = 2_048
       @group_cache = Hash.new { |h, k| h[k] = {} }
+      @group_mutex = Mutex.new
 
       # Computed once so the hot cache_event record doesn't look this up per call.
       CACHE_EVENT_VERSION = Record::VERSIONS.fetch(:cache_event)
@@ -58,7 +54,7 @@ module Lantern
               timestamp: started_at(event),
               deploy: cfg.deploy,
               server: cfg.server,
-              _group: group_for(store, key_shape(key)),
+              _group: group_for(store, key),
               **(exe ? exe.envelope : Record::EMPTY_ENVELOPE),
               store: store,
               key: key[0, 255],
@@ -80,28 +76,22 @@ module Lantern
         end
       end
 
-      # Strip ids so "users/123" and "users/456" share a group.
-      def key_shape(key)
-        cached = @key_shape_cache[key]
+      # Group hash for a (store, key): ids are stripped so "users/123" and
+      # "users/456" share a group, then the digest is taken. Both run once per
+      # distinct key; keys repeat heavily (the same fetch in a loop). The
+      # cached string is frozen because it is handed to every record as
+      # _group, and a redactor that mutated it in place would poison every
+      # later record for that key.
+      def group_for(store, key)
+        bucket = @group_cache[store]
+        cached = bucket[key]
         return cached if cached
 
         shape = key.gsub(/\b\d+\b/, "?").gsub(/[0-9a-f]{16,}/i, "?")
-        @key_shape_mutex.synchronize do
-          @key_shape_cache.clear if @key_shape_cache.size >= KEY_SHAPE_CACHE_LIMIT
-          @key_shape_cache[key] = shape
-        end
-        shape
-      end
-
-      def group_for(store, shape)
-        bucket = @group_cache[store]
-        cached = bucket[shape]
-        return cached if cached
-
-        group = Record.group_hash(store, shape)
-        @key_shape_mutex.synchronize do
-          bucket.clear if bucket.size >= KEY_SHAPE_CACHE_LIMIT
-          bucket[shape] = group
+        group = Record.group_hash(store, shape).freeze
+        @group_mutex.synchronize do
+          bucket.clear if bucket.size >= GROUP_CACHE_LIMIT
+          bucket[key] = group
         end
         group
       end

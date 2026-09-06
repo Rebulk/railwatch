@@ -41,7 +41,7 @@ def profile(label, n, top: 22)
   puts stackprof_lines(mode: :wall, interval: 20, top: top) { n.times { yield } }.drop(1).map(&:rstrip)
 end
 
-Lantern.reporter.define_singleton_method(:write) { |_r, _bytes = nil| nil }
+stub_reporter_writes!
 env = Rack::MockRequest.env_for("/widgets?x=1", "HTTP_USER_AGENT" => "bench/1.0", "HTTP_ACCEPT" => "text/html", "HTTP_COOKIE" => "a=b", "HTTP_HOST" => "example.org")
 mw = Lantern::Middleware::Request.new(->(_e) { [ 200, { "Content-Length" => "2" }, [ "ok" ] ] })
 Current.user = User.first

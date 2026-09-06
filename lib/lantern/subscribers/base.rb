@@ -9,8 +9,7 @@ module Lantern
         ActiveSupport::Notifications.subscribe(name) do |event|
           block.call(event)
         rescue StandardError => e
-          Lantern.debug { "#{name} subscriber raised #{e.class}: #{e.message}" }
-          Lantern.notify_unrecoverable(e)
+          subscriber_failed(name, e)
         end
       end
 
@@ -21,9 +20,13 @@ module Lantern
         ActiveSupport::Notifications.monotonic_subscribe(name) do |_name, _start, _finish, _id, payload|
           block.call(payload)
         rescue StandardError => e
-          Lantern.debug { "#{name} subscriber raised #{e.class}: #{e.message}" }
-          Lantern.notify_unrecoverable(e)
+          subscriber_failed(name, e)
         end
+      end
+
+      def subscriber_failed(name, error)
+        Lantern.debug { "#{name} subscriber raised #{error.class}: #{error.message}" }
+        Lantern.notify_unrecoverable(error)
       end
 
       def execution
