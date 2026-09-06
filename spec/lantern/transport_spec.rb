@@ -31,6 +31,18 @@ RSpec.describe Lantern::Transport::Http do
       )
     end
 
+    it "reports the active backpressure factor alongside batch accounting" do
+      captured = nil
+      stub_request(:post, "http://lantern.test/ingest").to_return do |request|
+        captured = request
+        { status: 200, body: '{"accepted":1,"rejected":0}' }
+      end
+
+      transport.deliver([ { t: "log" } ], backpressure_factor: 4.0)
+
+      expect(captured.headers["X-Lantern-Backpressure-Factor"]).to eq("4.0")
+    end
+
     it "uses one caller-supplied batch id for the original request and its immediate retry" do
       seen_ids = []
       stub_request(:post, "http://lantern.test/ingest").to_return do |request|
@@ -316,6 +328,45 @@ RSpec.describe Lantern::Reporter do
     end.new(writer)
   end
 
+  describe "adaptive backpressure" do
+    it "doubles to its cap above either high-water mark and halves as pressure clears" do
+      config = reporter_config
+      config.buffer_size = 100
+      config.buffer_bytes = 100
+      reporter = described_class.new(config, transport: Object.new)
+      reporter.buffer.push({ t: "log" }, 80)
+
+      4.times { reporter.send(:update_backpressure) }
+
+      expect(reporter.backpressure_factor).to eq(described_class::MAX_BACKPRESSURE_FACTOR)
+
+      reporter.buffer.drain
+      3.times { reporter.send(:update_backpressure) }
+
+      expect(reporter.backpressure_factor).to eq(1.0)
+    end
+
+    it "treats an active retry ladder as pressure" do
+      reporter = described_class.new(reporter_config, transport: Object.new)
+      reporter.instance_variable_set(:@retry_attempt, 1)
+
+      reporter.send(:update_backpressure)
+
+      expect(reporter.backpressure_factor).to eq(2.0)
+    end
+
+    it "stays at one when adaptive backpressure is disabled" do
+      config = reporter_config
+      config.backpressure = false
+      reporter = described_class.new(config, transport: Object.new)
+      3.times { |n| reporter.buffer.push({ n: n }) }
+
+      3.times { reporter.send(:update_backpressure) }
+
+      expect(reporter.backpressure_factor).to eq(1.0)
+    end
+  end
+
   describe "#flush" do
     it "passes the buffer's dropped count through to the transport" do
       captured_dropped = nil
@@ -333,6 +384,21 @@ RSpec.describe Lantern::Reporter do
       reporter.flush
 
       expect(captured_dropped).to eq(2)
+    end
+
+    it "passes its current backpressure factor through to supporting transports" do
+      captured_factor = nil
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, backpressure_factor:|
+        captured_factor = backpressure_factor
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      3.times { |n| reporter.buffer.push({ n: n }) }
+
+      reporter.flush
+
+      expect(captured_factor).to eq(2.0)
     end
 
 
@@ -839,6 +905,7 @@ RSpec.describe Lantern::Reporter do
       reporter.instance_variable_set(:@retry_attempt, 3)
       reporter.instance_variable_set(:@retry_at, 123.0)
       reporter.instance_variable_set(:@retry_batch, Object.new)
+      reporter.instance_variable_set(:@backpressure_factor, 8.0)
       reporter.instance_variable_set(:@in_flight_records, 2)
       reporter.instance_variable_set(:@in_flight_dropped, 4)
       reporter.instance_variable_set(:@shutdown_notified, true)
@@ -856,6 +923,7 @@ RSpec.describe Lantern::Reporter do
           retry_attempt: Lantern.reporter.instance_variable_get(:@retry_attempt),
           retry_at: Lantern.reporter.instance_variable_get(:@retry_at),
           retry_batch: Lantern.reporter.instance_variable_get(:@retry_batch),
+          backpressure_factor: Lantern.reporter.backpressure_factor,
           in_flight_records: Lantern.reporter.instance_variable_get(:@in_flight_records),
           in_flight_dropped: Lantern.reporter.instance_variable_get(:@in_flight_dropped),
           shutdown_notified: Lantern.reporter.instance_variable_get(:@shutdown_notified),
@@ -876,6 +944,7 @@ RSpec.describe Lantern::Reporter do
         "retry_attempt" => 0,
         "retry_at" => nil,
         "retry_batch" => nil,
+        "backpressure_factor" => 1.0,
         "in_flight_records" => 0,
         "in_flight_dropped" => 0,
         "shutdown_notified" => false,
@@ -883,6 +952,7 @@ RSpec.describe Lantern::Reporter do
       )
       expect(transport.unauthorized?).to be(true)
       expect(reporter.instance_variable_get(:@retry_attempt)).to eq(3)
+      expect(reporter.backpressure_factor).to eq(8.0)
       expect(reporter.instance_variable_get(:@in_flight_records)).to eq(2)
     end
   end

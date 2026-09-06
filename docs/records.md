@@ -18,6 +18,15 @@ Every record carries these (`Record.build`, `lib/lantern/record.rb`):
 | `server` | `Lantern.config.server` — hostname by default. |
 | `_group` | 128-bit grouping hash (MD5 of type-specific parts, `Record.group_hash`) the platform uses to bucket occurrences into one issue/row. |
 
+Each gzip NDJSON batch also has a small HTTP-header envelope. Drop accounting
+rides as `X-Lantern-Dropped` and `X-Lantern-Dropped-Bytes` when non-zero.
+`X-Lantern-Backpressure-Factor` is present when adaptive backpressure has
+reduced sampling; for example, `4.0` means each configured execution sample
+rate was divided by four when the batch was sent. The reporter doubles the
+factor on each pressured tick up to 8, then halves it toward 1 as pressure
+clears. This makes buffer loss visible alongside the sampling response that
+was active at delivery time.
+
 Records created inside an execution (everything except the five parent
 types, plus `user`/`process`/`visit`, which stand alone) also merge in the
 execution's envelope (`Execution#envelope`, `lib/lantern/execution.rb`):

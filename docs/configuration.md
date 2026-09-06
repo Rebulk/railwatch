@@ -366,6 +366,8 @@ database.
 | `buffer_bytes` | `LANTERN_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
 | `execution_buffer_bytes` | `LANTERN_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
 | `batch_bytes` | `LANTERN_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
+| `backpressure` | `LANTERN_BACKPRESSURE` | `true` | Adapt every execution kind's effective sample rate when the reporter buffer reaches its high-water mark or ingest is in retry backoff. |
+| `backpressure_high_water` | `LANTERN_BACKPRESSURE_HIGH_WATER` | `0.8` | Fraction of either `buffer_size` or `buffer_bytes` that signals pressure. Values must be greater than `0.0` and at most `1.0`; invalid values use the default. |
 | `flush_interval` | `LANTERN_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
@@ -387,6 +389,17 @@ seconds); it does not busy-loop. A 401 marks the transport
 permanently unauthorized (no further HTTP attempts for the process's
 lifetime); it and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
+
+On every reporter flush tick, adaptive backpressure doubles a process-local
+sample divisor while either buffer ceiling is at least 80% full or the retry
+ladder is active, up to 8x. Clear ticks halve it back toward 1x. Eight is
+enough to create room after three pressured ticks and recovers in three clear
+ticks; a 16x ceiling would preserve less telemetry and take longer to recover.
+The sampler reads the reporter's Float without locking the request path; the
+reporter is its only writer, an ivar assignment is atomic, and one stale read
+only affects one probabilistic decision. Set `backpressure` false to keep the
+factor at 1. The current value is sent as
+`X-Lantern-Backpressure-Factor` whenever it is greater than 1.
 
 `Lantern.flush` forces an immediate flush (also called by the `command`
 patches after a rake task/runner invocation finishes, so short-lived
