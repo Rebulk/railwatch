@@ -33,7 +33,10 @@ module Lantern
       unless ::Rails::Command::RunnerCommand.ancestors.include?(RunnerCommand)
         ::Rails::Command::RunnerCommand.prepend(RunnerCommand)
       end
-    rescue LoadError, StandardError
+    rescue LoadError, StandardError => e
+      # A railties rename would land here; say so rather than leaving every
+      # deployed `rails runner` script silently untraced.
+      Lantern.debug { "runner command patch not installed: #{e.class}: #{e.message}" }
       nil
     end
   end

@@ -756,7 +756,8 @@ the record still ships with whatever it did manage to read.
 Every Puma field is nil when no `Puma::Server` exists in the process, and
 every Solid Queue field is nil when `SolidQueue` isn't loaded.
 
-The sampler re-arms itself after `fork` (a `Process._fork` hook), so
+The sampler re-arms itself after `fork` (Rails' `ActiveSupport::ForkTracker`
+callback), so
 clustered Puma workers and forked Solid Queue workers each report without
 any `on_worker_boot` configuration.
 

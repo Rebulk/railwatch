@@ -21,16 +21,37 @@ RSpec.describe "process record" do
     expect(proc_rec[:cache_store]).to eq("ActiveSupport::Cache::MemoryStore")
   end
 
-  it "names the adapters from the app's configuration without loading Active Record or Active Job" do
-    # In a lazy-loading process, ActiveRecord::Base and ActiveJob::Base are
-    # autoloaded on first reference, and that reference used to be this
-    # record: some 350 ms of boot for two strings.
-    expect(ActiveRecord::Base).not_to receive(:connection_db_config)
-    expect(ActiveJob::Base).not_to receive(:queue_adapter_name)
+  it "boots a lazy-loading process without loading Active Record, Active Job, or Rake, and writes one process record after initialize" do
+    # The invariants behind the boot-cost claim, checked in a fresh process
+    # because this suite has long since loaded all three. The record used to
+    # reach ActiveRecord::Base and ActiveJob::Base for two strings, and the
+    # patches used to require rake and railties' runner command, in every
+    # boot: some 300 ms nothing else asked for.
+    script = <<~RUBY
+      ENV["RAILS_ENV"] = "test"
+      ENV["LANTERN_TOKEN"] = "boot"
+      ENV["LANTERN_INGEST_URL"] = "http://127.0.0.1:9"
+      require #{File.expand_path("../../dummy/config/environment", __dir__).inspect}
+      records, = Lantern.reporter.buffer.drain
+      puts JSON.generate(
+        active_record_loaded: ActiveRecord.autoload?(:Base).nil?,
+        active_job_loaded: ActiveJob.autoload?(:Base).nil?,
+        rake_loaded: defined?(::Rake) ? true : false,
+        process_records: records.count { |r| r[:t] == "process" },
+        boot_seconds: records.find { |r| r[:t] == "process" }&.dig(:boot_seconds))
+    RUBY
+    out = IO.popen([ RbConfig.ruby, "-e", script ], err: File::NULL, &:read)
+    state = JSON.parse(out.lines.last)
+
+    expect(state).to include("active_record_loaded" => false, "active_job_loaded" => false, "rake_loaded" => false, "process_records" => 1)
+    expect(state["boot_seconds"]).to be > 0
+  end
+
+  it "names the adapters from the app's configuration" do
     Lantern::Subscribers::ProcessInfo.install!(Rails.application)
 
     expect(Lantern::Subscribers::ProcessInfo.database_adapter).to eq("sqlite3")
-    expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("test")
+    expect(Lantern::Subscribers::ProcessInfo.configured_queue_adapter).to eq("test")
   end
 
   it "resolves a url-only database.yml, a DATABASE_URL-only app, and a self-named queue adapter" do
@@ -52,16 +73,23 @@ RSpec.describe "process record" do
     named = Class.new { def queue_adapter_name = "acme_queue" }.new
     with_adapter = Struct.new(:config).new(Struct.new(:database_configuration, :active_job).new({}, Struct.new(:queue_adapter).new(named)))
     Lantern::Subscribers::ProcessInfo.install!(with_adapter)
-    expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("acme_queue")
+    expect(Lantern::Subscribers::ProcessInfo.configured_queue_adapter).to eq("acme_queue")
   ensure
     Lantern::Subscribers::ProcessInfo.install!(Rails.application)
   end
 
-  it "is written after the app has initialized, not from the subscribe initializer" do
-    # boot_seconds is meant to cover the app's own initializers, which run
-    # after the gem's subscribe initializer.
-    expect(Lantern::Subscribers::ProcessInfo).not_to receive(:record!)
+  it "reports the effective queue adapter once Active Job is loaded, even when it was set on ActiveJob::Base directly" do
+    # config.active_job.queue_adapter is the railtie's input, not the
+    # result; an app that assigns ActiveJob::Base.queue_adapter in an
+    # initializer would otherwise be reported under the config default.
+    previous = ActiveJob::Base.queue_adapter
+    ActiveJob::Base.queue_adapter = :inline
     Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+
+    expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("inline")
+    expect(Lantern::Subscribers::ProcessInfo.configured_queue_adapter).to eq("test")
+  ensure
+    ActiveJob::Base.queue_adapter = previous
   end
 
   describe ".role" do

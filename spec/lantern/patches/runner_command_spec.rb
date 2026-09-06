@@ -5,8 +5,8 @@ require "rails/command"
 require "rails/commands/runner/runner_command"
 
 RSpec.describe Lantern::Patches::RunnerCommand do
-  # Prepended at boot by Patches.install!, but the require of railties'
-  # runner command is best-effort there, so make sure of it here.
+  # Prepended from the engine's runner hook, which only a real
+  # `bin/rails runner` process fires, so make sure of it here.
   before(:context) do
     Rails::Command::RunnerCommand.prepend(described_class) unless
       Rails::Command::RunnerCommand.ancestors.include?(described_class)

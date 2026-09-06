@@ -10,9 +10,11 @@
   `bin/rails runner` patches are installed from the engine's `rake_tasks`
   and `runner` hooks instead of every boot, which stops a web or worker
   process requiring rake and railties' runner command.
-- The `process` record is written from `config.after_initialize` rather
-  than from the subscribe initializer, so `boot_seconds` covers the app's
-  own initializers.
+- The `process` record is written from an `after_initialize` hook that
+  the engine registers from inside an initializer, so it runs after every
+  `after_initialize` block the app itself registers; `boot_seconds` covers
+  the app's own initializers and those blocks, and an app that reconfigures
+  Lantern late is respected.
 - Fork handling is one `ActiveSupport::ForkTracker` callback -- Rails' own
   `Process._fork` hook -- instead of three separate prepends on `Process`.
   `Lantern::Reporter::ForkHook`, `Lantern::Health::ForkHook`, and
