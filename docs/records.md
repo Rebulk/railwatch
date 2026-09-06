@@ -307,7 +307,7 @@ shutdown deadline can lose the record.
 | `file` / `line` | Top in-app backtrace frame. |
 | `frames` | Full backtrace (`Backtrace.frames`), each frame optionally with source snippet lines if `config.capture_exception_source` is on. Read from `backtrace_locations`, or parsed from the String backtrace when that is nil (an exception whose backtrace was assigned with `set_backtrace` or delegated to a wrapped error, as `ActiveRecord::StatementInvalid` and `Faraday::Error` do). |
 | `cause` | `{class, message}` of `error.cause`, truncated, or nil. |
-| `context` | Serialized `Lantern.context(...)` active when the error was captured. |
+| `context` | Serialized `Lantern.context(...)` active when the error was captured, merged with capture-specific context. An Active Job retry captured by `capture_job_retry_errors` adds `attempt` and `wait` (seconds). |
 | `code` | `Errno` constant, or `error.errno`/`error.code` if the error exposes one. |
 | `sql_state` | Postgres SQLSTATE, for `ActiveRecord::StatementInvalid` wrapping a driver error that exposes one (not populated for SQLite). |
 | `ruby_version` / `rails_version` | Process versions. |
@@ -340,7 +340,12 @@ An error a controller rescues with `rescue_from` is captured as
 `config.capture_rescued_exceptions = false` to turn that off. Active Job's
 equivalents (`retry_on` exhausted, `discard_on`) are already covered by
 the `retry_stopped`/`discard` subscriptions in
-`lib/lantern/subscribers/jobs.rb`. See
+`lib/lantern/subscribers/jobs.rb`. A retry that has not exhausted its
+attempts is logged but is not an exception by default; set
+`config.capture_job_retry_errors = true` to capture it as handled with
+severity `warning` and source `application.active_job.enqueue_retry`. This is
+off by default because retries are usually expected and can flood the issues
+list. See
 [`docs/configuration.md`](configuration.md) for both settings.
 
 #### Browser errors (`source: "browser"`)

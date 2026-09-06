@@ -76,7 +76,7 @@ module Lantern
                   :capture_sql_values,
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
-                  :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
+                  :capture_job_arguments, :capture_job_retry_errors, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths, :ignored_request_paths
 
@@ -170,6 +170,7 @@ module Lantern
       @profile_interval_us = env_int("LANTERN_PROFILE_INTERVAL_US", 1_000)
       @profiler = ENV["LANTERN_PROFILER"]&.to_sym
       @capture_job_arguments = env_bool("LANTERN_CAPTURE_JOB_ARGUMENTS", false)
+      @capture_job_retry_errors = env_bool("LANTERN_CAPTURE_JOB_RETRY_ERRORS", false)
       @capture_response_body_on_error = env_bool("LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR", false)
       @max_attachment_bytes = env_int("LANTERN_MAX_ATTACHMENT_BYTES", 1_048_576)
       # Release health: one `session` record per browser tab (the beacon

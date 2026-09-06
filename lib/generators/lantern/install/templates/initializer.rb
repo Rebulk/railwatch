@@ -28,6 +28,9 @@ Lantern.configure do |c|
   # c.backpressure = true               # adapt sampling under buffer/ingest pressure
   # c.backpressure_high_water = 0.8     # fraction of either buffer ceiling
   # c.capture_request_payload = false   # only captured for requests that raised, always redacted
+  # Retried job errors are usually expected, so they are not captured by
+  # default; enabling this can flood the issues list when retries are common.
+  # c.capture_job_retry_errors = false  # LANTERN_CAPTURE_JOB_RETRY_ERRORS
   # c.redact_headers += %w[X-Api-Key]
   # c.redact_params  += %w[ssn]         # merged with Rails.application.config.filter_parameters
   # c.ignored_request_paths += ["/internal/health"] # /up and /lantern/beacon are ignored by default

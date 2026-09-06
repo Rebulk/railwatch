@@ -22,6 +22,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
       "LANTERN_CAPTURE_REQUEST_PAYLOAD" => [ :capture_request_payload, "1", true, false ],
       "LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE" => [ :capture_exception_source, "0", false, true ],
+      "LANTERN_CAPTURE_JOB_RETRY_ERRORS" => [ :capture_job_retry_errors, "1", true, false ],
       "LANTERN_BUFFER_SIZE" => [ :buffer_size, "9999", 9_999, 10_000 ],
       "LANTERN_BUFFER_BYTES" => [ :buffer_bytes, "999999", 999_999, 16 * 1024 * 1024 ],
       "LANTERN_EXECUTION_BUFFER_BYTES" => [ :execution_buffer_bytes, "777777", 777_777, 8 * 1024 * 1024 ],
