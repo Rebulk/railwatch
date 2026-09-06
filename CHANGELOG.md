@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- Active Job retries can optionally capture the exception that caused the
+  retry as handled, warning-level telemetry with its attempt and wait in
+  context (`capture_job_retry_errors`,
+  `LANTERN_CAPTURE_JOB_RETRY_ERRORS`). It is off by default because retries
+  are usually expected and enabling it can flood the issues list. The
+  existing retry log is unchanged.
+
 - `health` records carry the recurring task schedule Solid Queue is
   running (`detail.recurring_tasks`, key => schedule), so the platform can
   tell a task that was removed from `config/recurring.yml` apart from one
