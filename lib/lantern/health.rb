@@ -93,12 +93,7 @@ module Lantern
           pool_waiting: pool[:waiting],
           queue_depth: queue[:queue_depth],
           queue_latency: queue[:queue_latency],
-          detail: JSON.generate(
-            queues: queue[:queues],
-            workers: queue[:workers],
-            requests_count: puma[:requests_count],
-            running: puma[:running],
-            max_threads_reached: puma[:max_threads_reached]))
+          detail: JSON.generate(detail(puma, queue)))
       end
     rescue StandardError => e
       Lantern.debug { "health sample failed: #{e.class}: #{e.message}" }
@@ -106,6 +101,33 @@ module Lantern
     end
 
     EMPTY = {}.freeze
+
+    def detail(puma, queue)
+      detail = {
+        queues: queue[:queues],
+        workers: queue[:workers],
+        requests_count: puma[:requests_count],
+        running: puma[:running],
+        max_threads_reached: puma[:max_threads_reached]
+      }
+      tasks = recurring_tasks
+      detail[:recurring_tasks] = tasks if tasks
+      detail
+    end
+
+    # The recurring tasks this process's Solid Queue knows about, key =>
+    # schedule, so the platform can tell a task that was removed from
+    # config/recurring.yml apart from one that stopped running. Read from
+    # the Jobs subscriber's cache (one query a minute per process, shared
+    # with scheduled-task detection). Left out rather than sent empty when
+    # there are none or the table could not be read: Jobs folds a failed
+    # read into an empty set, and "no manifest" must not read as "no tasks".
+    def recurring_tasks
+      schedules = Subscribers::Jobs.recurring_tasks[:schedules]
+      schedules.empty? ? nil : schedules
+    rescue StandardError
+      nil
+    end
 
     # Puma::Server#stats is the only public API exposing busy_threads, so it is
     # used in preference to the individual readers. It also resets Puma's

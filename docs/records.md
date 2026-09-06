@@ -754,7 +754,7 @@ the record still ships with whatever it did manage to read.
 | `pool_waiting` | Threads blocked waiting for a connection — sustained non-zero means the pool is undersized for the thread count. |
 | `queue_depth` | `SolidQueue::ReadyExecution.count` — jobs ready to run right now. |
 | `queue_latency` | Microseconds since the oldest ready job was created, i.e. the backlog's head-of-line wait. nil when the queue is empty. |
-| `detail` | JSON string: `queues` (ready count per queue name), `workers` (`SolidQueue::Process` rows of kind `Worker`), `requests_count` (Puma's lifetime request count for this process), `running` (threads Puma has spawned), `max_threads_reached` (true when Puma's `pool_capacity` was 0 at sample time, i.e. no spare thread). |
+| `detail` | JSON string: `queues` (ready count per queue name), `workers` (`SolidQueue::Process` rows of kind `Worker`), `requests_count` (Puma's lifetime request count for this process), `running` (threads Puma has spawned), `max_threads_reached` (true when Puma's `pool_capacity` was 0 at sample time, i.e. no spare thread), `recurring_tasks` (Solid Queue recurring task key => schedule, from `SolidQueue::RecurringTask`; left out when there are none or the table could not be read, so the platform can tell a task removed from `config/recurring.yml` apart from one that stopped running). |
 
 Every Puma field is nil when no `Puma::Server` exists in the process, and
 every Solid Queue field is nil when `SolidQueue` isn't loaded.
