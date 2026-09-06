@@ -391,9 +391,15 @@ lifetime); it and other permanent client rejections are reported through
 `Lantern.flush` forces an immediate flush (also called by the `command`
 patches after a rake task/runner invocation finishes, so short-lived
 processes don't lose their last batch to the flush interval). An unhandled
-exception (`Lantern.record_now` → `Reporter#write_now`) enqueues and wakes
-the reporter immediately; it never performs network I/O or a timeout cycle
-on the application thread.
+exception (`Lantern.record_now` → `Reporter#write_now`) enqueues the record
+and asks for an urgent flush; it never performs network I/O or a timeout
+cycle on the application thread. Urgent means within a quarter of a second
+(`Reporter::URGENT_FLUSH_DELAY`), not instantly: during an exception storm
+every request would otherwise wake the reporter for a handful of records,
+and a burst that produced 4,000 records went out as 400 POSTs of ten. A
+lone exception still ships inside that window; a storm coalesces into full
+batches, and a buffer that crosses `flush_threshold` flushes at once
+regardless.
 
 During shutdown the reporter immediately attempts any retained batch and
 keeps retrying within `shutdown_timeout`. If the deadline expires, the batch

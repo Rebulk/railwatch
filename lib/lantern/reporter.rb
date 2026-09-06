@@ -15,6 +15,13 @@ module Lantern
     # newer was discarded around it. Eight attempts on the backoff ladder is
     # roughly four minutes of outage.
     MAX_RETRY_ATTEMPTS = 8
+    # An unhandled exception asks for an immediate flush so it reaches the
+    # platform without waiting out flush_interval. "Immediate" is this many
+    # seconds, not zero: during an exception storm every request would
+    # otherwise wake the thread for a handful of records, and a burst that
+    # produced 4,000 records went out as 400 POSTs of ten. A lone exception
+    # still ships within the window; a storm coalesces into full batches.
+    URGENT_FLUSH_DELAY = 0.25
     DeliveryBatch = Data.define(:id, :records, :bytes, :dropped, :dropped_bytes, :prepared)
 
     class DeliveryError < StandardError
@@ -53,6 +60,7 @@ module Lantern
       @pid = Process.pid
       @stopping = false
       @flush_requested = false
+      @urgent_at = nil
       @retry_attempt = 0
       @retry_at = nil
       @retry_batch = nil
@@ -79,9 +87,16 @@ module Lantern
     # network I/O on the application thread.
     def write_now(record)
       ensure_process!
-      @buffer.push(record)
+      size = @buffer.push(record)
       arm_thread unless @thread&.alive?
-      request_flush
+      # A full buffer flushes now regardless; anything smaller flushes at
+      # the end of the urgent window, however many exceptions land in it.
+      return request_flush if size >= @config.flush_threshold
+
+      @mutex.synchronize do
+        @urgent_at ||= Clock.monotonic + URGENT_FLUSH_DELAY
+        @wakeup.signal
+      end
     end
 
     def flush
@@ -109,6 +124,7 @@ module Lantern
       @thread = nil
       @stopping = false
       @flush_requested = false
+      @urgent_at = nil
       @retry_attempt = 0
       @retry_at = nil
       # Newer reporters retain an immutable delivery batch (including its
@@ -212,10 +228,15 @@ module Lantern
           else
             if @flush_requested
               @flush_requested = false
+              @urgent_at = nil
+              return :flush
+            end
+            if @urgent_at && now >= @urgent_at
+              @urgent_at = nil
               return :flush
             end
             return :flush if now >= interval_deadline
-            deadline = interval_deadline
+            deadline = [ interval_deadline, @urgent_at ].compact.min
           end
           @wakeup.wait(@mutex, [ deadline - now, 0.0 ].max)
         end

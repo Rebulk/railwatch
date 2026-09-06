@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+- An unhandled exception's urgent flush is coalesced over a quarter-second
+  window (`Reporter::URGENT_FLUSH_DELAY`) instead of waking the reporter
+  per record. During an exception storm every request used to trigger its
+  own POST carrying the handful of records written since the last one: a
+  ten-second burst that produced 4,000 records went out as 400 POSTs of
+  ten, at about double the gzip bytes per record of a full batch. A lone
+  exception still ships within the window; a buffer that crosses
+  `flush_threshold` flushes at once as before.
+
 - `POST /lantern/beacon` is rate limited per client IP: 120 requests a
   minute by default (`beacon_rate_limit`, `LANTERN_BEACON_RATE_LIMIT`; `0`
   disables), answered with 429 and `Retry-After` past that. The beacon takes
