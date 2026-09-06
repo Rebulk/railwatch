@@ -67,7 +67,7 @@ module Lantern
                   :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
-                  :beacon_enabled, :debug, :capture_default_vendor_commands,
+                  :beacon_enabled, :beacon_rate_limit, :debug, :capture_default_vendor_commands,
                   :capture_default_vendor_cache_keys, :on_unrecoverable,
                   :capture_framework_events,
                   :tail_sample_slow_ms, :failure_context, :propagate_traces, :trace_propagation_hosts,
@@ -133,6 +133,11 @@ module Lantern
       @capture_framework_events = env_bool("LANTERN_CAPTURE_FRAMEWORK_EVENTS", false)
       @on_unrecoverable = nil
       @beacon_enabled = env_bool("LANTERN_BEACON", true)
+      # The beacon is unauthenticated and forces Lantern.keep! for browser
+      # errors, so without a ceiling anyone can spend an app's event quota
+      # from a shell. Per client IP per minute; 0 turns the limit off, and a
+      # negative value is normalized to 0 rather than left to mean anything.
+      @beacon_rate_limit = [ env_int("LANTERN_BEACON_RATE_LIMIT", 120), 0 ].max
       @debug = env_bool("LANTERN_DEBUG", false)
       # Tail-based sampling: a head-sampled-out execution is still kept when
       # it ran at least this long, raised, or Lantern.keep! was called. nil = off.

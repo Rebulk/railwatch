@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- `POST /lantern/beacon` is rate limited per client IP: 120 requests a
+  minute by default (`beacon_rate_limit`, `LANTERN_BEACON_RATE_LIMIT`; `0`
+  disables), answered with 429 and `Retry-After` past that. The beacon takes
+  no credential and keeps every browser error it is sent, so until now a
+  script could spend an app's event quota and open junk browser issues from
+  a shell. The counter lives in the app's cache store; a store that cannot
+  count fails open.
 - **Behaviour change for every app: `query` records now carry normalized SQL,
   not the raw statement.** String, numeric, hex, Postgres dollar-quoted and
   adapter-specific literals, plus SQL comments, are replaced with `?` while
