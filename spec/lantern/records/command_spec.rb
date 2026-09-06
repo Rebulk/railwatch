@@ -16,10 +16,33 @@ RSpec.describe "command record" do
     expect(Widget.exists?(name: "from_rake")).to be(true)
   end
 
-  it "installs Lantern::Patches::RunnerCommand on Rails::Command::RunnerCommand at boot" do
+  it "installs Lantern::Patches::RunnerCommand from the engine's runner hook, which bin/rails runner fires after boot" do
+    # Not at boot: requiring railties' runner command in every web and
+    # worker process cost boot time for a class those processes never call.
+    Rails.application.load_runner
     require "rails/command"
     require "rails/commands/runner/runner_command"
     expect(Rails::Command::RunnerCommand.ancestors).to include(Lantern::Patches::RunnerCommand)
+  end
+
+  it "installs Lantern::Patches::RakeTask from the engine's rake_tasks hook, which a rake process fires after boot" do
+    # spec_helper ran Rails.application.load_tasks once for the suite (Rake
+    # appends actions, so loading twice would run every task twice).
+    expect(Rake::Task.ancestors).to include(Lantern::Patches::RakeTask)
+  end
+
+  it "installs the rake and runner patches even when Lantern is not yet enabled at hook time" do
+    # A rake process runs load_tasks from the Rakefile before initialize!,
+    # so a token set in config/initializers/lantern.rb is not visible when
+    # the rake_tasks hook fires. The hook must not gate on Lantern.enabled?;
+    # the patches gate themselves on every call and are inert when off.
+    allow(Lantern).to receive(:enabled?).and_return(false)
+    rake_hooks = Lantern::Engine.instance_variable_get(:@rake_tasks) || Lantern::Engine.rake_tasks
+    runner_hooks = Lantern::Engine.instance_variable_get(:@runner) || Lantern::Engine.runner
+    expect(Lantern::Patches).to receive(:install_rake_task!).and_call_original
+    expect(Lantern::Patches).to receive(:install_runner_command!).and_call_original
+    rake_hooks.each { |blk| Lantern::Engine.instance.instance_exec(Rails.application, &blk) }
+    runner_hooks.each { |blk| Lantern::Engine.instance.instance_exec(Rails.application, &blk) }
   end
 
   context "once Rails::Command::RunnerCommand is actually prepended (simulating the require path being fixed)" do

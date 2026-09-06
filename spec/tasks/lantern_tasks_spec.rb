@@ -5,9 +5,8 @@ require "rake"
 require "tmpdir"
 
 RSpec.describe "lantern rake tasks" do
-  before(:all) do
-    Rails.application.load_tasks unless Rake::Task.task_defined?("lantern:status")
-  end
+  # spec_helper loads the app's tasks once for the whole suite; a second
+  # load_tasks would append every task's action a second time.
 
   # Rake runs a task once per process; a second `invoke` is a silent no-op.
   # Re-enabled BEFORE each example as well as after, because the install

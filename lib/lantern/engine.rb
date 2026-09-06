@@ -33,6 +33,34 @@ module Lantern
       Lantern::Patches.install!
     end
 
+    # The process record is written once the app has finished initializing.
+    # The after_initialize hook is registered from inside this initializer
+    # rather than from the engine's class body (which runs at
+    # Bundler.require time, before config/application.rb): hooks run in
+    # registration order, so this way it lands after every after_initialize
+    # block the app registers from application.rb, its environment files,
+    # and config/initializers. boot_seconds covers all of them, and an app
+    # that reconfigures Lantern in its own after_initialize is respected.
+    # Each forked child writes its own record from
+    # Lantern.restart_after_fork!.
+    initializer "lantern.process", after: :load_config_initializers do
+      config.after_initialize do
+        Lantern::Subscribers::ProcessInfo.record! if Lantern.enabled?
+      end
+    end
+
+    # Not gated on Lantern.enabled?: a rake process runs load_tasks (from
+    # the Rakefile) before initialize!, so a token set in
+    # config/initializers is not visible yet at that point. Both patches
+    # check Lantern.enabled? on every call and are inert when it is off.
+    rake_tasks do
+      Lantern::Patches.install_rake_task!
+    end
+
+    runner do
+      Lantern::Patches.install_runner_command!
+    end
+
     # Runs unconditionally (not gated on Lantern.enabled?) so `Lantern::Faraday`
     # is a valid constant for apps to reference in their Faraday stack setup
     # regardless of whether Lantern itself is enabled -- Lantern.record already
@@ -53,41 +81,48 @@ module Lantern
       at_exit { Lantern.reporter.shutdown if Lantern.enabled? }
     end
 
-    # Registered before the health/session hooks so its child callback
-    # unwinds first from Process._fork and replaces reporter state before
-    # either sampler can emit into it.
-    initializer "lantern.reporter_fork", after: "lantern.subscribe" do
-      next unless Lantern.enabled?
-
-      ::Process.singleton_class.prepend(Lantern::Reporter::ForkHook)
+    # Threads do not survive fork. Rails' own ForkTracker (a Process._fork
+    # hook, so it sees fork, Process.fork, and Kernel#fork exactly once per
+    # child) runs Lantern.restart_after_fork! in every Puma cluster worker
+    # and Solid Queue forked worker: the reporter first, so nothing
+    # inherited from the parent can be flushed, then the health sampler and
+    # session flusher. Registered whether or not Lantern is enabled yet --
+    # the check is made at fork time, so an app that enables Lantern late
+    # still gets a clean child -- and never allowed to raise: ForkTracker
+    # runs its callbacks in order with no rescue, and one that raised would
+    # skip every callback after it, including Active Record's pool reset.
+    initializer "lantern.fork" do
+      require "active_support/fork_tracker"
+      ActiveSupport::ForkTracker.after_fork do
+        Lantern.restart_after_fork! if Lantern.enabled?
+      rescue StandardError => e
+        Lantern.debug { "fork reset failed: #{e.class}: #{e.message}" }
+      end
     end
 
-    # Declared after "lantern.shutdown" so its at_exit is registered later and
-    # therefore runs first (at_exit is LIFO): the health thread is stopped
-    # before the reporter's final flush, not after it.
-    initializer "lantern.health", after: "lantern.reporter_fork" do
+    # Declared after "lantern.shutdown" (initializers run in declaration
+    # order) so its at_exit is registered later and therefore runs first
+    # (at_exit is LIFO): the health thread is stopped before the reporter's
+    # final flush, not after it.
+    initializer "lantern.health" do
       next unless Lantern.enabled?
 
       Lantern::Health.start!
       at_exit { Lantern::Health.stop! }
-      # Threads do not survive fork: re-arm the sampler in every child (Puma
-      # cluster workers, Solid Queue forked workers).
-      ::Process.singleton_class.prepend(Lantern::Health::ForkHook)
     end
 
     # Same shape as "lantern.health": one flusher thread per web process,
-    # stopped before the reporter's final flush, re-armed after a fork.
-    initializer "lantern.sessions", after: "lantern.health" do
+    # stopped before the reporter's final flush.
+    initializer "lantern.sessions" do
       next unless Lantern.enabled? && Lantern.config.track_sessions
 
       Lantern::Sessions.start!
       at_exit { Lantern::Sessions.stop! }
-      ::Process.singleton_class.prepend(Lantern::Sessions::ForkHook)
     end
 
-    # lib/tasks/lantern_tasks.rake is already picked up by Rails::Engine's
-    # default lib/tasks convention (Rails::Engine#run_tasks_blocks), so no
-    # explicit rake_tasks registration is needed here.
+    # lib/tasks/lantern_tasks.rake is picked up by Rails::Engine's default
+    # lib/tasks convention; the rake_tasks block above only installs the
+    # Rake::Task patch.
   end
 end
 

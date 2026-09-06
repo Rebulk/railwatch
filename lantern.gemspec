@@ -25,5 +25,8 @@ Gem::Specification.new do |spec|
     Dir["{app,config,lib,docs}/**/*", "MIT-LICENSE", "Rakefile", "README.md", "CHANGELOG.md", "llms.txt", "AGENTS.md"]
   end
 
-  spec.add_dependency "rails", ">= 8.1"
+  spec.add_dependency "rails", ">= 8.1", "< 9"
+  # Used for profile stacks and attachments. A bundled gem since Ruby 3.4,
+  # so it must be declared rather than assumed from the standard library.
+  spec.add_dependency "base64"
 end

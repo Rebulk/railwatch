@@ -35,15 +35,6 @@ module Lantern
     @pid = nil
     @stopping = false
 
-    # See Lantern::Health::ForkHook.
-    module ForkHook
-      def _fork
-        pid = super
-        Sessions.restart_after_fork! if pid.zero?
-        pid
-      end
-    end
-
     module_function
 
     # Session keys dropped because the process was already tracking MAX_KEYS.

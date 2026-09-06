@@ -31,7 +31,10 @@ deliver, and a query fires two of them); Lantern's subscriber body is 5 to
 Off the request thread, the reporter spends about 30 µs of CPU per record
 serializing and gzipping, which was 2 to 4 percent of process CPU in a
 saturated load test, and each record on the wire is about 95 bytes after
-gzip. Boot time is unchanged; resident memory is 1 to 2 MB higher at idle
+gzip. Boot with the gem enabled is within noise of boot without it (it
+used to be 300 ms and 10 MB slower, until the process record stopped
+loading Active Record and Active Job just to name their adapters, and the
+rake and runner patches moved out of the web boot); resident memory is 1 to 2 MB higher at idle
 plus about 2 KB per buffered record.
 
 Two honest caveats. The budget is **CPU time on the request thread**, not

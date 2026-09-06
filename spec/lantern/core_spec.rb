@@ -372,6 +372,7 @@ RSpec.describe Lantern do
   describe "process info" do
     it "reports boot_seconds measured from Lantern::BOOTED_AT, not an unset global" do
       Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+      Lantern::Subscribers::ProcessInfo.record!
       proc_record = lantern_records(:process).sole
       expect(proc_record[:boot_seconds]).to be_between(0, 60)
     end

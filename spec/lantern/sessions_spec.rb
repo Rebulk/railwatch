@@ -174,22 +174,6 @@ RSpec.describe Lantern::Sessions, type: :request do
   end
 end
 
-RSpec.describe Lantern::Sessions::ForkHook do
-  it "re-arms the flusher in the child after a fork" do
-    expect(Lantern::Sessions).to receive(:restart_after_fork!)
-    fake = Class.new { def _fork = 0 }.new
-    fake.singleton_class.prepend(described_class)
-    expect(fake._fork).to eq(0)
-  end
-
-  it "leaves the parent alone" do
-    expect(Lantern::Sessions).not_to receive(:restart_after_fork!)
-    fake = Class.new { def _fork = 4242 }.new
-    fake.singleton_class.prepend(described_class)
-    expect(fake._fork).to eq(4242)
-  end
-end
-
 RSpec.describe "Lantern::Sessions fork state" do
   it "replaces inherited synchronization, session, and drop state" do
     old_mutex = Lantern::Sessions.instance_variable_get(:@mutex)

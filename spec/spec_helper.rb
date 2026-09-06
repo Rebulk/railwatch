@@ -21,6 +21,9 @@ WebMock.disable_net_connect!
 # observed in this suite. Apps using WebMock in their own tests would do the same.
 RSpec.configure do |config|
   config.before(:suite) { Net::HTTP.prepend(Lantern::Patches::NetHttp) }
+  # The Rake::Task patch is installed from the engine's rake_tasks hook, as
+  # in a real rake process; the specs that execute tasks need it in place.
+  config.before(:suite) { Rails.application.load_tasks }
   config.include Lantern::SpecHelper
   config.include ActiveJob::TestHelper
   config.use_transactional_fixtures = true

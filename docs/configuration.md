@@ -424,12 +424,23 @@ process exit after that deadline cannot preserve records for the next boot.
 |---|---|---|---|
 | `health_interval` | `LANTERN_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
 
-Lantern re-arms the reporter, sampler, and profiler after `fork` (a
-`Process._fork` hook), so clustered Puma workers and forked Solid Queue
-workers each get a fresh buffer, transport policy state, process record,
-health thread, and profiler slot. The child never flushes records or drop
-accounting inherited from its parent, and no `on_worker_boot` configuration
-is needed.
+Lantern re-arms the reporter, sampler, and profiler after `fork` (one
+`ActiveSupport::ForkTracker` callback, Rails' own `Process._fork` hook), so
+clustered Puma workers and forked Solid Queue workers each get a fresh
+buffer, transport policy state, process record, health thread, and profiler
+slot. The child never flushes records or drop accounting inherited from its
+parent, and no `on_worker_boot` configuration is needed.
+
+The `process` record is written from `config.after_initialize`, after the
+app's own initializers, so `boot_seconds` covers them. A Puma master that
+preloads the app runs those initializers too, so it writes its own
+`process` record and starts its own reporter, health, and session threads
+before forking; Puma prints "Detected N Thread(s) started in app boot"
+for them. That is advisory: the threads it is warning about are exactly
+the ones the fork callback replaces in every worker. The Rake and
+`bin/rails runner` patches are installed from the engine's `rake_tasks`
+and `runner` hooks, which only a rake or runner process fires, so a web or
+worker boot does not require rake or railties' runner command.
 
 A numeric `LANTERN_*` value that is not a number (`LANTERN_BUFFER_SIZE=12px`)
 falls back to the default documented in the tables above rather than being

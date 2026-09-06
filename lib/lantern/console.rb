@@ -30,7 +30,7 @@ module Lantern
     end
 
     # Idempotent, and the whole of quiet mode: every record path, the
-    # subscriber install (which is what emits the `process` record), and the
+    # subscriber install, the after_initialize `process` record, and the
     # reporter/health/sessions threads are already gated on Lantern.enabled?.
     # Returns whether this call is what silenced the process.
     def silence!

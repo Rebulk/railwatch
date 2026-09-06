@@ -4,7 +4,8 @@ module Lantern
   # One background thread per web/worker process, shipping a single `health`
   # record every config.health_interval seconds: Puma's thread pool, the
   # Active Record connection pool, and Solid Queue's backlog. Started from the
-  # engine's "lantern.health" initializer.
+  # engine's "lantern.health" initializer and re-armed in every forked child
+  # from Lantern.restart_after_fork!.
   #
   # A sample must never be visible to the app: the whole thing runs inside
   # Lantern.ignore and rescues everything, so a missing constant, an
@@ -19,20 +20,10 @@ module Lantern
     @pid = nil
     @stopping = false
 
-    # Prepended onto Process's singleton class by the engine: Ruby routes
-    # fork, Process.fork and Kernel#fork through Process._fork, so this sees
-    # every child exactly once.
-    module ForkHook
-      def _fork
-        pid = super
-        Health.restart_after_fork! if pid.zero?
-        pid
-      end
-    end
-
     module_function
 
-    # Idempotent; ForkHook calls it again in every forked child.
+    # Idempotent; Lantern.restart_after_fork! calls it again in every forked
+    # child.
     def start!
       return unless Lantern.enabled?
       return if defined?(Rails) && Rails.env.test?
