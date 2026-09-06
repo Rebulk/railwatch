@@ -22,6 +22,10 @@ module Lantern
     # produced 4,000 records went out as 400 POSTs of ten. A lone exception
     # still ships within the window; a storm coalesces into full batches.
     URGENT_FLUSH_DELAY = 0.25
+    # Three pressure ticks reach 8x and three clear ticks recover to 1x. That
+    # is enough to turn a saturated stream into breathing room without the
+    # long recovery and sparse telemetry a 16x cap would impose.
+    MAX_BACKPRESSURE_FACTOR = 8.0
     DeliveryBatch = Data.define(:id, :records, :bytes, :dropped, :dropped_bytes, :prepared)
 
     class DeliveryError < StandardError
@@ -53,6 +57,10 @@ module Lantern
       @retry_attempt = 0
       @retry_at = nil
       @retry_batch = nil
+      # Ruby ivars hold object references atomically. The reporter is the
+      # only writer, and sampler readers can safely tolerate one stale Float,
+      # so the hot execution path does not take a mutex for this value.
+      @backpressure_factor = 1.0
       @in_flight_records = 0
       @in_flight_dropped = 0
       @in_flight_bytes = 0
@@ -64,6 +72,8 @@ module Lantern
       ensure_process!
       @buffer
     end
+
+    attr_reader :backpressure_factor
 
     def write(record, bytes = nil)
       ensure_process!
@@ -90,7 +100,10 @@ module Lantern
 
     def flush
       ensure_process!
-      @flush_mutex.synchronize { deliver_buffer }
+      @flush_mutex.synchronize do
+        update_backpressure
+        deliver_buffer
+      end
     end
 
     def ensure_thread
@@ -120,6 +133,7 @@ module Lantern
       # idempotency key) between attempts. Keep this reset forward-compatible
       # so that batch can never cross a process boundary after fork.
       @retry_batch = nil
+      @backpressure_factor = 1.0
       @in_flight_records = 0
       @in_flight_dropped = 0
       @in_flight_bytes = 0
@@ -429,10 +443,29 @@ module Lantern
       parameters = @transport.method(:deliver).parameters
       accepts_batch_id = parameters.any? { |kind, name| kind == :keyrest || name == :batch_id }
       accepts_dropped_bytes = parameters.any? { |kind, name| kind == :keyrest || name == :dropped_bytes }
+      accepts_backpressure = parameters.any? { |kind, name| kind == :keyrest || name == :backpressure_factor }
       keywords = { dropped: batch.dropped }
       keywords[:batch_id] = batch.id if accepts_batch_id
       keywords[:dropped_bytes] = batch.dropped_bytes if accepts_dropped_bytes
+      keywords[:backpressure_factor] = @backpressure_factor if accepts_backpressure
       @transport.deliver(batch.records, **keywords)
+    end
+
+    def update_backpressure
+      unless @config.backpressure
+        @backpressure_factor = 1.0
+        return
+      end
+
+      buffered, _, buffered_bytes, = @buffer.stats
+      high_water = @config.backpressure_high_water
+      pressured = buffered >= @config.buffer_size * high_water ||
+        buffered_bytes >= @config.buffer_bytes * high_water || @retry_attempt.positive?
+      @backpressure_factor = if pressured
+        [ @backpressure_factor * 2.0, MAX_BACKPRESSURE_FACTOR ].min
+      else
+        [ @backpressure_factor / 2.0, 1.0 ].max
+      end
     end
 
     def in_flight(records, dropped, bytes, dropped_bytes)

@@ -41,7 +41,7 @@ module Lantern
         self
       end
 
-      def deliver(records, dropped: 0, dropped_bytes: 0, batch_id: SecureRandom.uuid)
+      def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 
         body, sent, over_cap, over_cap_bytes = encode(records)
@@ -57,8 +57,10 @@ module Lantern
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: sent)
-          result = parse(post(body, dropped, dropped_bytes, batch_id), expected_count: sent) if attempt < 2 && (500..599).cover?(result.status)
+          result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
+          if attempt < 2 && (500..599).cover?(result.status)
+            result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
+          end
           apply_status_policy(result)
           result
         rescue StandardError => e
@@ -105,12 +107,15 @@ module Lantern
         [ io.string, sent, over_cap, over_cap_bytes ]
       end
 
-      def post(body, dropped, dropped_bytes, batch_id)
+      def post(body, dropped, dropped_bytes, backpressure_factor, batch_id)
         req = Net::HTTP::Post.new(@uri)
         req["Content-Type"] = "application/x-ndjson"
         req["Content-Encoding"] = "gzip"
         req["X-Lantern-Dropped"] = dropped.to_s if dropped.positive?
         req["X-Lantern-Dropped-Bytes"] = dropped_bytes.to_s if dropped_bytes.positive?
+        if backpressure_factor > 1.0
+          req["X-Lantern-Backpressure-Factor"] = backpressure_factor.to_s
+        end
         req["X-Lantern-Version"] = Lantern::VERSION
         req["X-Lantern-Batch-Id"] = batch_id
         req.body = body

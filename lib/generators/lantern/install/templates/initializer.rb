@@ -25,6 +25,8 @@ Lantern.configure do |c|
   # c.buffer_bytes = 16 * 1024 * 1024   # reporter queue memory ceiling
   # c.execution_buffer_bytes = 8 * 1024 * 1024
   # c.batch_bytes = 8 * 1024 * 1024     # uncompressed NDJSON per request
+  # c.backpressure = true               # adapt sampling under buffer/ingest pressure
+  # c.backpressure_high_water = 0.8     # fraction of either buffer ceiling
   # c.capture_request_payload = false   # only captured for requests that raised, always redacted
   # Retried job errors are usually expected, so they are not captured by
   # default; enabling this can flood the issues list when retries are common.

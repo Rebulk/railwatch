@@ -28,6 +28,31 @@ RSpec.describe "sampling", type: :request do
     expect(lantern_records(:query)).to be_empty
   end
 
+  it "still ships an unhandled exception from a sampled-out request under backpressure" do
+    Lantern.config.sample[:requests] = 0.0
+    Lantern.config.sample[:exceptions] = 1.0
+    Lantern.reporter.instance_variable_set(:@backpressure_factor, 4.0)
+    allow(Random).to receive(:rand).and_return(0.1)
+
+    get "/boom"
+
+    expect(lantern_records(:exception).sole).to include(class: "ArgumentError", handled: false)
+    expect(lantern_records(:request).sole[:status_code]).to eq(500)
+  ensure
+    Lantern.reporter.instance_variable_set(:@backpressure_factor, 1.0)
+  end
+
+  it "divides every configured sample rate by the reporter's backpressure factor" do
+    Lantern.config.sample[:requests] = 1.0
+    Lantern.reporter.instance_variable_set(:@backpressure_factor, 4.0)
+    allow(Random).to receive(:rand).and_return(0.24, 0.25)
+
+    expect(Lantern::Sampler.decide(:requests)).to be(true)
+    expect(Lantern::Sampler.decide(:requests)).to be(false)
+  ensure
+    Lantern.reporter.instance_variable_set(:@backpressure_factor, 1.0)
+  end
+
   it "ships nothing for an unhandled exception when sampled out and exceptions rate is 0.0" do
     Lantern.config.sample[:requests] = 0.0
     Lantern.config.sample[:exceptions] = 0.0
