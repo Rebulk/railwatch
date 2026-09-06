@@ -42,12 +42,16 @@ module Lantern
       Lantern::Subscribers::ProcessInfo.record! if Lantern.enabled?
     end
 
+    # Not gated on Lantern.enabled?: a rake process runs load_tasks (from
+    # the Rakefile) before initialize!, so a token set in
+    # config/initializers is not visible yet at that point. Both patches
+    # check Lantern.enabled? on every call and are inert when it is off.
     rake_tasks do
-      Lantern::Patches.install_rake_task! if Lantern.enabled?
+      Lantern::Patches.install_rake_task!
     end
 
     runner do
-      Lantern::Patches.install_runner_command! if Lantern.enabled?
+      Lantern::Patches.install_runner_command!
     end
 
     # Runs unconditionally (not gated on Lantern.enabled?) so `Lantern::Faraday`

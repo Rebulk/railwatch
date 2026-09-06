@@ -39,25 +39,28 @@ module Lantern
           cache_store: (Rails.cache.class.name rescue nil))
       end
 
-      # Read from the app's configuration rather than from
-      # ActiveRecord::Base / ActiveJob::Base: in a lazy-loading process
-      # (development, or a production boot without eager loading) touching
-      # those constants is what loads the frameworks, some 350 ms of boot
-      # nothing else asked for.
+      # Resolved from the app's configuration with Rails' own resolvers
+      # rather than through ActiveRecord::Base / ActiveJob::Base: in a
+      # lazy-loading process (development, or a production boot without
+      # eager loading) touching those constants is what loads the
+      # frameworks, some 350 ms of boot nothing else asked for. Both
+      # resolvers are requirable on their own.
       def database_adapter
-        env = @app&.config&.database_configuration&.dig(Lantern.config.environment_name) or return nil
-        # Two-tier config puts the adapter under the environment; three-tier
-        # (primary/cache/queue) nests one hash per database, and the first
-        # one with an adapter is the primary.
-        adapter = env["adapter"] || env.each_value.find { |db| db.is_a?(Hash) && db["adapter"] }&.dig("adapter")
-        adapter&.to_s
+        config = @app&.config&.database_configuration or return nil
+        require "active_record/database_configurations"
+        # Keyed by Rails.env, as Active Record itself does; DATABASE_URL and
+        # `url:` entries are resolved the same way it resolves them.
+        ActiveRecord::DatabaseConfigurations.new(config).find_db_config(Rails.env)&.adapter
       rescue StandardError
         nil
       end
 
       def queue_adapter
         adapter = @app&.config&.active_job&.queue_adapter or return nil
-        adapter.is_a?(Symbol) || adapter.is_a?(String) ? adapter.to_s : adapter.class.name.demodulize.delete_suffix("Adapter").underscore
+        return adapter.to_s if adapter.is_a?(Symbol) || adapter.is_a?(String)
+
+        require "active_job/queue_adapter"
+        ActiveJob.adapter_name(adapter).underscore
       rescue StandardError
         nil
       end

@@ -33,6 +33,30 @@ RSpec.describe "process record" do
     expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("test")
   end
 
+  it "resolves a url-only database.yml, a DATABASE_URL-only app, and a self-named queue adapter" do
+    app = Struct.new(:config).new(Struct.new(:database_configuration, :active_job).new(
+      { "test" => { "url" => "postgres://u:p@db.example/app" } }, Struct.new(:queue_adapter).new(nil)))
+    Lantern::Subscribers::ProcessInfo.install!(app)
+    expect(Lantern::Subscribers::ProcessInfo.database_adapter).to eq("postgresql")
+
+    url_only = Struct.new(:config).new(Struct.new(:database_configuration, :active_job).new({}, Struct.new(:queue_adapter).new(nil)))
+    Lantern::Subscribers::ProcessInfo.install!(url_only)
+    previous_url = ENV["DATABASE_URL"]
+    ENV["DATABASE_URL"] = "mysql2://u@h/d"
+    begin
+      expect(Lantern::Subscribers::ProcessInfo.database_adapter).to eq("mysql2")
+    ensure
+      previous_url ? ENV["DATABASE_URL"] = previous_url : ENV.delete("DATABASE_URL")
+    end
+
+    named = Class.new { def queue_adapter_name = "acme_queue" }.new
+    with_adapter = Struct.new(:config).new(Struct.new(:database_configuration, :active_job).new({}, Struct.new(:queue_adapter).new(named)))
+    Lantern::Subscribers::ProcessInfo.install!(with_adapter)
+    expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("acme_queue")
+  ensure
+    Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+  end
+
   it "is written after the app has initialized, not from the subscribe initializer" do
     # boot_seconds is meant to cover the app's own initializers, which run
     # after the gem's subscribe initializer.

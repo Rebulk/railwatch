@@ -31,6 +31,20 @@ RSpec.describe "command record" do
     expect(Rake::Task.ancestors).to include(Lantern::Patches::RakeTask)
   end
 
+  it "installs the rake and runner patches even when Lantern is not yet enabled at hook time" do
+    # A rake process runs load_tasks from the Rakefile before initialize!,
+    # so a token set in config/initializers/lantern.rb is not visible when
+    # the rake_tasks hook fires. The hook must not gate on Lantern.enabled?;
+    # the patches gate themselves on every call and are inert when off.
+    allow(Lantern).to receive(:enabled?).and_return(false)
+    rake_hooks = Lantern::Engine.instance_variable_get(:@rake_tasks) || Lantern::Engine.rake_tasks
+    runner_hooks = Lantern::Engine.instance_variable_get(:@runner) || Lantern::Engine.runner
+    expect(Lantern::Patches).to receive(:install_rake_task!).and_call_original
+    expect(Lantern::Patches).to receive(:install_runner_command!).and_call_original
+    rake_hooks.each { |blk| Lantern::Engine.instance.instance_exec(Rails.application, &blk) }
+    runner_hooks.each { |blk| Lantern::Engine.instance.instance_exec(Rails.application, &blk) }
+  end
+
   context "once Rails::Command::RunnerCommand is actually prepended (simulating the require path being fixed)" do
     before(:context) do
       require "rails/command"
