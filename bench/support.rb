@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 # Shared setup for every script in bench/. Requiring it boots the dummy app
-# on SQLite in the test environment with Lantern enabled and pointed at a
+# on SQLite in the test environment with Nightrail enabled and pointed at a
 # port nothing listens on, loads the schema, seeds a few rows, and makes
 # the reporter drop records instead of shipping them, so a script measures
 # in-process cost only.
 #
 # It also records every ActiveSupport::Notifications subscriber the gem
 # installs, so a script can take the gem genuinely out of the way
-# (lantern_off!) and put it back (lantern_on!). Flipping config.enabled is
+# (nightrail_off!) and put it back (nightrail_on!). Flipping config.enabled is
 # not enough for a baseline: the subscribers still receive every event, and
 # a log Capture left on the broadcast logger still costs.
 #
@@ -16,37 +16,37 @@
 # Rack::Test DRIVER; the dummy app's own routes (/widgets, /many, /cached,
 # /boom, ...) stay mounted.
 ENV["RAILS_ENV"] = "test"
-ENV["LANTERN_TOKEN"] ||= "bench"
-ENV["LANTERN_INGEST_URL"] ||= "http://127.0.0.1:9"
+ENV["NIGHTRAIL_TOKEN"] ||= "bench"
+ENV["NIGHTRAIL_INGEST_URL"] ||= "http://127.0.0.1:9"
 
 require "active_support"
 require "active_support/notifications"
 
-LANTERN_SUBSCRIPTIONS = []
-module TrackLanternSubscriptions
+NIGHTRAIL_SUBSCRIPTIONS = []
+module TrackNightrailSubscriptions
   def subscribe(pattern = nil, callback = nil, &block)
     sub = super
-    LANTERN_SUBSCRIPTIONS << [ pattern, sub, :subscribe ] if from_lantern?
+    NIGHTRAIL_SUBSCRIPTIONS << [ pattern, sub, :subscribe ] if from_nightrail?
     sub
   end
 
   def monotonic_subscribe(pattern = nil, callback = nil, &block)
     sub = super
-    LANTERN_SUBSCRIPTIONS << [ pattern, sub, :monotonic_subscribe ] if from_lantern?
+    NIGHTRAIL_SUBSCRIPTIONS << [ pattern, sub, :monotonic_subscribe ] if from_nightrail?
     sub
   end
 
   private
 
-  def from_lantern? = caller_locations(2, 3).any? { |l| l.path.include?("/lib/lantern/") }
+  def from_nightrail? = caller_locations(2, 3).any? { |l| l.path.include?("/lib/nightrail/") }
 end
-ActiveSupport::Notifications.singleton_class.prepend(TrackLanternSubscriptions)
+ActiveSupport::Notifications.singleton_class.prepend(TrackNightrailSubscriptions)
 
 require_relative "../spec/dummy/config/environment"
 require "rack/test"
 require "json"
 
-abort "Lantern must be enabled for benchmarks (LANTERN_ENABLED is off)" unless Lantern.enabled?
+abort "Nightrail must be enabled for benchmarks (NIGHTRAIL_ENABLED is off)" unless Nightrail.enabled?
 
 ActiveRecord::Schema.verbose = false
 load File.expand_path("../spec/dummy/db/schema.rb", __dir__)
@@ -55,31 +55,31 @@ User.create!(name: "bench", email: "bench@example.com")
 
 # Swallow transport work entirely; the reporter thread is measured by
 # bench/transport_cost.rb and bench/load/run.sh, not here.
-Lantern.reporter.define_singleton_method(:flush) { @buffer.drain; nil }
+Nightrail.reporter.define_singleton_method(:flush) { @buffer.drain; nil }
 
-CAPTURE = Rails.logger.broadcasts.find { |l| l.is_a?(Lantern::Subscribers::Logs::Capture) } or
-  abort "Lantern's log Capture is not on Rails.logger; the log path would go unmeasured"
+CAPTURE = Rails.logger.broadcasts.find { |l| l.is_a?(Nightrail::Subscribers::Logs::Capture) } or
+  abort "Nightrail's log Capture is not on Rails.logger; the log path would go unmeasured"
 
-def lantern_off!
-  LANTERN_SUBSCRIPTIONS.each { |_, sub, _| ActiveSupport::Notifications.unsubscribe(sub) }
+def nightrail_off!
+  NIGHTRAIL_SUBSCRIPTIONS.each { |_, sub, _| ActiveSupport::Notifications.unsubscribe(sub) }
   Rails.logger.stop_broadcasting_to(CAPTURE)
-  Lantern.config.enabled = false
+  Nightrail.config.enabled = false
 end
 
-def lantern_on!
-  LANTERN_SUBSCRIPTIONS.map! do |pattern, sub, how|
+def nightrail_on!
+  NIGHTRAIL_SUBSCRIPTIONS.map! do |pattern, sub, how|
     delegate = sub.instance_variable_get(:@delegate)
     [ pattern, ActiveSupport::Notifications.public_send(how, pattern, delegate), how ]
   end
   Rails.logger.broadcast_to(CAPTURE)
-  Lantern.config.enabled = true
+  Nightrail.config.enabled = true
 end
 
 # Keep records out of the reporter entirely (what these scripts measure is
 # upstream of it), or collect them into `into` for a script that prices them.
 def stub_reporter_writes!(into = nil)
-  Lantern.reporter.define_singleton_method(:write) { |record, _bytes = nil| into << record if into }
-  Lantern.reporter.define_singleton_method(:write_now) { |record| into << record if into }
+  Nightrail.reporter.define_singleton_method(:write) { |record, _bytes = nil| into << record if into }
+  Nightrail.reporter.define_singleton_method(:write_now) { |record| into << record if into }
 end
 
 # Cheap request shapes for the scripts that need something besides the
@@ -149,16 +149,16 @@ end
 # equally. Returns [off, on], each { min:, p50:, allocs: } over the rounds;
 # allocations are deterministic and taken as the minimum.
 def interleaved_measure(path, rounds:, batch:)
-  lantern_off!
+  nightrail_off!
   20.times { DRIVER.get(path) }
-  lantern_on!
+  nightrail_on!
   20.times { DRIVER.get(path) }
   off = []
   on = []
   rounds.times do
-    lantern_off!
+    nightrail_off!
     off << request_batch(path, batch)
-    lantern_on!
+    nightrail_on!
     on << request_batch(path, batch)
   end
   summarize = lambda do |samples|

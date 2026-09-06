@@ -40,19 +40,19 @@ proc_cpu() { stat_ticks /proc/$1/stat; }
 
 run_config() {
   local label="$1"; shift
-  env RAILS_ENV=test LANTERN_TOKEN=bench LANTERN_INGEST_URL="$SINK" "$@" \
-    bundle exec puma -p "$PORT" -t 4:4 -w 0 -q spec/dummy/config.ru > /tmp/lantern_load_puma.log 2>&1 &
+  env RAILS_ENV=test NIGHTRAIL_TOKEN=bench NIGHTRAIL_INGEST_URL="$SINK" "$@" \
+    bundle exec puma -p "$PORT" -t 4:4 -w 0 -q spec/dummy/config.ru > /tmp/nightrail_load_puma.log 2>&1 &
   local pid=$!
   for _ in $(seq 1 60); do curl -sf -o /dev/null "http://127.0.0.1:$PORT/widgets" && break; sleep 0.5; done
   for _ in $(seq 1 200); do curl -s -o /dev/null "http://127.0.0.1:$PORT/widgets"; done  # warm
   sleep 3; curl -s "$SINK/stats?reset" > /dev/null
   echo "== $label"
-  local rss0 cpu0 rep0; rss0=$(awk '/VmRSS/{print $2}' /proc/$pid/status); cpu0=$(proc_cpu $pid); rep0=$(thread_cpu $pid lantern-report)
+  local rss0 cpu0 rep0; rss0=$(awk '/VmRSS/{print $2}' /proc/$pid/status); cpu0=$(proc_cpu $pid); rep0=$(thread_cpu $pid nightrail-report)
   for p in $PATHS; do
     ruby bench/load/loadgen.rb -u "http://127.0.0.1:$PORT$p" -c "$CONC" -d "$DUR"
   done
   sleep 3  # let the reporter flush its last interval
-  local rss1 cpu1 rep1; rss1=$(awk '/VmRSS/{print $2}' /proc/$pid/status); cpu1=$(proc_cpu $pid); rep1=$(thread_cpu $pid lantern-report)
+  local rss1 cpu1 rep1; rss1=$(awk '/VmRSS/{print $2}' /proc/$pid/status); cpu1=$(proc_cpu $pid); rep1=$(thread_cpu $pid nightrail-report)
   local cpu=$((cpu1 - cpu0)) rep=$((rep1 - rep0))
   echo "   puma cpu ${cpu}0ms total, reporter thread ${rep}0ms ($(( cpu > 0 ? rep * 100 / cpu : 0 ))%); rss $((rss0/1024))MB -> $((rss1/1024))MB; sink got $(curl -s "$SINK/stats")"
   kill $pid; wait $pid 2>/dev/null
@@ -60,8 +60,8 @@ run_config() {
 
 for round in $(seq 1 "$ROUNDS"); do
   echo "### round $round  (load avg $(cut -d' ' -f1-3 /proc/loadavg))"
-  run_config "disabled (LANTERN_ENABLED=0)" LANTERN_ENABLED=0
-  run_config "enabled, sampled in" LANTERN_ENABLED=1
-  run_config "enabled, requests sampled 10%" LANTERN_ENABLED=1 LANTERN_REQUEST_SAMPLE_RATE=0.1
-  run_config "enabled, sampled out" LANTERN_ENABLED=1 LANTERN_REQUEST_SAMPLE_RATE=0
+  run_config "disabled (NIGHTRAIL_ENABLED=0)" NIGHTRAIL_ENABLED=0
+  run_config "enabled, sampled in" NIGHTRAIL_ENABLED=1
+  run_config "enabled, requests sampled 10%" NIGHTRAIL_ENABLED=1 NIGHTRAIL_REQUEST_SAMPLE_RATE=0.1
+  run_config "enabled, sampled out" NIGHTRAIL_ENABLED=1 NIGHTRAIL_REQUEST_SAMPLE_RATE=0
 done

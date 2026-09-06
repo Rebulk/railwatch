@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-gemspec name: "lantern-observability"
+gemspec name: "nightrail"
 
 gem "puma"
 gem "sqlite3", ">= 2.1"

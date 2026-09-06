@@ -2,13 +2,13 @@
 
 # Gate: the gem must never write to the application's database. Drives 50
 # instrumented requests and fails if any INSERT/UPDATE/DELETE was issued from
-# a frame inside lib/lantern.
+# a frame inside lib/nightrail.
 #
 #   bundle exec ruby bench/no_db_writes.rb
 #
 require_relative "support"
 
-gem_root = File.expand_path("..", __dir__) + "/lib/lantern"
+gem_root = File.expand_path("..", __dir__) + "/lib/nightrail"
 offenders = []
 ActiveSupport::Notifications.subscribe("sql.active_record") do |event|
   sql = event.payload[:sql].to_s
@@ -26,9 +26,9 @@ end
 WidgetJob.perform_now("bench")
 
 if offenders.empty?
-  puts "NO DB WRITES FROM LANTERN: PASSED (200 requests + 1 job)"
+  puts "NO DB WRITES FROM NIGHTRAIL: PASSED (200 requests + 1 job)"
 else
-  puts "LANTERN WROTE TO THE APP DATABASE:"
+  puts "NIGHTRAIL WROTE TO THE APP DATABASE:"
   offenders.uniq.first(10).each { |o| puts "  #{o}" }
   exit 1
 end

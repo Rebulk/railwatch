@@ -8,7 +8,7 @@
 #
 #   bundle exec ruby bench/cost_by_shape.rb
 #   ROUNDS=15 bundle exec ruby bench/cost_by_shape.rb
-#   LANTERN_REQUEST_SAMPLE_RATE=0 bundle exec ruby bench/cost_by_shape.rb   # head-sampled-out path
+#   NIGHTRAIL_REQUEST_SAMPLE_RATE=0 bundle exec ruby bench/cost_by_shape.rb   # head-sampled-out path
 #   BENCH_OUT=/tmp/after.json bundle exec ruby bench/cost_by_shape.rb      # keep the numbers
 #
 # To compare before and after a change, run it on both checkouts with
@@ -32,8 +32,8 @@ BATCH = 15
 
 def measure(path) = interleaved_measure(path, rounds: ROUNDS, batch: BATCH)
 
-label = Lantern.config.sample[:requests].zero? ? "sampled out" : "sampled in"
-puts "Lantern #{label}: per-request CPU µs on the request thread (off = gem unsubscribed), #{ROUNDS} interleaved rounds x #{BATCH}"
+label = Nightrail.config.sample[:requests].zero? ? "sampled out" : "sampled in"
+puts "Nightrail #{label}: per-request CPU µs on the request thread (off = gem unsubscribed), #{ROUNDS} interleaved rounds x #{BATCH}"
 puts format("%-28s %9s %9s %9s | %9s %9s %9s | %7s %7s %7s", "shape", "off min", "on min", "Δ min", "off p50", "on p50", "Δ p50", "off al", "on al", "Δ al")
 results = {}
 SHAPES.each do |name, path|

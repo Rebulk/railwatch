@@ -1,8 +1,10 @@
 # Changelog
 
-- Prepared the gem for its public `lantern-observability` distribution while
-  preserving the `Lantern` namespace and legacy Git-source `lantern` gemspec.
-  Added strict package verification, Trusted Publishing release automation,
+- Renamed the gem from Lantern to Nightrail: constants, file paths,
+  `X-Nightrail-*` headers, `NIGHTRAIL_*` environment variables, rake tasks,
+  the generator, the `/nightrail` mount, and the `nightrail` distribution name.
+  There is no compatibility layer; this is the first public release.
+- Prepared the gem for its public RubyGems distribution. Added strict package verification, Trusted Publishing release automation,
   public security/contribution guidance, TLS verification assertions, an
   HTTPS-by-default ingest policy, and browser beacon payload hardening.
 
@@ -17,28 +19,28 @@
   80% of either its record or byte ceiling, or an active ingest retry ladder,
   doubles every execution kind's effective sample divisor up to 8; clear ticks
   halve it back to 1. It is enabled by default and configurable with
-  `backpressure` / `LANTERN_BACKPRESSURE` and `backpressure_high_water` /
-  `LANTERN_BACKPRESSURE_HIGH_WATER`. The current divisor rides on deliveries
-  as `X-Lantern-Backpressure-Factor`, and resets after fork.
+  `backpressure` / `NIGHTRAIL_BACKPRESSURE` and `backpressure_high_water` /
+  `NIGHTRAIL_BACKPRESSURE_HIGH_WATER`. The current divisor rides on deliveries
+  as `X-Nightrail-Backpressure-Factor`, and resets after fork.
 
 - Active Job retries can optionally capture the exception that caused the
   retry as handled, warning-level telemetry with its attempt and wait in
   context (`capture_job_retry_errors`,
-  `LANTERN_CAPTURE_JOB_RETRY_ERRORS`). It is off by default because retries
+  `NIGHTRAIL_CAPTURE_JOB_RETRY_ERRORS`). It is off by default because retries
   are usually expected and enabling it can flood the issues list. The
   existing retry log is unchanged.
 
-- Deploy identifiers are auto-detected without spawning Git: explicit Lantern
+- Deploy identifiers are auto-detected without spawning Git: explicit Nightrail
   and Kamal values first, then common Heroku, Render, Fly, Vercel, GitLab,
   GitHub, and build environment variables, a Capistrano `REVISION`, and the
   checkout's loose or packed Git ref. Full SHAs are consistently shortened to
-  12 characters. `LANTERN_DETECT_DEPLOY=false` opts out of inferred values,
-  and `lantern:doctor` reports the selected source.
+  12 characters. `NIGHTRAIL_DETECT_DEPLOY=false` opts out of inferred values,
+  and `nightrail:doctor` reports the selected source.
 
 - `health` records carry the recurring task schedule Solid Queue is
   running (`detail.recurring_tasks`, key => schedule), so the platform can
   tell a task that was removed from `config/recurring.yml` apart from one
-  that stopped running. Lantern Cloud used to flag a removed task as
+  that stopped running. Nightrail Cloud used to flag a removed task as
   missed every ten minutes for thirty days after its last run. Left out,
   not sent empty, when there are no tasks or the table could not be read.
 
@@ -71,11 +73,11 @@
   the engine registers from inside an initializer, so it runs after every
   `after_initialize` block the app itself registers; `boot_seconds` covers
   the app's own initializers and those blocks, and an app that reconfigures
-  Lantern late is respected.
+  Nightrail late is respected.
 - Fork handling is one `ActiveSupport::ForkTracker` callback -- Rails' own
   `Process._fork` hook -- instead of three separate prepends on `Process`.
-  `Lantern::Reporter::ForkHook`, `Lantern::Health::ForkHook`, and
-  `Lantern::Sessions::ForkHook` are gone; `Lantern.restart_after_fork!`
+  `Nightrail::Reporter::ForkHook`, `Nightrail::Health::ForkHook`, and
+  `Nightrail::Sessions::ForkHook` are gone; `Nightrail.restart_after_fork!`
   resets everything in order.
 - The gemspec declares `base64` (a bundled gem since Ruby 3.4, previously
   reached only through Active Support's own dependency) and bounds the
@@ -90,8 +92,8 @@
   exception still ships within the window; a buffer that crosses
   `flush_threshold` flushes at once as before.
 
-- `POST /lantern/beacon` is rate limited per client IP: 120 requests a
-  minute by default (`beacon_rate_limit`, `LANTERN_BEACON_RATE_LIMIT`; `0`
+- `POST /nightrail/beacon` is rate limited per client IP: 120 requests a
+  minute by default (`beacon_rate_limit`, `NIGHTRAIL_BEACON_RATE_LIMIT`; `0`
   disables), answered with 429 and `Retry-After` past that. The beacon takes
   no credential and keeps every browser error it is sent, so until now a
   script could spend an app's event quota and open junk browser issues from
@@ -102,7 +104,7 @@
   adapter-specific literals, plus SQL comments, are replaced with `?` while
   the statement shape and placeholders remain. SQL literals routinely contain
   email addresses, tokens, and other customer data, and until now every one of
-  them was shipped. Set `capture_sql_values` (`LANTERN_CAPTURE_SQL_VALUES`) to
+  them was shipped. Set `capture_sql_values` (`NIGHTRAIL_CAPTURE_SQL_VALUES`) to
   restore the old behaviour. Active Record's separate structured binds are
   never sent either way, and `capture_query_explain` is unaffected -- the
   EXPLAIN still runs on the raw statement, only what is stored in `sql`
@@ -129,13 +131,13 @@
   NDJSON per ingest request). Each record is weighed once, when it is
   buffered, and the weight travels with it, so nothing is measured twice.
   Byte loss is counted and reported alongside record loss
-  (`X-Lantern-Dropped-Bytes`).
+  (`X-Nightrail-Dropped-Bytes`).
 - A queue holding more than one batch is delivered as several batches; the
   tail is kept for the next flush rather than dropped. A record that still
   does not fit one delivery is dropped and counted rather than raising -- a
   batch that is too large is exactly as large on the next attempt, so
   retrying it would burn all eight attempts and drop it anyway.
-- `Lantern.attach` reads a file or IO with a bounded `cap + 1` read. A 2GB
+- `Nightrail.attach` reads a file or IO with a bounded `cap + 1` read. A 2GB
   log file used to be read whole and then sliced to 1 MiB.
 
 - User references survive a tenant that binds after the user is resolved.
@@ -147,15 +149,15 @@
   `"acme:1"` and the entity is deduplicated against that final reference
   rather than the provisional one. Jobs enqueued from such a request carry
   the raw id and the tenant, and the worker qualifies it on restore.
-- `Lantern.context(tenant: ...)` now actually sets the tenant on records, as
-  documented. It binds onto the running execution at `Lantern.context` time;
+- `Nightrail.context(tenant: ...)` now actually sets the tenant on records, as
+  documented. It binds onto the running execution at `Nightrail.context` time;
   `Context.current_tenant` reads that before falling back to `TenantRecord` /
   `ActiveRecord::Tenanted`, so nothing on the per-record path pays for it.
 
 - A `user` entity is now cached (one per id per process-hour) only after the
   execution that carried it was actually handed to the reporter. Previously
   the first sighting wrote the cache entry unconditionally, so if that
-  sighting happened inside a sampled-out or `Lantern.pause`d execution -- or
+  sighting happened inside a sampled-out or `Nightrail.pause`d execution -- or
   an execution whose sampling flipped afterwards -- no `user` record was ever
   written, and every sampled-in sighting for the next hour was suppressed:
   the platform had records attributed to a user it had no name or email for.
@@ -169,10 +171,10 @@
   and unhandled exceptions inside an action share one execution and one trace.
   A channel action has no HTTP request and no Rack middleware around it, so
   until now those records had no parent at all. Head sampling is its own knob,
-  `sample[:channels]` / `LANTERN_CHANNEL_SAMPLE_RATE`; an unhandled channel
+  `sample[:channels]` / `NIGHTRAIL_CHANNEL_SAMPLE_RATE`; an unhandled channel
   exception still ships with its parent when the channel rate is zero.
 
-- `Lantern.context` is now redacted with the same `ActiveSupport::ParameterFilter`
+- `Nightrail.context` is now redacted with the same `ActiveSupport::ParameterFilter`
   that redacts request params. Context is application data and gets copied
   onto every record built while it is set, so an app that put an API token or
   a password there was writing it verbatim into telemetry.
@@ -181,7 +183,7 @@
   left the platform with an unparseable fragment -- the whole context was
   lost rather than most of it. Whole values are kept while they fit, an
   oversized string value ends with `[TRUNCATED]`, anything that still does
-  not fit is dropped, and `"_lantern_truncated": true` says it happened. The
+  not fit is dropped, and `"_nightrail_truncated": true` says it happened. The
   empty-context fast path (which runs on every log record) is unchanged.
 
 - Request teardown no longer parses a non-multipart request body. Emitting
@@ -189,7 +191,7 @@
   `request.format`, and Rack parses the body the first time either is asked
   for. When a controller ran, that parse had already happened and was
   memoized; when nothing ran -- a routing 404, a rack-attack block, an
-  upstream rejection -- Lantern was the only component that ever read the
+  upstream rejection -- Nightrail was the only component that ever read the
   body, at teardown, after the response was decided. Both reads are now
   guarded: `files` falls back to walking params only for a multipart request
   (nothing else can carry an upload), and `format` is reported only when it
@@ -205,7 +207,7 @@
   all-zero `{"accepted":0,"rejected":0}` -- that is how the platform answers
   for a paused or over-quota environment, and retrying it would burn eight
   attempts and drop the records anyway. Per-record rejections
-  (`rejected > 0`) stay routine: they are logged under `LANTERN_DEBUG` and
+  (`rejected > 0`) stay routine: they are logged under `NIGHTRAIL_DEBUG` and
   are not reported to `on_unrecoverable`, since the platform's ingest batch
   is the authoritative accounting for them.
 - Per-request overhead roughly halved, and per-query overhead cut by about
@@ -231,9 +233,9 @@
   and exception paths piece by piece, reporter-thread and wire cost,
   allocation and CPU attribution, and an end-to-end Puma load harness.
 
-- The installer now prefers a hidden prompt, stdin, or `LANTERN_TOKEN`, never
+- The installer now prefers a hidden prompt, stdin, or `NIGHTRAIL_TOKEN`, never
   prints token values, and refuses to put a token in a tracked or non-ignored
-  `.env`. `lantern:doctor` also fails when it finds a plaintext `lt_...` token
+  `.env`. `nightrail:doctor` also fails when it finds a plaintext `lt_...` token
   in likely secret-bearing files tracked by Git. The legacy `--token=` option
   remains compatible but warns about shell-history and process-list exposure.
 
@@ -243,9 +245,9 @@
   ever stopped, so every execution in that worker was counted as skipped and
   never profiled for the life of the process.
 
-- Numeric `LANTERN_*` environment variables are parsed with `Integer()`/
+- Numeric `NIGHTRAIL_*` environment variables are parsed with `Integer()`/
   `Float()` and fall back to the documented default when the value is not a
-  number. `LANTERN_BUFFER_SIZE=12px` used to become `0` via `String#to_i`,
+  number. `NIGHTRAIL_BUFFER_SIZE=12px` used to become `0` via `String#to_i`,
   silently turning off buffering; the same applied to timeouts, intervals
   and sample rates.
 
@@ -288,7 +290,7 @@
   on rebulk-system that was every outgoing HTTP request of a 30-second sync.
 
 - Active Job payloads now carry the enqueuing execution's user and tenant
-  (`lantern_user`/`lantern_tenant`) next to the trace and parent ids, and
+  (`nightrail_user`/`nightrail_tenant`) next to the trace and parent ids, and
   the worker restores them before the attempt opens. A `job_attempt` and
   every child record under it are attributed to the person whose request
   enqueued the job instead of to a worker process with no signed-in user,
@@ -297,13 +299,13 @@
   Payloads without the keys (enqueued before this change) deserialize to
   nil and fall back to local resolution as before.
 
-- `c.failure_context = 200` (`LANTERN_FAILURE_CONTEXT`) keeps a
+- `c.failure_context = 200` (`NIGHTRAIL_FAILURE_CONTEXT`) keeps a
   head-sampled-out execution's last 200 child records in a ring and ships
   them only if that execution reports an unhandled exception, so an
   unsampled failure is diagnosable without enabling slow-request tail
   sampling globally. Off (0) by default, which leaves the sampled-out path
   building and buffering nothing exactly as before. `exceptions: 0`,
-  ignored and handled exceptions, `Lantern.pause`/`ignore`, and an
+  ignored and handled exceptions, `Nightrail.pause`/`ignore`, and an
   interactive `rails runner` never promote a ring; overflow is counted onto
   the batch's dropped-record count; with `tail_sample_slow_ms` also set,
   tail sampling's larger buffer wins.
@@ -340,10 +342,10 @@
   String backtrace in that case.
 
 - Request exclusions now bypass instrumentation correctly. `/up` and
-  `/lantern/beacon` are excluded by default, apps can configure exact paths
+  `/nightrail/beacon` are excluded by default, apps can configure exact paths
   or regexps through `ignored_request_paths`, and a same-origin authenticated
   reporter POST to `/ingest` is recognized behind reverse proxies. The last
-  case prevents Lantern Cloud's self-monitoring from creating an endless
+  case prevents Nightrail Cloud's self-monitoring from creating an endless
   flush -> ingest-request -> flush feedback loop without hiding unrelated
   application routes also named `/ingest`.
 
@@ -365,8 +367,8 @@
   error groups, regresses and resolves like any other issue. Each error
   carries the page URL, Inertia component, visit, tab session, user agent,
   and the last 20 breadcrumbs (console errors, clicks, navigations).
-  `startLantern({ ignoreErrors, denyUrls, tenant })`, plus
-  `lanternRootOptions()` for React 19's `createRoot` and
+  `startNightrail({ ignoreErrors, denyUrls, tenant })`, plus
+  `nightrailRootOptions()` for React 19's `createRoot` and
   `reportError(error, context)` for a React 18 boundary — outside a
   development build React never hands a boundary-caught error to
   `window.onerror`. Replaces `@sentry/react`; see
@@ -375,7 +377,7 @@
 - Interactive sessions are no longer treated as application failures.
   `bin/rails console` captures nothing, starts no background thread, and
   sends no `process`/`health` record (`config.capture_console` /
-  `LANTERN_CAPTURE_CONSOLE=1` re-enables everything). A `bin/rails runner`
+  `NIGHTRAIL_CAPTURE_CONSOLE=1` re-enables everything). A `bin/rails runner`
   the operator typed (`-`, inline code, or a `.rb` file under
   `config.interactive_runner_paths`, default `/tmp/` and `/var/tmp/`) ships
   its `command` record with `interactive: true` and its exit code, but does
@@ -384,7 +386,7 @@
 
 - Release health: a new `session` record type, from the browser client (one
   session per tab, riding along on the visit beacon) and from the request
-  middleware (`Lantern::Sessions`, one flusher thread per web process).
+  middleware (`Nightrail::Sessions`, one flusher thread per web process).
   `config.track_sessions`, `config.session_flush_interval`,
   `config.session_timeout`; `c.ignore = [:sessions]` turns off shipping.
 
@@ -403,8 +405,8 @@
   of failing), `queue_latency` measured at perform-start rather than after the
   job runs, `connection`, and `concurrency_key`; a pruned job attempt gets a
   fresh `execution_id`/`trace_id` instead of reusing a stale one.
-- `process` records measure `boot_seconds` from `Lantern::BOOTED_AT`, a clock
-  reading taken as early in process boot as Lantern can observe, instead of an
+- `process` records measure `boot_seconds` from `Nightrail::BOOTED_AT`, a clock
+  reading taken as early in process boot as Nightrail can observe, instead of an
   unset global.
 - `bin/rails runner` invocations are instrumented as a `command` execution.
 - Inertia SSR renders are timed automatically (`inertia.ssr_ms`) wherever
@@ -416,28 +418,28 @@
   default vendor cache-key prefixes (`rack::attack`, `flipper`, ...) are
   excluded by default; opt back in with `capture_default_vendor_commands` /
   `capture_default_vendor_cache_keys`.
-- `Lantern.reject_cache_keys` drops your own noisy cache keys the same way as
+- `Nightrail.reject_cache_keys` drops your own noisy cache keys the same way as
   the default vendor list, with trailing-`*` prefix matching and regex support.
 - A request sampled out together with `sample[:exceptions] = 0` now ships
   nothing for an unhandled exception, instead of always shipping one.
 - Requests report `route_methods`, `route_domain`, and uploaded `files`
   (name/size/content_type only, never file contents).
-- `Lantern.on_unrecoverable` registers a callback for Lantern's own internal
+- `Nightrail.on_unrecoverable` registers a callback for Nightrail's own internal
   errors (a subscriber raising, or delivery failing after its retry).
-- `Lantern::Faraday` middleware instruments outgoing HTTP made through
-  Faraday (`f.use Lantern::Faraday`); `Lantern.instrument_outgoing(method,
+- `Nightrail::Faraday` middleware instruments outgoing HTTP made through
+  Faraday (`f.use Nightrail::Faraday`); `Nightrail.instrument_outgoing(method,
   url) { }` covers any other HTTP client.
 - Fixed `Backtrace.caller_location` excluding legitimate app/spec frames that
-  happened to live under a path containing "/lantern/" (this gem's own
-  `spec/dummy`, for one); it now only skips Lantern's own `lib/` and frames
+  happened to live under a path containing "/nightrail/" (this gem's own
+  `spec/dummy`, for one); it now only skips Nightrail's own `lib/` and frames
   inside an installed gem, so query and outgoing-request source locations
   resolve correctly again.
-- Fixed `lantern:status` and `lantern:deploy` rake tasks running twice per
-  invocation: the engine no longer manually `load`s `lib/tasks/lantern_tasks.rake`
+- Fixed `nightrail:status` and `nightrail:deploy` rake tasks running twice per
+  invocation: the engine no longer manually `load`s `lib/tasks/nightrail_tasks.rake`
   on top of Rails' automatic `lib/tasks/*.rake` loading.
 - `Transport::Http` is now HTTP-status-aware: a 5xx response is retried once,
   a 4xx is not retried, a 401 marks the reporter unauthorized and stops
-  flushing (logged once via `Lantern.debug` and `Lantern.on_unrecoverable`),
+  flushing (logged once via `Nightrail.debug` and `Nightrail.on_unrecoverable`),
   and a 402 (quota) backs off for 60 seconds, dropping and counting records
   as dropped during the backoff window. Delivery still never raises.
 - Fixed `Patches::RakeTask` shipping a separate command record per

@@ -1,8 +1,8 @@
 # Production browser source maps
 
-Lantern can resolve minified browser errors to their original source files,
+Nightrail can resolve minified browser errors to their original source files,
 lines, function names and embedded code. Maps stay in the environment's
-private telemetry database; Lantern never downloads a `sourceMappingURL`.
+private telemetry database; Nightrail never downloads a `sourceMappingURL`.
 
 Enable hidden source maps in Vite:
 
@@ -16,10 +16,10 @@ export default defineConfig({
 After building, upload the maps **before publishing the image or assets**:
 
 ```sh
-LANTERN_DEPLOY="$RELEASE_SHA" bin/rails 'lantern:sourcemaps[public,true]'
+NIGHTRAIL_DEPLOY="$RELEASE_SHA" bin/rails 'nightrail:sourcemaps[public,true]'
 ```
 
-The task uses the application's `LANTERN_TOKEN` and `LANTERN_INGEST_URL`.
+The task uses the application's `NIGHTRAIL_TOKEN` and `NIGHTRAIL_INGEST_URL`.
 Use the same deploy value the running application reports. The first argument
 is the public URL root: `public/vite/assets/index-abc.js.map` becomes
 `vite/assets/index-abc.js`, matching `/vite/assets/index-abc.js` in a browser
@@ -28,9 +28,9 @@ server acknowledges its upload. Without it, files are retained. A failed
 upload fails the task and leaves that file on disk. Hidden maps still exist
 on disk, so the deletion step belongs before publishing public assets.
 
-The equivalent environment options are `LANTERN_SOURCEMAPS_DIR=public` and
-`LANTERN_SOURCEMAPS_DELETE=true`. The generated Kamal post-deploy hook also
-accepts `--sourcemaps` or `LANTERN_SOURCEMAPS=true`, using local artifacts on
+The equivalent environment options are `NIGHTRAIL_SOURCEMAPS_DIR=public` and
+`NIGHTRAIL_SOURCEMAPS_DELETE=true`. The generated Kamal post-deploy hook also
+accepts `--sourcemaps` or `NIGHTRAIL_SOURCEMAPS=true`, using local artifacts on
 the deployer and `KAMAL_VERSION` as the deploy. That hook reports failures
 without failing the deployment. Build-time upload is preferable because it
 removes maps before assets become public.
@@ -54,7 +54,7 @@ them and cannot resolve minified locations accurately.
 
 For a custom release uploader, POST the raw `.map` bytes to
 `/ingest/sourcemaps` with `Content-Type: application/octet-stream`,
-`Authorization: Bearer lt_...`, `X-Lantern-Deploy`, and
-`X-Lantern-Filename` (the generated JavaScript URL path without a leading
+`Authorization: Bearer lt_...`, `X-Nightrail-Deploy`, and
+`X-Nightrail-Filename` (the generated JavaScript URL path without a leading
 slash). A successful response is HTTP 201 with
 `{"ok":true,"filename":"vite/assets/index-abc.js","bytes":1234}`.

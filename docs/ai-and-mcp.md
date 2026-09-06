@@ -1,6 +1,6 @@
 # AI assistants and MCP
 
-Lantern Cloud is an [MCP](https://modelcontextprotocol.io) server. Point
+Nightrail Cloud is an [MCP](https://modelcontextprotocol.io) server. Point
 Claude Code, Claude Desktop, Cursor, VS Code, or Zed at it and the assistant
 sitting in your editor can read the same production data your dashboards
 show: issues and their stack traces, slow routes, the queries and N+1s
@@ -10,11 +10,11 @@ priority, leave a comment — and every write is signed with your user and the
 agent's name in the issue's activity feed.
 
 The endpoint is `<your ingest host>/mcp`. For the hosted platform that's
-`https://lantern.rebulk.com/mcp`; if you self-host, it is your own host (see
+`https://nightrail.rebulk.com/mcp`; if you self-host, it is your own host (see
 [`self-hosting.md`](self-hosting.md)). The gem knows which one you're on:
 
 ```sh
-bin/rails lantern:mcp
+bin/rails nightrail:mcp
 ```
 
 prints every block below with your platform's host already filled in.
@@ -35,13 +35,13 @@ each with a copy button — so the fastest path is: generate, copy, paste.
 
 ## 2. Connect a client
 
-Everything below uses `https://lantern.rebulk.com/mcp`; substitute your own
+Everything below uses `https://nightrail.rebulk.com/mcp`; substitute your own
 host if you self-host, and `lnt_your_token_here` for the token.
 
 ### Claude Code
 
 ```sh
-claude mcp add lantern --transport http https://lantern.rebulk.com/mcp \
+claude mcp add nightrail --transport http https://nightrail.rebulk.com/mcp \
   --header "Authorization: Bearer lnt_your_token_here"
 ```
 
@@ -53,12 +53,12 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ```json
 {
   "mcpServers": {
-    "lantern": {
+    "nightrail": {
       "command": "npx",
       "args": [
         "-y",
         "mcp-remote",
-        "https://lantern.rebulk.com/mcp",
+        "https://nightrail.rebulk.com/mcp",
         "--header",
         "Authorization: Bearer lnt_your_token_here"
       ]
@@ -74,8 +74,8 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ```json
 {
   "mcpServers": {
-    "lantern": {
-      "url": "https://lantern.rebulk.com/mcp",
+    "nightrail": {
+      "url": "https://nightrail.rebulk.com/mcp",
       "headers": { "Authorization": "Bearer lnt_your_token_here" }
     }
   }
@@ -89,9 +89,9 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ```json
 {
   "servers": {
-    "lantern": {
+    "nightrail": {
       "type": "http",
-      "url": "https://lantern.rebulk.com/mcp",
+      "url": "https://nightrail.rebulk.com/mcp",
       "headers": { "Authorization": "Bearer lnt_your_token_here" }
     }
   }
@@ -105,13 +105,13 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ```json
 {
   "context_servers": {
-    "lantern": {
+    "nightrail": {
       "source": "custom",
       "command": "npx",
       "args": [
         "-y",
         "mcp-remote",
-        "https://lantern.rebulk.com/mcp",
+        "https://nightrail.rebulk.com/mcp",
         "--header",
         "Authorization: Bearer lnt_your_token_here"
       ]
@@ -123,7 +123,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ### Check it without a client
 
 ```sh
-curl -sS https://lantern.rebulk.com/mcp \
+curl -sS https://nightrail.rebulk.com/mcp \
   -H "Authorization: Bearer lnt_your_token_here" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
@@ -131,8 +131,8 @@ curl -sS https://lantern.rebulk.com/mcp \
 
 A JSON body listing tools means the token works. A `401` means it doesn't.
 
-`GET https://lantern.rebulk.com/mcp` and
-`GET https://lantern.rebulk.com/.well-known/mcp.json` describe the server —
+`GET https://nightrail.rebulk.com/mcp` and
+`GET https://nightrail.rebulk.com/.well-known/mcp.json` describe the server —
 name, version, protocol version, transport, tool and prompt names, and how
 to authenticate — with no token at all, for clients that probe a host before
 they're configured.
@@ -154,10 +154,10 @@ durations are milliseconds.** Every `window` argument takes `1h`, `6h`,
 | `get_route` | `application_slug`, `environment`, `route` or `group_hash`, `window?` | one route's count/errors, p50/p95/p99/max, its slowest individual requests, the slowest queries those requests ran, and each N+1 with a concrete Active Record fix. |
 | `search_requests` | `application_slug`, `environment`, `q?`, `window?`, `limit?` | individual requests. `q` is the dashboard's filter grammar: `method:GET`, `route:/checkout`, `status:500` or `status:5xx`, `deploy:…`, `tenant:…`, `user:…`, `min_ms:250`; bare words match the route name. |
 | `get_execution` | `application_slug`, `environment`, `execution_id` | one execution and its full child timeline — every query, cache read, log line, outgoing request, view render, and exception, each offset in ms from the start. |
-| `explain_query` | `application_slug`, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `LANTERN_CAPTURE_QUERY_EXPLAIN`. `sql` is the normalized shape unless the app also sets `LANTERN_CAPTURE_SQL_VALUES`. |
+| `explain_query` | `application_slug`, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `NIGHTRAIL_CAPTURE_QUERY_EXPLAIN`. `sql` is the normalized shape unless the app also sets `NIGHTRAIL_CAPTURE_SQL_VALUES`. |
 | `get_profile` | `application_slug`, `environment`, `profile_id?`, `execution_id?`, `limit?` | the hottest frames of a stack profile — self and total samples, each with a percentage. |
 | `search_logs` | `application_slug`, `environment`, `q`, `level?`, `limit?` | matching log lines, each with the `execution_id` to expand with `get_execution`. |
-| `list_tenants` | `application_slug`, `environment`, `window?`, `q?` | your app's own tenants (whatever it passes to `Lantern.context(tenant:)`) with request, error, job, exception, and user counts. |
+| `list_tenants` | `application_slug`, `environment`, `window?`, `q?` | your app's own tenants (whatever it passes to `Nightrail.context(tenant:)`) with request, error, job, exception, and user counts. |
 | `recent_deploys` | `application_slug`, `environment` | the 20 most recent deploys with ref, name, time, and link. |
 | `release_health` | `application_slug`, `environment`, `window?` | crash-free session rate, crash-free user rate, and adoption per release. |
 | `list_alerts` | `application_slug?`, `event?`, `status?`, `limit?` | fired alerts: which rule, which issue, which integration, and whether delivery succeeded. |
@@ -184,9 +184,9 @@ call:
 
 | URI | Contents |
 |---|---|
-| `lantern://applications` | Every application and environment the token can see. |
-| `lantern://applications/<slug>/environments/<name>/summary` | Request and job volume, p95, errors, open issue count, last-seen time, and deploys, over the last 24 hours, with the previous 24 hours alongside for comparison. |
-| `lantern://docs/<name>` | Lantern's own documentation — `readme`, `getting-started`, `configuration`, `records`, `testing`, `replacing-sentry`, `troubleshooting`, `faq`, and the rest. An assistant that doesn't know an option can look it up instead of guessing. |
+| `nightrail://applications` | Every application and environment the token can see. |
+| `nightrail://applications/<slug>/environments/<name>/summary` | Request and job volume, p95, errors, open issue count, last-seen time, and deploys, over the last 24 hours, with the previous 24 hours alongside for comparison. |
+| `nightrail://docs/<name>` | Nightrail's own documentation — `readme`, `getting-started`, `configuration`, `records`, `testing`, `replacing-sentry`, `troubleshooting`, `faq`, and the rest. An assistant that doesn't know an option can look it up instead of guessing. |
 
 ## 6. What an assistant can and can't do
 
@@ -207,13 +207,13 @@ call:
 ## 7. Agents working on your app
 
 Separately from the MCP server, the gem ships two files for coding agents
-working *in a Rails app that uses Lantern*:
+working *in a Rails app that uses Nightrail*:
 
 - [`../llms.txt`](../llms.txt) — the [llmstxt.org](https://llmstxt.org)
-  index: one paragraph on what Lantern is, then every document with a
+  index: one paragraph on what Nightrail is, then every document with a
   one-line description.
 - [`../AGENTS.md`](../AGENTS.md) — how to install it, the facade methods,
-  the spec matchers, `lantern:doctor`, and this MCP hookup, in under 120
+  the spec matchers, `nightrail:doctor`, and this MCP hookup, in under 120
   lines.
 
 Copy either into your own app's repo to give its agent the same context.

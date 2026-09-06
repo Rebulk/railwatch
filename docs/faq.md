@@ -4,7 +4,7 @@
 
 The gem ships with an overhead gate that CI runs on every change
 (`bench/overhead.rb`, `bundle exec ruby bench/overhead.rb`). It boots the
-dummy app on SQLite, drives three request shapes with Lantern genuinely out
+dummy app on SQLite, drives three request shapes with Nightrail genuinely out
 of the way (its notification subscribers unsubscribed, its log capture
 detached) and then in, alternating every batch so background load hits
 both equally, and fails the build if instrumentation costs more than:
@@ -25,7 +25,7 @@ letting a real regression through.
 
 Most of the per-query figure is Rails' own notification dispatch (an
 `ActiveSupport::Notifications::Event` costs about 6 µs to build and
-deliver, and a query fires two of them); Lantern's subscriber body is 5 to
+deliver, and a query fires two of them); Nightrail's subscriber body is 5 to
 15 µs of it.
 
 Off the request thread, the reporter spends about 30 µs of CPU per record
@@ -49,8 +49,8 @@ number comes from before changing the code, are listed in
 
 A second gate, `bench/no_db_writes.rb`, drives 200 requests and a job with
 a `sql.active_record` subscriber watching for any `INSERT`/`UPDATE`/
-`DELETE` issued from a frame inside `lib/lantern`, and fails if it finds
-one. **Lantern never writes to your application's database.** Records
+`DELETE` issued from a frame inside `lib/nightrail`, and fails if it finds
+one. **Nightrail never writes to your application's database.** Records
 live in memory and are shipped by a background thread. That is not a
 nicety: instrumentation that takes a write lock is what turns a
 single-writer SQLite app into a "database is locked" incident.
@@ -97,18 +97,18 @@ time**. There is no single "send everything" switch:
 | `capture_exception_locals` | The raising frame's local variables, truncated and filtered. |
 
 Everything else is per record type, in your initializer:
-`Lantern.redact_requests`, `redact_queries`, `redact_exceptions`,
+`Nightrail.redact_requests`, `redact_queries`, `redact_exceptions`,
 `redact_cache_events`, `redact_commands`, `redact_mail`,
 `redact_outgoing_requests`, `redact_logs` mutate a record in place;
-`Lantern.reject_queries`, `reject_cache_events`, `reject_mail`,
+`Nightrail.reject_queries`, `reject_cache_events`, `reject_mail`,
 `reject_notifications`, `reject_broadcasts`, `reject_outgoing_requests`,
 `reject_enqueued_jobs`, `reject_logs` drop it entirely.
-`Lantern.before_ingest` gets the last look at a whole batch.
+`Nightrail.before_ingest` gets the last look at a whole batch.
 
 Who the user is comes from a resolver block you write
 (`c.user { |u| ... }`), so the fields on a `user` record are exactly the
 ones you chose to put there. Cache keys are truncated at 255 characters
-and can be dropped wholesale with `Lantern.reject_cache_keys`; outgoing
+and can be dropped wholesale with `Nightrail.reject_cache_keys`; outgoing
 request URLs, inbound request URLs, and redirect targets have authority
 credentials, entire query strings, and fragments stripped; uploaded files are
 recorded as metadata (name, size, content type) and never contents.
@@ -175,8 +175,8 @@ buffered tree gets the same treatment (`c.execution_buffer_bytes`, 8 MiB),
 and one delivery is capped at `c.batch_bytes` (8 MiB uncompressed). When a
 limit is reached the *oldest* record is dropped and a counter is
 incremented — the app thread never blocks waiting for room. The counters
-ride along on the next successful batch (`X-Lantern-Dropped` and
-`X-Lantern-Dropped-Bytes`), so loss shows up on the platform instead of
+ride along on the next successful batch (`X-Nightrail-Dropped` and
+`X-Nightrail-Dropped-Bytes`), so loss shows up on the platform instead of
 being silent.
 
 A queue holding more than one batch is delivered as several batches: the
@@ -200,7 +200,7 @@ both configurable, and they're always on the reporter thread — even an
 unhandled exception only enqueues and wakes that thread. A **401** marks the
 transport unauthorized and stops further HTTP attempts for that process's
 lifetime (fix the token and restart). A 401 or other permanent client
-rejection drops that rejected batch and calls `Lantern.on_unrecoverable`
+rejection drops that rejected batch and calls `Nightrail.on_unrecoverable`
 with its status and record count.
 
 Two 2xx shapes are a *successful* drain rather than a failure. An
@@ -211,17 +211,17 @@ batch is released, because retrying it would burn all eight attempts and
 drop the records anyway. And `rejected > 0` is routine, not an incident:
 the platform rejects individual records it cannot store, records that
 already appear on its own ingest batch. Those are visible under
-`LANTERN_DEBUG=1` and are deliberately **not** sent to
-`Lantern.on_unrecoverable`.
+`NIGHTRAIL_DEBUG=1` and are deliberately **not** sent to
+`Nightrail.on_unrecoverable`.
 
 On shutdown, `at_exit` gives the thread `c.shutdown_timeout` (2 seconds) to
 attempt retained records immediately and retry within the remaining time.
 If the deadline expires, the records stay retained and their count is sent
-to `Lantern.on_unrecoverable` (or stderr under `LANTERN_DEBUG=1`). This is an
+to `Nightrail.on_unrecoverable` (or stderr under `NIGHTRAIL_DEBUG=1`). This is an
 in-memory buffer, not an on-disk spool: a hard kill, or exiting after that
-deadline, cannot carry those records into the next process. Lantern never
+deadline, cannot carry those records into the next process. Nightrail never
 uses `Rails.logger` for its own failures, which would turn them into `log`
-records about Lantern.
+records about Nightrail.
 
 ## See also
 

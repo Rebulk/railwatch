@@ -1,0 +1,54 @@
+# frozen_string_literal: true
+
+# Nightrail: first-class monitoring for Rails. Every option here can also be
+# set by the NIGHTRAIL_* env var named in the comment.
+Nightrail.configure do |c|
+  # c.token = ENV["NIGHTRAIL_TOKEN"]                    # NIGHTRAIL_TOKEN (required)
+  # c.ingest_url = "https://nightrail.rebulk.com"     # NIGHTRAIL_INGEST_URL
+  # c.deploy = "release-name"                       # NIGHTRAIL_DEPLOY; platform/Git auto-detected
+  # c.detect_deploy = false                         # NIGHTRAIL_DETECT_DEPLOY; default true
+
+  # Sampling is decided once per execution; a sampled-in request ships its
+  # whole tree of queries, cache events, jobs, mail, and logs.
+  # c.sample = { requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0, channels: 1.0, exceptions: 1.0 }
+
+  # Drop whole record types: :queries, :cache_events, :mail, :broadcasts,
+  # :notifications, :outgoing_requests, :storage_ops, :view_renders, :logs, :transactions
+  # c.ignore = []
+
+  # Default vendor rake tasks (db:migrate, assets:precompile, ...) and default
+  # vendor cache-key prefixes (rack::attack, flipper, ...) are excluded unless
+  # you opt back in.
+  # c.capture_default_vendor_commands = false    # NIGHTRAIL_CAPTURE_DEFAULT_VENDOR_COMMANDS
+  # c.capture_default_vendor_cache_keys = false  # NIGHTRAIL_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS
+
+  # c.log_level = :info
+  # c.buffer_bytes = 16 * 1024 * 1024   # reporter queue memory ceiling
+  # c.execution_buffer_bytes = 8 * 1024 * 1024
+  # c.batch_bytes = 8 * 1024 * 1024     # uncompressed NDJSON per request
+  # c.backpressure = true               # adapt sampling under buffer/ingest pressure
+  # c.backpressure_high_water = 0.8     # fraction of either buffer ceiling
+  # c.capture_request_payload = false   # only captured for requests that raised, always redacted
+  # Retried job errors are usually expected, so they are not captured by
+  # default; enabling this can flood the issues list when retries are common.
+  # c.capture_job_retry_errors = false  # NIGHTRAIL_CAPTURE_JOB_RETRY_ERRORS
+  # c.redact_headers += %w[X-Api-Key]
+  # c.redact_params  += %w[ssn]         # merged with Rails.application.config.filter_parameters
+  # c.ignored_request_paths += ["/internal/health"] # /up and /nightrail/beacon are ignored by default
+
+  # How the current user is described. Default reads Current.user then Warden.
+  # c.user { |user| { id: user.id, name: user.name, email: user.email } }
+end
+
+# A trailing "*" matches as a prefix; a string starting with "^" (or another
+# regex metacharacter) is compiled as a Regexp; anything else must match the
+# cache key exactly.
+# Nightrail.reject_cache_keys %w[session: rack::attack* ^feature_flag_\d+$]
+# Nightrail.reject_outgoing_requests { |r| r[:host] == "127.0.0.1" }
+# Nightrail.redact_queries { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
+# Nightrail.before_ingest { |batch| batch.size < 10_000 }   # return false to drop a batch
+
+# Called whenever Nightrail rescues one of its own internal errors (a
+# subscriber raising, or delivery failing after its retry), instead of only
+# logging to Nightrail.debug.
+# Nightrail.on_unrecoverable { |error| Rails.error.report(error, handled: true) }

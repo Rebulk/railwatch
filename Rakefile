@@ -15,7 +15,7 @@ end
 task default: :spec
 
 namespace :package do
-  desc "Build, inspect, install, and boot the public gem and legacy Git package"
+  desc "Build, inspect, install, and boot the public gem"
   task :verify do
     sh "bundle exec ruby script/verify_package"
   end
