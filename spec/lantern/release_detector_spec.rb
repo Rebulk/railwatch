@@ -55,6 +55,21 @@ RSpec.describe Lantern::ReleaseDetector do
     end
   end
 
+  it "follows a git worktree's .git file to its gitdir and the repository's refs" do
+    Dir.mktmpdir do |repo|
+      FileUtils.mkdir_p(File.join(repo, ".git/refs/heads"))
+      FileUtils.mkdir_p(File.join(repo, ".git/worktrees/feature"))
+      File.write(File.join(repo, ".git/refs/heads/feature"), "#{sha}\n")
+      File.write(File.join(repo, ".git/worktrees/feature/HEAD"), "ref: refs/heads/feature\n")
+      File.write(File.join(repo, ".git/worktrees/feature/commondir"), "../..\n")
+      Dir.mktmpdir do |root|
+        File.write(File.join(root, ".git"), "gitdir: #{File.join(repo, ".git/worktrees/feature")}\n")
+
+        expect(described_class.detect(project_root: root, env: {})).to eq(sha[0, 12])
+      end
+    end
+  end
+
   it "reads a detached git HEAD" do
     Dir.mktmpdir do |root|
       FileUtils.mkdir_p(File.join(root, ".git"))
