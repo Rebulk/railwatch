@@ -2,6 +2,15 @@
 
 ## 0.1.0 (unreleased)
 
+- Reporter backpressure now smooths sustained bursts before the bounded queue
+  starts losing whole executions. On each existing reporter tick, a buffer at
+  80% of either its record or byte ceiling, or an active ingest retry ladder,
+  doubles every execution kind's effective sample divisor up to 8; clear ticks
+  halve it back to 1. It is enabled by default and configurable with
+  `backpressure` / `LANTERN_BACKPRESSURE` and `backpressure_high_water` /
+  `LANTERN_BACKPRESSURE_HIGH_WATER`. The current divisor rides on deliveries
+  as `X-Lantern-Backpressure-Factor`, and resets after fork.
+
 - `health` records carry the recurring task schedule Solid Queue is
   running (`detail.recurring_tasks`, key => schedule), so the platform can
   tell a task that was removed from `config/recurring.yml` apart from one
