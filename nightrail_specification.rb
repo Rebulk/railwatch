@@ -20,8 +20,7 @@ module Nightrail
         spec.license     = "MIT"
 
         spec.metadata["homepage_uri"] = spec.homepage
-        # TODO: replace this constructed URL after the GitHub repository rename.
-        source_repository = "https://github.com/Rebulk/#{%w[lan tern].join}"
+        source_repository = "https://github.com/Rebulk/nightrail"
         spec.metadata["source_code_uri"] = source_repository
         spec.metadata["changelog_uri"] = "#{source_repository}/blob/main/CHANGELOG.md"
         spec.metadata["documentation_uri"] = "#{source_repository}/blob/main/README.md"

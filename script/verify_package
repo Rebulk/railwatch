@@ -46,7 +46,7 @@ begin
   assert!(package_spec.homepage == "https://nightrail.rebulk.com", "package homepage changed")
   assert!(package_spec.required_ruby_version == Gem::Requirement.new(">= 3.4"), "supported Ruby constraint changed")
   assert!(package_spec.metadata["rubygems_mfa_required"] == "true", "RubyGems MFA must be required")
-  expected_source = "https://github.com/Rebulk/#{%w[lan tern].join}"
+  expected_source = "https://github.com/Rebulk/nightrail"
   assert!(package_spec.metadata["source_code_uri"] == expected_source, "source metadata changed")
 
   runtime_dependencies = package_spec.runtime_dependencies.to_h do |dependency|
