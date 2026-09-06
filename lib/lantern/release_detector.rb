@@ -40,6 +40,7 @@ module Lantern
     end
 
     def git_sha(git_dir)
+      git_dir = resolve_gitdir(git_dir)
       head = read(File.join(git_dir, "HEAD"))&.strip
       return head if SHA.match?(head.to_s)
       return unless head&.start_with?("ref: refs/")
@@ -47,12 +48,27 @@ module Lantern
       ref = head.delete_prefix("ref: ")
       return if ref.include?("..") || ref.include?("\\") || ref.end_with?("/")
 
-      loose = read(File.join(git_dir, ref))&.strip
+      # A worktree's gitdir holds HEAD but its refs and packed-refs live in
+      # the repository it was created from, named by its commondir file.
+      refs_dir = read(File.join(git_dir, "commondir"))&.strip
+      refs_dir = refs_dir ? File.expand_path(refs_dir, git_dir) : git_dir
+      loose = read(File.join(refs_dir, ref))&.strip
       return loose if SHA.match?(loose.to_s)
 
-      packed_ref(git_dir, ref)
+      packed_ref(refs_dir, ref)
     end
     private_class_method :git_sha
+
+    # A worktree's .git is a file naming its gitdir ("gitdir: ...").
+    def resolve_gitdir(git_dir)
+      return git_dir unless File.file?(git_dir)
+
+      pointer = read(git_dir).to_s.strip
+      return git_dir unless pointer.start_with?("gitdir: ")
+
+      File.expand_path(pointer.delete_prefix("gitdir: "), File.dirname(git_dir))
+    end
+    private_class_method :resolve_gitdir
 
     def packed_ref(git_dir, ref)
       packed = read(File.join(git_dir, "packed-refs"))

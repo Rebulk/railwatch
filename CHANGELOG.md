@@ -2,6 +2,10 @@
 
 ## 0.1.0 (unreleased)
 
+- Deploy detection follows a git worktree's `.git` file to its gitdir and
+  resolves the branch through the repository's refs, so a development app
+  checked out as a worktree gets a deploy value like a plain clone.
+
 - Reporter backpressure now smooths sustained bursts before the bounded queue
   starts losing whole executions. On each existing reporter tick, a buffer at
   80% of either its record or byte ceiling, or an active ingest retry ladder,
