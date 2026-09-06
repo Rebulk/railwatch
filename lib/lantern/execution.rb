@@ -13,6 +13,9 @@ module Lantern
     COUNTERS = %i[queries cached_queries exceptions logs cache_events jobs_enqueued mail
                   broadcasts notifications outgoing_requests storage_ops view_renders
                   transactions hydrated_models lazy_loads deprecations spans].freeze
+    # GC.stat with no key builds the whole stat hash; whether this Ruby
+    # reports GC time never changes, so ask once.
+    GC_TIME_SUPPORTED = GC.stat.key?(:time)
 
     attr_reader :source, :id, :trace_id, :parent_id, :started_at, :started_mono, :counters,
                 :stages, :stage_durations, :query_groups, :records, :dropped_records,
@@ -130,7 +133,7 @@ module Lantern
       @byte_limit = Lantern.config.execution_buffer_bytes
       @transaction_statement_counts = Hash.new(0)
       @allocations_start = GC.stat(:total_allocated_objects)
-      @gc_time_start = GC.stat(:time) if GC.stat.key?(:time)
+      @gc_time_start = GC.stat(:time) if GC_TIME_SUPPORTED
     end
 
     def sampled?

@@ -17,6 +17,39 @@ RSpec.describe "log record" do
     expect(log[:message]).to eq("hello world")
   end
 
+  it "does not make Rails.logger.debug? true just by being attached to the broadcast logger" do
+    # BroadcastLogger#debug? is true when any broadcast is at DEBUG, and
+    # every framework LogSubscriber (Active Record's SQL line, Action
+    # View's render lines) formats its message only when it is. A Capture
+    # left at DEBUG would make the app pay for log lines nobody stores.
+    capture = Rails.logger.broadcasts.find { |l| l.is_a?(Lantern::Subscribers::Logs::Capture) }
+    expect(capture).not_to be_nil
+    expect(capture.level).to eq(::Logger::INFO)
+    expect(Rails.logger.debug?).to be(false)
+  end
+
+  it "honours Rails.logger.level= like any other broadcast, so a save-and-restore round-trips" do
+    # BroadcastLogger#level is the minimum over its broadcasts and #level=
+    # is dispatched to all of them. A capture that reported one level and
+    # ignored assignment would make `saved = Rails.logger.level;
+    # Rails.logger.level = FATAL; ...; Rails.logger.level = saved` restore
+    # the app's logger to the capture's level instead of its own.
+    capture = Rails.logger.broadcasts.find { |l| l.is_a?(Lantern::Subscribers::Logs::Capture) }
+    saved = Rails.logger.level
+    Rails.logger.level = ::Logger::ERROR
+    expect(capture.level).to eq(::Logger::ERROR)
+    expect(Rails.logger.level).to eq(::Logger::ERROR)
+
+    Lantern.start_execution(source: :command, sample_kind: :commands)
+    Rails.logger.info("below the level the app set")
+    Rails.logger.error("at it")
+    finish!
+
+    expect(lantern_records(:log).map { |l| l[:level] }).to eq([ "error" ])
+  ensure
+    Rails.logger.level = saved
+  end
+
   it "drops lines below config.log_level and keeps lines at or above it" do
     old_log_level = Lantern.config.log_level
     Lantern.config.log_level = "warn"

@@ -115,6 +115,28 @@
   (`rejected > 0`) stay routine: they are logged under `LANTERN_DEBUG` and
   are not reported to `on_unrecoverable`, since the platform's ingest batch
   is the authoritative accounting for them.
+- Per-request overhead roughly halved, and per-query overhead cut by about
+  two thirds, measured against a baseline with the gem's subscribers
+  genuinely unsubscribed. The log capture reported itself at DEBUG, which
+  made `Rails.logger.debug?` true for the whole app and had every framework
+  `LogSubscriber` format its SQL, render, and cache lines for nobody; it
+  now reports `config.log_level`. A head-sampled-out request no longer
+  builds the request record it was about to discard. The transaction
+  statement counter shares the query subscriber's event instead of taking
+  a second one per query, and the model-hydration counter subscribes
+  without an `Event` object. Cache-event and view-render group hashes,
+  the vendor cache-key check, and the `GC.stat(:time)` probe are computed
+  once instead of per event.
+
+- `bench/overhead.rb` now measures against a real baseline: every
+  subscriber the gem installed is unsubscribed and its log capture detached
+  for the "off" batches, rather than flipping `config.enabled` with
+  everything still wired in, which had hidden most of the cost. It gates
+  three request shapes on SQLite and fails if `Rails.logger.debug?` is on.
+  The scripts that produced the numbers in the docs are committed alongside
+  it and indexed in `bench/README.md`: per-shape cost, the request, query,
+  and exception paths piece by piece, reporter-thread and wire cost,
+  allocation and CPU attribution, and an end-to-end Puma load harness.
 
 - The installer now prefers a hidden prompt, stdin, or `LANTERN_TOKEN`, never
   prints token values, and refuses to put a token in a tracked or non-ignored

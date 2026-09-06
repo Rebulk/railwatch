@@ -3,8 +3,9 @@
 First-class monitoring for Rails. One gem instruments requests, jobs,
 scheduled tasks, commands, queries, exceptions, cache, mail, broadcasts,
 outgoing HTTP, storage, views, and logs, links them into one trace per
-execution, and ships them to Lantern Cloud with under a millisecond of
-overhead per request and zero writes to your database.
+execution, and ships them to Lantern Cloud for about half a millisecond
+per request plus tens of microseconds per query, with zero writes to your
+database.
 
 ## Install
 

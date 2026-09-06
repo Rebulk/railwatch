@@ -26,15 +26,27 @@ module Lantern
                                     action_view. action_mailer. active_storage. action_cable.].freeze
 
       class Capture < ::Logger
+        # BroadcastLogger#debug? is true when ANY broadcast is at DEBUG, and
+        # every framework LogSubscriber (Active Record's SQL line, Action
+        # View's render lines, the cache store's) formats its message only
+        # when it is. A Logger.new(nil) sits at DEBUG, which made adding
+        # Lantern turn all of that formatting on for lines nobody stored.
+        # Starting at config.log_level instead keeps the app's own level in
+        # charge. From here on this is an ordinary Logger: `Rails.logger.level
+        # =` and `Rails.logger.silence` reach it like any other broadcast, so
+        # what the app reads back is what it set.
         def initialize
-          super(nil)
+          super(nil, level: Logs.min_severity)
         end
 
         def add(severity, message = nil, progname = nil)
           return true unless Lantern.enabled?
           return true unless Logs.execution
           severity ||= ::Logger::UNKNOWN
-          return true if severity < Logs.min_severity
+          # Both gates: the Logger's own level (which the app may have raised
+          # or silenced) and config.log_level (which may have changed since
+          # this logger was built).
+          return true if severity < level || severity < Logs.min_severity
           message = progname if message.nil? && !block_given?
           message = yield if message.nil? && block_given?
           Logs.write(LEVELS[severity] || "unknown", message)

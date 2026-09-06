@@ -115,18 +115,32 @@ module Lantern
     # and only if it raised (so every unhandled exception has a parent) --
     # unless the tail decision (tail_keep?) rescues the whole tree, which is
     # also how a failure-context ring is promoted.
+    #
+    # The parent's fields may be given as a block instead of keywords. It is
+    # called only when a parent is actually going to ship, so a caller whose
+    # fields are expensive to assemble (the request middleware: an
+    # ActionDispatch::Request, a header walk) skips that work for a
+    # head-sampled-out execution nothing rescued.
     def finish_execution(parent_type = nil, group: nil, **fields)
       exe = Current.execution
       return Current.clear unless exe
 
       exe.capture_memory
       tail = !exe.sampled? && tail_keep?(exe)
-      fields[:tail_sampled] = true if tail
+      shipping = exe.sampled? || tail
       # The profile is a child record of this execution, so it has to be
-      # buffered before the parent is built and the tree is shipped.
-      fields[:profiled] = true if exe.profiler_handle && ship_profile(exe, exe.sampled? || tail)
-      parent = parent_type && build_parent(parent_type, exe, group: group, **fields)
-      if exe.sampled? || tail
+      # buffered before the parent is built and the tree is shipped. Stopped
+      # either way: a profiler left running would outlive the execution.
+      profiled = exe.profiler_handle && ship_profile(exe, shipping)
+      parent = nil
+      if parent_type && (shipping || exe.exception_sampled)
+        fields.merge!(yield) if block_given?
+        group ||= fields.delete(:group)
+        fields[:tail_sampled] = true if tail
+        fields[:profiled] = true if profiled
+        parent = build_parent(parent_type, exe, group: group, **fields)
+      end
+      if shipping
         # Before the records are written: it settles each pending `user`
         # entity's final reference, which a tenant bound after the entity was
         # resolved will have changed.
@@ -136,7 +150,9 @@ module Lantern
           reporter.buffer.account_dropped(exe.dropped_records, bytes: exe.dropped_bytes)
         end
         reporter.write(parent) if parent
-      elsif parent && exe.exception_sampled
+      elsif parent
+        # Head-sampled out, but an unhandled exception rolled the exceptions
+        # sample in: the exception needs its parent, and only its parent.
         reporter.write(parent)
       end
       parent

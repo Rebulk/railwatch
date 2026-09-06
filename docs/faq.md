@@ -4,27 +4,45 @@
 
 The gem ships with an overhead gate that CI runs on every change
 (`bench/overhead.rb`, `bundle exec ruby bench/overhead.rb`). It boots the
-dummy app, drives a request that issues 200 queries with Lantern off and
-then on, interleaved in short blocks so background load hits both equally,
-and fails the build if instrumentation costs more than:
+dummy app on SQLite, drives three request shapes with Lantern genuinely out
+of the way (its notification subscribers unsubscribed, its log capture
+detached) and then in, alternating every batch so background load hits
+both equally, and fails the build if instrumentation costs more than:
 
-| Budget | Limit |
-|---|---|
-| Added p50 per request | 1.5 ms of CPU time |
-| Added cost per query | 8 µs |
-| Added allocations per request | 3,000 |
+| Request shape | Added CPU per request | Added allocations |
+|---|---|---|
+| Trivial, no queries | 0.9 ms | 400 |
+| 20 uncached SQLite queries | 3.0 ms | 1,000 |
+| N+1 page: 7 queries, 1 log line | 2.0 ms | 500 |
 
-Measured on an idle core, the gem comes in at roughly **0.4 ms fixed per
-request plus about 2 µs per query** — so ~0.85 ms for that deliberately
-extreme 200-query request. The limits are higher than the measurement on
-purpose: they leave headroom for a loaded CI box without letting a real
-regression through.
+Measured on a shared 8-core box at load average 4, the gem comes in at
+roughly **0.4 ms fixed per request plus 40 to 80 µs per real query**, so
+about 0.9 ms for the N+1 page and 1.7 to 2.3 ms for the 20-query stress
+case. A head-sampled-out request pays about half the fixed cost and 10 to
+20 µs per query, all of it counting. The limits are higher than the
+measurement on purpose: they leave headroom for a loaded CI box without
+letting a real regression through.
+
+Most of the per-query figure is Rails' own notification dispatch (an
+`ActiveSupport::Notifications::Event` costs about 6 µs to build and
+deliver, and a query fires two of them); Lantern's subscriber body is 5 to
+15 µs of it.
+
+Off the request thread, the reporter spends about 30 µs of CPU per record
+serializing and gzipping, which was 2 to 4 percent of process CPU in a
+saturated load test, and each record on the wire is about 95 bytes after
+gzip. Boot time is unchanged; resident memory is 1 to 2 MB higher at idle
+plus about 2 KB per buffered record.
 
 Two honest caveats. The budget is **CPU time on the request thread**, not
 wall time — wall time on a shared runner swings by tens of milliseconds
 for reasons that have nothing to do with the gem, which would make the
-gate useless. And a request that runs 200 queries is a stress case; a
-normal request pays mostly the fixed cost.
+gate useless. And the 20-query request is a stress case; a normal request
+pays mostly the fixed cost.
+
+The scripts behind these numbers, and the ones for finding out where a
+number comes from before changing the code, are listed in
+[`bench/README.md`](../bench/README.md).
 
 A second gate, `bench/no_db_writes.rb`, drives 200 requests and a job with
 a `sql.active_record` subscriber watching for any `INSERT`/`UPDATE`/
