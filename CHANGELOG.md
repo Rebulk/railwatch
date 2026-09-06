@@ -2,6 +2,26 @@
 
 ## 0.1.0 (unreleased)
 
+- Boot with the gem enabled is now within noise of boot without it; it was
+  about 300 ms and 10 MB slower.
+  The `process` record read its adapter names through `ActiveRecord::Base`
+  and `ActiveJob::Base`, which autoloaded both frameworks before anything
+  else asked for them; it now reads the app's configuration. The Rake and
+  `bin/rails runner` patches are installed from the engine's `rake_tasks`
+  and `runner` hooks instead of every boot, which stops a web or worker
+  process requiring rake and railties' runner command.
+- The `process` record is written from `config.after_initialize` rather
+  than from the subscribe initializer, so `boot_seconds` covers the app's
+  own initializers.
+- Fork handling is one `ActiveSupport::ForkTracker` callback -- Rails' own
+  `Process._fork` hook -- instead of three separate prepends on `Process`.
+  `Lantern::Reporter::ForkHook`, `Lantern::Health::ForkHook`, and
+  `Lantern::Sessions::ForkHook` are gone; `Lantern.restart_after_fork!`
+  resets everything in order.
+- The gemspec declares `base64` (a bundled gem since Ruby 3.4, previously
+  reached only through Active Support's own dependency) and bounds the
+  Rails dependency to `>= 8.1, < 9`.
+
 - An unhandled exception's urgent flush is coalesced over a quarter-second
   window (`Reporter::URGENT_FLUSH_DELAY`) instead of waking the reporter
   per record. During an exception storm every request used to trigger its

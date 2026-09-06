@@ -918,18 +918,31 @@ RSpec.describe Lantern::Reporter do
   end
 end
 
-RSpec.describe Lantern::Reporter::ForkHook do
-  it "resets Lantern state in the child" do
+RSpec.describe "fork handling" do
+  it "registers one ActiveSupport::ForkTracker callback that resets the whole gem in the child" do
+    # Rails' ForkTracker is a Process._fork hook, so it sees fork,
+    # Process.fork, and Kernel#fork exactly once per child. One registration
+    # rather than a prepend per subsystem, and only ever this one: a second
+    # would reset the child twice and write two process records.
+    callbacks = ActiveSupport::ForkTracker.instance_variable_get(:@callbacks)
+    ours = callbacks.select { |cb| cb.source_location&.first&.end_with?("lib/lantern/engine.rb") }
+    expect(ours.size).to eq(1)
+
     expect(Lantern).to receive(:restart_after_fork!)
-    fake = Class.new { def _fork = 0 }.new
-    fake.singleton_class.prepend(described_class)
-    expect(fake._fork).to eq(0)
+    ours.first.call
   end
 
-  it "leaves Lantern state alone in the parent" do
-    expect(Lantern).not_to receive(:restart_after_fork!)
-    fake = Class.new { def _fork = 4242 }.new
-    fake.singleton_class.prepend(described_class)
-    expect(fake._fork).to eq(4242)
+  it "restarts the reporter before the health and session threads, so they emit into the child's reporter" do
+    order = []
+    allow(Lantern::Profiler).to receive(:restart_after_fork!) { order << :profiler }
+    allow(Lantern.reporter).to receive(:restart_after_fork!) { order << :reporter }
+    allow(Lantern::Subscribers::Users).to receive(:restart_after_fork!) { order << :users }
+    allow(Lantern::Subscribers::ProcessInfo).to receive(:restart_after_fork!) { order << :process }
+    allow(Lantern::Health).to receive(:restart_after_fork!) { order << :health }
+    allow(Lantern::Sessions).to receive(:restart_after_fork!) { order << :sessions }
+
+    Lantern.restart_after_fork!
+
+    expect(order).to eq(%i[profiler reporter users process health sessions])
   end
 end

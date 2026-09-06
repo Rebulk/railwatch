@@ -44,6 +44,7 @@ RSpec.describe Lantern::Console do
     it "sends no process record, because a console is not a server" do
       described_class.silence!
       Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+      Lantern::Subscribers::ProcessInfo.record!
 
       expect(lantern_records(:process)).to be_empty
     end

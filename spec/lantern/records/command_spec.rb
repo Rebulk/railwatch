@@ -16,10 +16,19 @@ RSpec.describe "command record" do
     expect(Widget.exists?(name: "from_rake")).to be(true)
   end
 
-  it "installs Lantern::Patches::RunnerCommand on Rails::Command::RunnerCommand at boot" do
+  it "installs Lantern::Patches::RunnerCommand from the engine's runner hook, which bin/rails runner fires after boot" do
+    # Not at boot: requiring railties' runner command in every web and
+    # worker process cost boot time for a class those processes never call.
+    Rails.application.load_runner
     require "rails/command"
     require "rails/commands/runner/runner_command"
     expect(Rails::Command::RunnerCommand.ancestors).to include(Lantern::Patches::RunnerCommand)
+  end
+
+  it "installs Lantern::Patches::RakeTask from the engine's rake_tasks hook, which a rake process fires after boot" do
+    # spec_helper ran Rails.application.load_tasks once for the suite (Rake
+    # appends actions, so loading twice would run every task twice).
+    expect(Rake::Task.ancestors).to include(Lantern::Patches::RakeTask)
   end
 
   context "once Rails::Command::RunnerCommand is actually prepended (simulating the require path being fixed)" do

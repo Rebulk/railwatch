@@ -719,7 +719,7 @@ sampling. Gives the platform a server/deploy inventory for free.
 | `ruby_version` / `rails_version` / `lantern_version` | Versions. |
 | `app` | Top-level module name of the Rails app. |
 | `environment` | `config.environment_name` (defaults to `Rails.env`). |
-| `boot_seconds` | Monotonic time since `Lantern::BOOTED_AT` (this file's load time, i.e. as early in boot as the gem can observe). |
+| `boot_seconds` | Monotonic time from `Lantern::BOOTED_AT` (the gem's load time, as early in boot as it can observe) to `config.after_initialize`, when the record is written -- so it covers the app's own initializers. |
 | `database_adapter` | Primary DB adapter name. |
 | `queue_adapter` | Active Job queue adapter name. |
 | `cache_store` | `Rails.cache` class name. |

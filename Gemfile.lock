@@ -2,7 +2,8 @@ PATH
   remote: .
   specs:
     lantern (0.1.0)
-      rails (>= 8.1)
+      base64
+      rails (>= 8.1, < 9)
 
 GEM
   remote: https://rubygems.org/

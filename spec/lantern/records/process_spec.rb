@@ -5,6 +5,7 @@ require "spec_helper"
 RSpec.describe "process record" do
   it "captures pid, role, ruby/rails/lantern versions, adapters, cache store, and boot_seconds" do
     Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+    Lantern::Subscribers::ProcessInfo.record!
 
     proc_rec = lantern_records(:process).sole
     expect(proc_rec[:pid]).to eq(Process.pid)
@@ -18,6 +19,25 @@ RSpec.describe "process record" do
     expect(proc_rec[:database_adapter]).to eq("sqlite3")
     expect(proc_rec[:queue_adapter]).to eq("test")
     expect(proc_rec[:cache_store]).to eq("ActiveSupport::Cache::MemoryStore")
+  end
+
+  it "names the adapters from the app's configuration without loading Active Record or Active Job" do
+    # In a lazy-loading process, ActiveRecord::Base and ActiveJob::Base are
+    # autoloaded on first reference, and that reference used to be this
+    # record: some 350 ms of boot for two strings.
+    expect(ActiveRecord::Base).not_to receive(:connection_db_config)
+    expect(ActiveJob::Base).not_to receive(:queue_adapter_name)
+    Lantern::Subscribers::ProcessInfo.install!(Rails.application)
+
+    expect(Lantern::Subscribers::ProcessInfo.database_adapter).to eq("sqlite3")
+    expect(Lantern::Subscribers::ProcessInfo.queue_adapter).to eq("test")
+  end
+
+  it "is written after the app has initialized, not from the subscribe initializer" do
+    # boot_seconds is meant to cover the app's own initializers, which run
+    # after the gem's subscribe initializer.
+    expect(Lantern::Subscribers::ProcessInfo).not_to receive(:record!)
+    Lantern::Subscribers::ProcessInfo.install!(Rails.application)
   end
 
   describe ".role" do

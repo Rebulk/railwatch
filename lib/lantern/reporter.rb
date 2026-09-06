@@ -37,17 +37,6 @@ module Lantern
       end
     end
 
-    # Prepended onto Process's singleton class by the engine. The reset runs
-    # before the child returns from fork, so no app or at_exit path can touch
-    # the inherited parent buffer first.
-    module ForkHook
-      def _fork
-        pid = super
-        Lantern.restart_after_fork! if pid.zero?
-        pid
-      end
-    end
-
     def initialize(config, transport: nil, random: Random)
       @config = config
       @buffer = build_buffer

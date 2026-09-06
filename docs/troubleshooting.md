@@ -132,9 +132,10 @@ end
 have workers.
 
 **What actually happens.** Ruby routes `fork`, `Process.fork`, and
-`Kernel#fork` through `Process._fork`, and Lantern prepends hooks for the
-reporter, health sampler, and session flusher. Before the child returns
-from `fork`, it replaces the inherited reporter buffer, drop accounting,
+`Kernel#fork` through `Process._fork`, and Lantern registers one callback
+with Rails' own `ActiveSupport::ForkTracker` (the same hook Active Record
+uses to reset its connection pools). Before the child returns from
+`fork`, it replaces the inherited reporter buffer, drop accounting,
 transport policy state, mutexes, condition variables, dead threads, and the
 profiler's process-global state (a parent's in-flight profile would
 otherwise leave the child permanently unable to profile).
