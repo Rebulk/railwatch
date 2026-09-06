@@ -1,8 +1,10 @@
 # Changelog
 
-- Prepared the gem for its public `nightrail` distribution while
-  preserving the `Nightrail` namespace and legacy Git-source `nightrail` gemspec.
-  Added strict package verification, Trusted Publishing release automation,
+- Renamed the gem from Lantern to Nightrail: constants, file paths,
+  `X-Nightrail-*` headers, `NIGHTRAIL_*` environment variables, rake tasks,
+  the generator, the `/nightrail` mount, and the `nightrail` distribution name.
+  There is no compatibility layer; this is the first public release.
+- Prepared the gem for its public RubyGems distribution. Added strict package verification, Trusted Publishing release automation,
   public security/contribution guidance, TLS verification assertions, an
   HTTPS-by-default ingest policy, and browser beacon payload hardening.
 

@@ -10,8 +10,8 @@ nothing else has to be wired by hand.
 bundle add nightrail
 ```
 
-The distribution name is `nightrail`. Its Ruby namespace and
-explicit require paths remain `Nightrail::*` and `require "nightrail"`.
+The gem, its Ruby namespace, and its require path share one name:
+`nightrail`, `Nightrail::*`, `require "nightrail"`.
 
 ## 2. Run the installer
 

@@ -15,9 +15,9 @@ bin/rails generate nightrail:install --prompt-token  # 2. hidden token input plu
 bin/rails nightrail:doctor                    # 3. check every piece is wired up after restart
 ```
 
-The distribution name is `nightrail`; the Ruby namespace and
-explicit require paths remain `Nightrail::*` and `require "nightrail"`. For a
-self-hosted deployment or an unreleased revision, use the Git source instead:
+The gem, its Ruby namespace, and its require path share one name:
+`nightrail`, `Nightrail::*`, `require "nightrail"`. For a self-hosted
+deployment or an unreleased revision, use the Git source instead:
 
 ```ruby
 gem "nightrail", github: "Rebulk/nightrail"
