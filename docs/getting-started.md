@@ -7,8 +7,11 @@ nothing else has to be wired by hand.
 ## 1. Add the gem
 
 ```sh
-bundle add lantern
+bundle add lantern-observability
 ```
+
+The distribution name is `lantern-observability`. Its Ruby namespace and
+explicit require paths remain `Lantern::*` and `require "lantern"`.
 
 ## 2. Run the installer
 

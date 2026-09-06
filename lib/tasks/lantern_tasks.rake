@@ -100,6 +100,16 @@ namespace :lantern do
     ingest = URI.parse(config.ingest_url) rescue nil
     check.call(ingest.is_a?(URI::HTTP), "ingest url", config.ingest_url)
 
+    transport_security = config.ingest_url_allowed?
+    check.call(transport_security, "ingest transport security",
+               if ingest&.scheme == "https"
+                 "HTTPS with certificate verification"
+               elsif transport_security
+                 "plain HTTP explicitly allowed for #{ingest.host}"
+               else
+                 "plain HTTP refused; use HTTPS or set LANTERN_ALLOW_HTTP=true"
+               end)
+
     check.call(Lantern::Transport::Http.new(config).ping, "ingest reachable",
                "GET #{URI.join(config.ingest_url, '/ingest/ping')}", fatal: true)
 
@@ -264,6 +274,7 @@ namespace :lantern do
   desc "Send deploy metadata to Lantern: rake lantern:deploy[ref,name,url]"
   task :deploy, [ :ref, :name, :url ] => :environment do |_t, args|
     deploy = Lantern.config.deploy or abort "LANTERN_DEPLOY (or KAMAL_VERSION) is not set"
+    abort "Plain HTTP ingest is disabled; use HTTPS or set LANTERN_ALLOW_HTTP=true" unless Lantern.config.ingest_url_allowed?
     uri = URI.join(Lantern.config.ingest_url, "/ingest/deploys")
     req = Net::HTTP::Post.new(uri)
     req["Authorization"] = "Bearer #{Lantern.config.token}"

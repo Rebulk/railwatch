@@ -18,6 +18,7 @@ module Lantern
     def upload(directory: "public", delete: false)
       raise ArgumentError, "LANTERN_TOKEN is not set" if @config.token.to_s.empty?
       raise ArgumentError, "LANTERN_DEPLOY (or KAMAL_VERSION) is not set" if @config.deploy.to_s.empty?
+      raise ArgumentError, "plain HTTP ingest is disabled; use HTTPS or set LANTERN_ALLOW_HTTP=true" unless @config.ingest_url_allowed?
       root = Pathname.new(directory).realpath
       files = Dir[root.join("**/*.map").to_s].sort.select { |path| File.file?(path) }
       raise ArgumentError, "no .map files found in #{root}" if files.empty?

@@ -1,7 +1,8 @@
 # Lantern, for coding agents
 
-About *using* the `lantern` gem from a Rails application; copy this into that
-application's repository. Index of everything else: [`llms.txt`](llms.txt).
+About *using* the `lantern-observability` gem from a Rails application; copy
+this into that application's repository. Index of everything else:
+[`llms.txt`](llms.txt).
 
 Lantern instruments a Rails app end to end and ships linked telemetry to
 Lantern Cloud. Every request, job attempt, scheduled task run, and command is
@@ -12,7 +13,7 @@ render, exception, and span is a child of one, linked by
 ## Install
 
 ```sh
-bundle add lantern
+bundle add lantern-observability
 bin/rails generate lantern:install --prompt-token --kamal-secrets
 ```
 

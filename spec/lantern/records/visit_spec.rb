@@ -79,6 +79,32 @@ RSpec.describe "visit record", type: :request do
     expect(lantern_records(:visit).size).to eq(50)
   end
 
+  it "ignores a visits value that is not an array and non-object entries within an array" do
+    post "/lantern/beacon", params: { visits: { component: "not-a-list" } }.to_json,
+         headers: { "Content-Type" => "application/json" }
+    expect(response).to have_http_status(:no_content)
+
+    post_beacon([ "text", 42, nil, [ "nested" ], { component: "Valid", only: { not: "an array" } } ])
+
+    expect(response).to have_http_status(:no_content)
+    expect(lantern_records(:visit).sole).to include(component: "Valid", only: [])
+  end
+
+  it "rejects a beacon body over 256 KiB before recording it" do
+    post_beacon([ { component: "X", url: "x" * (Lantern::BeaconController::MAX_REQUEST_BYTES + 1) } ])
+
+    expect(response).to have_http_status(:content_too_large)
+    expect(lantern_records(:visit)).to be_empty
+  end
+
+  it "does not answer 500 for a JSON body containing invalid UTF-8" do
+    body = "{\"visits\":[{\"component\":\"bad\xFFvalue\"}]}".b
+    post "/lantern/beacon", params: body, headers: { "Content-Type" => "application/json" }
+
+    expect(response.status).not_to be_between(500, 599)
+    expect(lantern_records(:visit)).to be_empty
+  end
+
   it "threads Users.resolve_id's return value through as the visit's user field" do
     allow(Lantern::Subscribers::Users).to receive(:resolve_id).and_return("42")
     post_beacon([ { component: "X", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "200" } ])

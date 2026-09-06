@@ -9,6 +9,8 @@ module Lantern
     MAX_METRIC_MS = 120_000
     MAX_CLS = 100.0
 
+    MAX_REQUEST_BYTES = 256 * 1024
+    MAX_VISITS = 50
     MAX_ERRORS = 50
     MAX_ERROR_MESSAGE = 1024
     MAX_ERROR_STACK = 8192
@@ -20,37 +22,41 @@ module Lantern
 
     RATE_LIMIT_WINDOW = 60 # seconds
 
-    before_action :throttle, if: -> { Lantern.config.beacon_enabled }
+    before_action :limit_payload, :throttle, if: -> { Lantern.config.beacon_enabled }
 
     def create
       return head :no_content unless Lantern.config.beacon_enabled
 
-      visits = Array(params[:visits]).first(50)
+      visits = params[:visits].is_a?(Array) ? params[:visits].first(MAX_VISITS).filter_map { |visit| object(visit) } : []
       user_id = Subscribers::Users.resolve_beacon_id(request)
       tenant = beacon_tenant(params[:tenant])
       record_session(params[:session], visits, user_id, tenant)
       record_errors(params[:errors], user_id, tenant)
       visits.each do |v|
-        v = v.to_unsafe_h if v.respond_to?(:to_unsafe_h)
         Lantern.record(:visit,
-          group: Record.group_hash(v["component"].to_s),
-          timestamp: v["started_at"].to_f / 1000.0,
-          component: v["component"].to_s[0, 255],
-          url: v["url"].to_s[0, 2048],
-          method: v["method"].to_s[0, 10],
-          duration: (v["duration_ms"].to_f * 1000).round,
-          status: v["status"].to_s[0, 20],
+          group: Record.group_hash(safe_string(v["component"], 255)),
+          timestamp: safe_float(v["started_at"]) / 1000.0,
+          component: safe_string(v["component"], 255),
+          url: safe_string(v["url"], 2048),
+          method: safe_string(v["method"], 10),
+          duration: (safe_float(v["duration_ms"]) * 1000).round,
+          status: safe_string(v["status"], 20),
           partial: v["partial"] ? true : false,
-          only: Array(v["only"]).map(&:to_s).first(50),
-          props_bytes: v["props_bytes"].to_i,
+          only: array(v["only"]).first(50).map { |value| safe_string(value, 255) },
+          props_bytes: safe_integer(v["props_bytes"]),
           lcp: metric_ms(v["lcp"]),
           cls: cumulative_layout_shift(v["cls"]),
           inp: metric_ms(v["inp"]),
           ttfb: metric_ms(v["ttfb"]),
           user: user_id,
           tenant: tenant,
-          user_agent: request.user_agent.to_s[0, 256])
+          user_agent: safe_string(request.user_agent, 256))
       end
+      head :no_content
+    rescue StandardError => error
+      # The endpoint is unauthenticated and its payload is untrusted. A bad
+      # shape must not turn into an exception in the customer application.
+      Lantern.debug { "discarded invalid beacon payload: #{error.class}: #{error.message}" }
       head :no_content
     end
 
@@ -74,15 +80,19 @@ module Lantern
       head :too_many_requests
     end
 
+    def limit_payload
+      head :content_too_large if request.raw_post.bytesize > MAX_REQUEST_BYTES
+    end
+
     # The browser half of release health: one `session` record per beacon
     # flush, never more, whatever the flush carried. The first one the client
     # sends has no duration yet and opens the session; every later flush
     # beats it along; the pagehide flush closes it with `ended`.
     def record_session(session, visits, user_id, tenant)
-      return if session.blank?
+      session = object(session)
+      return unless session
 
-      session = session.to_unsafe_h if session.respond_to?(:to_unsafe_h)
-      id = session["id"].to_s[0, 64]
+      id = safe_string(session["id"], 64)
       return if id.empty?
 
       duration_ms = session["duration_ms"]
@@ -91,8 +101,8 @@ module Lantern
         id: id,
         source: "browser",
         status: duration_ms.nil? ? "started" : "ok",
-        started_at: session["started_at"].to_f / 1000.0,
-        duration: duration_ms.nil? ? nil : (duration_ms.to_f * 1000).round,
+        started_at: safe_float(session["started_at"]) / 1000.0,
+        duration: duration_ms.nil? ? nil : (safe_float(duration_ms) * 1000).round,
         visits: visits.size,
         errors: visits.count { |v| v["status"] == "error" },
         ended: session["ended"] ? true : false,
@@ -118,9 +128,9 @@ module Lantern
       origin = request.base_url
       session_id = session_id_from(params[:session])
       errors.each do |error|
-        error = error.to_unsafe_h if error.respond_to?(:to_unsafe_h)
-        next unless error.is_a?(Hash)
-        name = error["name"].to_s[0, 255]
+        error = object(error)
+        next unless error
+        name = safe_string(error["name"], 255)
         next if name.empty?
         record_error(error, name, origin, session_id, user_id, tenant)
       end
@@ -132,26 +142,26 @@ module Lantern
     # (startLantern({ tenant })) fills that gap, and never overrides a
     # tenant the server did resolve for itself.
     def beacon_tenant(hint)
-      Context.current_tenant || (hint.is_a?(String) ? hint[0, 255].presence : nil)
+      Context.current_tenant || (hint.is_a?(String) ? safe_string(hint, 255).presence : nil)
     end
 
     # The tab's session id, so a browser error can be lined up with the
     # session it crashed. Shaped like every other read off this payload:
     # anything but a hash carrying an id yields no id at all.
     def session_id_from(session)
-      session = session.to_unsafe_h if session.respond_to?(:to_unsafe_h)
-      session.is_a?(Hash) ? session["id"].to_s[0, 64] : ""
+      session = object(session)
+      session ? safe_string(session["id"], 64) : ""
     end
 
     def record_error(error, name, origin, session_id, user_id, tenant)
-      message = error["message"].to_s[0, MAX_ERROR_MESSAGE]
-      frames = Backtrace.js_frames(error["stack"].to_s[0, MAX_ERROR_STACK], origin: origin)
+      message = safe_string(error["message"], MAX_ERROR_MESSAGE)
+      frames = Backtrace.js_frames(safe_string(error["stack"], MAX_ERROR_STACK), origin: origin)
       top = Subscribers::Exceptions.top_frame(frames)
       parts = Subscribers::Exceptions.cap_fingerprint(
         [ name, top[:file], top[:line], Subscribers::Exceptions.normalize_message(message) ])
       Lantern.record(:exception,
         group: Record.group_hash(*parts),
-        timestamp: error["at"].to_f.positive? ? error["at"].to_f / 1000.0 : nil,
+        timestamp: safe_float(error["at"]).positive? ? safe_float(error["at"]) / 1000.0 : nil,
         class: name,
         message: message,
         handled: false,
@@ -161,11 +171,11 @@ module Lantern
         line: top[:line],
         frames: frames,
         context: Context.serialized_with(error_context(error["context"]).merge(browser: {
-          url: error["url"].to_s[0, 2048].presence,
-          component: error["component"].to_s[0, 255].presence,
-          visit: error["visit"].to_s[0, 2048].presence,
+          url: safe_string(error["url"], 2048).presence,
+          component: safe_string(error["component"], 255).presence,
+          visit: safe_string(error["visit"], 2048).presence,
           session: session_id.presence,
-          user_agent: request.user_agent.to_s[0, 256].presence,
+          user_agent: safe_string(request.user_agent, 256).presence,
           breadcrumbs: breadcrumbs(error["breadcrumbs"]).presence
         }.compact)),
         fingerprint: parts,
@@ -180,12 +190,13 @@ module Lantern
     def breadcrumbs(raw)
       return [] unless raw.is_a?(Array)
       raw.first(MAX_BREADCRUMBS).filter_map do |crumb|
-        crumb = crumb.to_unsafe_h if crumb.respond_to?(:to_unsafe_h)
-        next unless crumb.is_a?(Hash)
-        next unless CRUMB_KINDS.include?(crumb["kind"].to_s)
-        text = crumb["text"].to_s[0, MAX_CRUMB_TEXT]
+        crumb = object(crumb)
+        next unless crumb
+        kind = safe_string(crumb["kind"], 20)
+        next unless CRUMB_KINDS.include?(kind)
+        text = safe_string(crumb["text"], MAX_CRUMB_TEXT)
         next if text.empty?
-        { at: crumb["at"].to_f, kind: crumb["kind"].to_s, text: text }
+        { at: safe_float(crumb["at"]), kind: kind, text: text }
       end
     end
 
@@ -193,9 +204,11 @@ module Lantern
     # boundary's component stack, most often. Flattened to strings so a
     # cyclic or enormous object cannot ride in on it.
     def error_context(raw)
-      raw = raw.to_unsafe_h if raw.respond_to?(:to_unsafe_h)
-      return {} unless raw.is_a?(Hash)
-      raw.first(MAX_CONTEXT_KEYS).to_h { |key, value| [ key.to_s[0, 64], value.to_s[0, MAX_CONTEXT_VALUE] ] }
+      raw = object(raw)
+      return {} unless raw
+      raw.first(MAX_CONTEXT_KEYS).to_h do |key, value|
+        [ safe_string(key, 64), safe_string(value, MAX_CONTEXT_VALUE) ]
+      end
     end
 
     # Web vitals only ride along on the initial-load visit, and only from
@@ -203,12 +216,39 @@ module Lantern
     # is nil far more often than not.
     def metric_ms(value)
       return nil if value.nil? || value == ""
-      value.to_f.round.clamp(0, MAX_METRIC_MS)
+      safe_float(value).round.clamp(0, MAX_METRIC_MS)
     end
 
     def cumulative_layout_shift(value)
       return nil if value.nil? || value == ""
-      value.to_f.clamp(0.0, MAX_CLS).round(4)
+      safe_float(value).clamp(0.0, MAX_CLS).round(4)
+    end
+
+    def object(value)
+      value = value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
+      value if value.is_a?(Hash)
+    end
+
+    def array(value)
+      value.is_a?(Array) ? value : []
+    end
+
+    def safe_string(value, length)
+      value.to_s.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)[0, length]
+    rescue StandardError
+      ""
+    end
+
+    def safe_float(value)
+      Float(value, exception: false).to_f
+    rescue StandardError
+      0.0
+    end
+
+    def safe_integer(value)
+      Integer(value, exception: false).to_i
+    rescue StandardError
+      0
     end
   end
 end

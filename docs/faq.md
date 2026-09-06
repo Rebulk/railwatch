@@ -64,8 +64,7 @@ rollups for the charts.
 
 Retention is set by the account's plan tier, not by the gem — 7, 30, or
 90 days depending on the plan. For a self-hosted install, retention,
-backups, and the pruner are yours to run:
-[`lantern-cloud/docs/operations.md`](../../lantern-cloud/docs/operations.md).
+backups, and pruning are the platform operator's responsibility.
 
 ## What about PII?
 

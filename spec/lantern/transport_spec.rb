@@ -7,6 +7,34 @@ RSpec.describe Lantern::Transport::Http do
   let(:transport) { described_class.new(Lantern.config) }
 
   describe "#deliver" do
+    it "pins TLS certificate verification to VERIFY_PEER" do
+      config = Lantern.config.dup
+      config.ingest_url = "https://lantern.example"
+      secure_transport = described_class.new(config)
+      response = Net::HTTPOK.new("1.1", "200", "OK")
+      http = instance_double(Net::HTTP, request: response)
+
+      expect(Net::HTTP).to receive(:start).with(
+        "lantern.example", 443,
+        hash_including(use_ssl: true, verify_mode: OpenSSL::SSL::VERIFY_PEER)
+      ).and_yield(http)
+
+      expect(secure_transport.ping).to be(true)
+    end
+
+    it "refuses non-loopback plain HTTP without making a request" do
+      config = Lantern.config.dup
+      config.ingest_url = "http://lantern.example"
+      config.allow_http = false
+      insecure_transport = described_class.new(config)
+
+      expect(Net::HTTP).not_to receive(:start)
+      result = insecure_transport.deliver([ { t: "log" } ])
+
+      expect(result.ok).to be(false)
+      expect(result.error).to include("plain HTTP ingest is disabled")
+    end
+
     it "posts the batch as gzip NDJSON with the bearer token, gem version, and content headers" do
       captured = nil
       stub_request(:post, "http://lantern.test/ingest").to_return do |request|

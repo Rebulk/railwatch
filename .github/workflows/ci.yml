@@ -36,6 +36,21 @@ jobs:
       - name: RuboCop
         run: bundle exec rubocop
 
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+
+      - name: Verify public package and legacy Git consumers
+        run: bundle exec rake package:verify
+
   # The per-request overhead budget (bench/overhead.rb) and the no-DB-writes
   # guarantee (bench/no_db_writes.rb). Runner load varies, so this job is
   # advisory: it fails loudly but does not block merges.

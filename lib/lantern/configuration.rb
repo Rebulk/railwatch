@@ -59,7 +59,7 @@ module Lantern
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
-    attr_accessor :enabled, :token, :ingest_url, :server, :environment,
+    attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -87,6 +87,7 @@ module Lantern
       @enabled = env_bool("LANTERN_ENABLED", true)
       @token = ENV["LANTERN_TOKEN"]
       @ingest_url = ENV.fetch("LANTERN_INGEST_URL", "https://lantern.rebulk.com")
+      @allow_http = env_bool("LANTERN_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
       @detect_deploy = env_bool("LANTERN_DETECT_DEPLOY", true)
       detect_release
@@ -232,6 +233,16 @@ module Lantern
 
     def enabled?
       @enabled && token.present?
+    end
+
+    def ingest_url_allowed?
+      uri = URI.parse(ingest_url.to_s)
+      return true if uri.scheme == "https"
+      return false unless uri.scheme == "http"
+
+      allow_http || %w[localhost 127.0.0.1 ::1 [::1]].include?(uri.host)
+    rescue URI::InvalidURIError
+      false
     end
 
     attr_reader :ignore

@@ -286,8 +286,8 @@ snippet highlighting.
 **Fix.** Nothing on the gem side; this is a property of the platform's
 telemetry store. SQLite is the default and first-class target for
 per-environment telemetry precisely because of features like this. A
-telemetry database created before the FTS index existed also falls back —
-see [`lantern-cloud/docs/operations.md`](../../lantern-cloud/docs/operations.md).
+telemetry database created before the FTS index existed also falls back. A
+self-hosted platform operator should rebuild the documented search index.
 
 ## The Tenants page is empty
 

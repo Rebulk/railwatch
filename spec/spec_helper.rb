@@ -3,6 +3,7 @@
 ENV["RAILS_ENV"] = "test"
 ENV["LANTERN_TOKEN"] = "test-token"
 ENV["LANTERN_INGEST_URL"] = "http://lantern.test"
+ENV["LANTERN_ALLOW_HTTP"] = "true"
 ENV["LANTERN_DEPLOY"] = "abc123"
 ENV["LANTERN_LOG_LEVEL"] = "info"
 
