@@ -87,7 +87,7 @@ bin/rails lantern:doctor
 ✓ ingest reachable: GET https://lantern.rebulk.com/ingest/ping
 ✓ request middleware: Lantern::Middleware::Request at position 0
 ✓ engine mounted: POST /lantern/beacon -> lantern/beacon#create
-✓ deploy: 8f31c0a (from GIT_REV)
+✓ deploy: 8f31c0a42e91 (from GIT_REV)
 ✓ sample rates: requests=1.0 jobs=1.0 commands=1.0 scheduled_tasks=1.0 exceptions=1.0
 ✓ ignored record types: none
 ```
@@ -234,12 +234,14 @@ LANTERN_INGEST_URL=https://lantern.rebulk.com   # only when self-hosting
 LANTERN_DEPLOY=<release identifier>
 ```
 
-Set `LANTERN_DEPLOY` to whatever your platform calls the thing it just
-shipped — `HEROKU_SLUG_COMMIT` on Heroku, `RENDER_GIT_COMMIT` on Render,
-your image tag under plain Docker. That value is the release: it lands
-on every record, groups the Releases page, and marks the charts.
-Without it, `config.deploy` falls back to `KAMAL_VERSION` then `GIT_REV`,
-and is nil if neither is set.
+`LANTERN_DEPLOY` is the explicit override. Without it, `config.deploy` checks,
+in order: `KAMAL_VERSION`; `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
+`HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
+`VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, and `GITHUB_SHA`; a Capistrano
+`REVISION` file; then `.git/HEAD` through loose or packed refs. It never runs
+Git during boot. Full 40-character SHAs are shortened to 12 characters. Set
+`LANTERN_DETECT_DEPLOY=false` to disable inferred sources while retaining
+`LANTERN_DEPLOY` and `KAMAL_VERSION`.
 
 ### No Kamal
 

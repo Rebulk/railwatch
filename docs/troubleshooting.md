@@ -225,17 +225,24 @@ being profiled is simply not profiled — expected, not a bug.
 groups everything under one blank release.
 
 **Cause.** `config.deploy` is unset. The doctor's `deploy` line says so,
-and when it is set, says which env var it came from.
+and when it is set, names the environment variable, `REVISION`, Git checkout,
+or initializer it came from.
 
 **Fix.** Set one of them; they are read in this order:
 
-1. `LANTERN_DEPLOY` — set it explicitly on any platform
-   (`HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, your image tag).
-2. `KAMAL_VERSION` — set for you inside a Kamal-deployed container.
-3. `GIT_REV` — a common convention in Docker builds.
+1. `LANTERN_DEPLOY` — the explicit override on any platform.
+2. `KAMAL_VERSION`.
+3. `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`, `HEROKU_SLUG_COMMIT`,
+   `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
+   `VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, or `GITHUB_SHA`.
+4. A Capistrano `REVISION` file.
+5. `.git/HEAD`, resolved through a loose ref or `packed-refs` without a Git
+   subprocess.
 
-Or assign it in the initializer. The value is stamped on every record,
-so a change only affects records shipped after the restart. Note that
+Full 40-character SHAs are shortened to 12 characters. Or assign `deploy` in
+the initializer. Set `detect_deploy`/`LANTERN_DETECT_DEPLOY` to false to ignore
+steps 3–5. The value is stamped on every record, so a change only affects
+records shipped after the restart. Note that
 `config.deploy` and the deploy *marker* are two different things: the
 marker (with its commit list) comes from `lantern:deploy` or the Kamal
 hook below.

@@ -14,7 +14,7 @@ Every record carries these (`Record.build`, `lib/lantern/record.rb`):
 | `v` | Record schema version for this type (`Record::VERSIONS`). |
 | `t` | Type string, e.g. `"query"`. |
 | `timestamp` | Unix seconds (float) when the event started. |
-| `deploy` | `Lantern.config.deploy` — `LANTERN_DEPLOY`, `KAMAL_VERSION`, or `GIT_REV`. |
+| `deploy` | `Lantern.config.deploy` — auto-detected from the deploy environment, `REVISION`, or Git checkout as documented in [`configuration.md`](configuration.md#core). |
 | `server` | `Lantern.config.server` — hostname by default. |
 | `_group` | 128-bit grouping hash (MD5 of type-specific parts, `Record.group_hash`) the platform uses to bucket occurrences into one issue/row. |
 

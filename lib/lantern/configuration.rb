@@ -59,7 +59,7 @@ module Lantern
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
-    attr_accessor :enabled, :token, :ingest_url, :deploy, :server, :environment,
+    attr_accessor :enabled, :token, :ingest_url, :server, :environment,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -79,13 +79,16 @@ module Lantern
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths, :ignored_request_paths
 
-    attr_reader :user_resolver, :beacon_user_resolver, :fingerprint_resolver, :redactors, :rejectors, :before_ingest
+    attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
+                :fingerprint_resolver, :redactors, :rejectors, :before_ingest
 
     def initialize
       @enabled = env_bool("LANTERN_ENABLED", true)
       @token = ENV["LANTERN_TOKEN"]
       @ingest_url = ENV.fetch("LANTERN_INGEST_URL", "https://lantern.rebulk.com")
-      @deploy = ENV["LANTERN_DEPLOY"] || ENV["KAMAL_VERSION"] || ENV["GIT_REV"]
+      @project_root = defined?(Rails) ? Rails.root : Dir.pwd
+      @detect_deploy = env_bool("LANTERN_DETECT_DEPLOY", true)
+      detect_release
       # Kamal names the container after the host plus a container id, so a
       # bare hostname changes on every deploy and never matches the host the
       # post-deploy hook registers as expected. KAMAL_HOST, which Kamal sets
@@ -189,6 +192,17 @@ module Lantern
       @before_ingest = []
     end
 
+    def deploy=(value)
+      @deploy = value
+      @deploy_source = "config/initializers/lantern.rb"
+      @deploy_overridden = true
+    end
+
+    def detect_deploy=(value)
+      @detect_deploy = value
+      detect_release unless @deploy_overridden
+    end
+
     def user(&block)
       @user_resolver = block
     end
@@ -264,6 +278,19 @@ module Lantern
     end
 
     private
+
+    def detect_release
+      @deploy_source = nil
+      if @detect_deploy
+        @deploy = ReleaseDetector.detect(project_root: @project_root) { |source| @deploy_source = source }
+        return
+      end
+
+      @deploy_source = %w[LANTERN_DEPLOY KAMAL_VERSION].find { |key| ENV[key].to_s.strip != "" }
+      value = @deploy_source ? ENV[@deploy_source].to_s.strip : ""
+      @deploy = ReleaseDetector::SHA.match?(value) ? value[0, 12] : value
+      @deploy = nil if @deploy.empty?
+    end
 
     def env_bool(key, default)
       return default unless ENV.key?(key)

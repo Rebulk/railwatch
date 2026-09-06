@@ -2,6 +2,13 @@
 
 ## 0.1.0 (unreleased)
 
+- Deploy identifiers are auto-detected without spawning Git: explicit Lantern
+  and Kamal values first, then common Heroku, Render, Fly, Vercel, GitLab,
+  GitHub, and build environment variables, a Capistrano `REVISION`, and the
+  checkout's loose or packed Git ref. Full SHAs are consistently shortened to
+  12 characters. `LANTERN_DETECT_DEPLOY=false` opts out of inferred values,
+  and `lantern:doctor` reports the selected source.
+
 - `health` records carry the recurring task schedule Solid Queue is
   running (`detail.recurring_tasks`, key => schedule), so the platform can
   tell a task that was removed from `config/recurring.yml` apart from one

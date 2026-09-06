@@ -243,6 +243,14 @@ RSpec.describe "lantern rake tasks" do
       expect(output).to include("✓ deploy: abc123 (from LANTERN_DEPLOY)")
     end
 
+    it "reports a deploy detected from the checkout" do
+      allow(Lantern.config).to receive(:deploy_source).and_return("REVISION")
+
+      output, = run_doctor
+
+      expect(output).to include("✓ deploy: abc123 (from REVISION)")
+    end
+
     it "reports the sample rates and the ignored record types" do
       Lantern.config.ignore = [ :view_renders ]
       output, = run_doctor
@@ -355,7 +363,7 @@ RSpec.describe "lantern rake tasks" do
 
       output, aborted = run_doctor
 
-      expect(output).to include("✗ deploy: unset")
+      expect(output).to include("✗ deploy: none: set LANTERN_DEPLOY")
       expect(aborted).to be(false)
     ensure
       Lantern.config.deploy = old_deploy
