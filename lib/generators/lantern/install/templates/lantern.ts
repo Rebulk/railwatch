@@ -96,6 +96,32 @@ let timer: number | undefined
 let ignoreErrors: (string | RegExp)[] = DEFAULT_IGNORE_ERRORS
 let denyUrls: RegExp[] = DEFAULT_DENY_URLS
 let tenantOf: (() => string | undefined) | undefined
+// Whether the user is waiting on a request. A visit the page starts by
+// itself -- a poll, a refresh when the tab comes back, a prefetch on hover
+// -- runs without the progress bar (`showProgress: false`, which Inertia
+// derives from `async: true`), and when one drops its connection nothing
+// the user did has failed: the page keeps what it has and the next tick
+// refreshes it. A laptop waking on a new network used to open an issue
+// that way. So a dropped request is reported only while the user is
+// waiting, which is one of two things. `foregroundVisits` counts visits
+// with the progress bar (or a deferred-props load, which the user watches
+// as a skeleton) between `start` and `finish`. `foregroundRequest` is a
+// visit the user asked for that has no request of its own: Inertia serves
+// a click from a prefetch already in the air without ever firing `start`
+// for it, so `before` is the one event it gets, and it stands until that
+// visit lands (`success`/`error` naming its id), a waiting request starts,
+// its drop is reported, or a `before` listener cancels it. Not `navigate`:
+// an instant visit fires that for its placeholder before the prefetch is
+// even looked up. Counted and flagged rather than matched, because the
+// failure event names only the error, not the visit. An app that wants a
+// particular background refresh reported passes `showProgress: true`.
+let foregroundVisits = 0
+let foregroundRequest: { id?: string } | null = null
+// Errors Inertia has already delivered through its own failure event. It
+// re-rejects the same object afterwards and nothing awaits it, so the error
+// arrives a second time as an unhandled rejection; that copy is dropped
+// whether or not the first was reported.
+const requestFailures = new WeakSet<object>()
 
 function endpoint() {
   return "/lantern/beacon"
@@ -264,8 +290,8 @@ function capture(name: string, message: string, stack?: string, context?: Record
     context,
   }
   // Deduped within the flush, not across the page's life: a render loop
-  // throws the same error every retry, and Inertia re-rejects the error it
-  // just fired `exception` for, so the same crash arrives twice.
+  // throws the same error every retry. (Inertia's re-rejection of a failed
+  // request is dropped by identity in the rejection handler instead.)
   if (errors.some((e) => e.name === error.name && e.message === error.message && e.stack === error.stack)) return
   errors.push(error)
 }
@@ -339,7 +365,8 @@ function stringify(value: unknown) {
 // and `httpException`. Both versions dispatch every router event as a
 // CustomEvent "inertia:<name>" on document, so listening there for all
 // four names works on either without the typed router.on, whose event map
-// only knows its own version's names.
+// only knows its own version's names. The first kind is reported only for
+// a visit the user is waiting on -- see `foregroundVisits`.
 function startErrorCapture() {
   window.addEventListener("error", (event) => {
     // Neither an error object nor a message means there is nothing to
@@ -348,12 +375,53 @@ function startErrorCapture() {
     captureValue((event.error ?? event.message) as unknown, "Error")
   })
   window.addEventListener("unhandledrejection", (event) => {
-    captureValue(event.reason as unknown, "UnhandledRejection")
+    const reason = event.reason as unknown
+    if (typeof reason === "object" && reason !== null && requestFailures.has(reason)) return
+    captureValue(reason, "UnhandledRejection")
   })
-  onInertia("exception", (detail) => captureValue(detail.exception, "InertiaException"))
-  onInertia("networkError", (detail) => captureValue(detail.error, "InertiaException"))
+  onInertia("exception", (detail) => captureRequestFailure(detail.exception))
+  onInertia("networkError", (detail) => captureRequestFailure(detail.error))
   onInertia("invalid", (detail) => captureInvalidResponse(detail.response))
   onInertia("httpException", (detail) => captureInvalidResponse(detail.response))
+}
+
+// A visit the user is waiting on: one that shows the progress bar, or the
+// load of a page's deferred props, which Inertia starts by itself but the
+// user watches as a skeleton. Read structurally so the same file compiles
+// against Inertia 2 and 3, whose visit types differ.
+function waiting(visit: object): boolean {
+  return (
+    ("showProgress" in visit && visit.showProgress === true) ||
+    ("deferredProps" in visit && visit.deferredProps === true)
+  )
+}
+
+// Inertia 3 stamps every visit with an id and names it on `success` and
+// `error`. Inertia 2 has neither, so there a landing cannot be told apart
+// from a background poll's and clears nothing: the request stands until
+// the next waiting `before`, a waiting `start`, or a reported failure,
+// which can only over-report.
+function idOf(record: object, key: string): string | undefined {
+  const value = key in record ? (record as Record<string, unknown>)[key] : undefined
+  return typeof value === "string" ? value : undefined
+}
+
+function landed(detail: object) {
+  if (foregroundRequest?.id !== undefined && idOf(detail, "visitId") === foregroundRequest.id) {
+    foregroundRequest = null
+  }
+}
+
+// The failure fires before the visit's `finish`, so the visit that failed
+// is still counted: nothing counted and nothing requested means only
+// background visits were in the air, and one of those is what dropped. A
+// requested visit whose request dropped is over; the next thing the user
+// does is a new `before`.
+function captureRequestFailure(error: unknown) {
+  if (typeof error === "object" && error !== null) requestFailures.add(error)
+  if (foregroundVisits === 0 && !foregroundRequest) return
+  foregroundRequest = null
+  captureValue(error, "InertiaException")
 }
 
 function onInertia(name: string, handler: (detail: Record<string, unknown>) => void) {
@@ -529,8 +597,27 @@ export function startLantern(options: LanternOptions = {}) {
   startBreadcrumbs()
   startErrorCapture()
 
+  // `before` fires for a click before Inertia looks for a prefetch to serve
+  // it with, so it is the one event a prefetch-served visit has of its own.
+  // A prefetch's own `before` carries no progress bar and is not counted.
+  // Listeners registered after this one may still cancel the visit (an
+  // unsaved-changes guard, say), and a cancelled visit fires nothing more;
+  // the dispatch is over by the time the microtask runs, so the answer is
+  // final there.
+  router.on("before", (event) => {
+    const v = event.detail.visit
+    if (!waiting(v) || event.defaultPrevented) return
+    const request = (foregroundRequest = { id: idOf(v, "id") })
+    queueMicrotask(() => {
+      if (event.defaultPrevented && foregroundRequest === request) foregroundRequest = null
+    })
+  })
   router.on("start", (event) => {
     const v = event.detail.visit
+    if (waiting(v)) {
+      foregroundVisits++
+      foregroundRequest = null
+    }
     current = {
       started_at: Date.now(),
       url: v.url.toString(),
@@ -541,16 +628,21 @@ export function startLantern(options: LanternOptions = {}) {
     crumb("navigate", `${v.method.toUpperCase()} ${current.url}`)
   })
   router.on("success", (event) => {
+    landed(event.detail)
     component = event.detail.page.component
     if (!current) return
     current.component = component
     current.props_bytes = JSON.stringify(event.detail.page.props ?? {}).length
     current.status = "success"
   })
-  router.on("error", () => {
+  router.on("error", (event) => {
+    landed(event.detail)
     if (current) current.status = "error"
   })
-  router.on("finish", () => {
+  router.on("finish", (event) => {
+    // Fires once whether the visit completed, failed, or was cancelled.
+    // Clamped so a missed start can only over-report, never silence.
+    if (waiting(event.detail.visit)) foregroundVisits = Math.max(0, foregroundVisits - 1)
     if (!current) return
     current.duration_ms = Date.now() - current.started_at
     current.status ??= "cancelled"
