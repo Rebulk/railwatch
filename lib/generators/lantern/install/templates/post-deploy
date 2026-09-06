@@ -28,6 +28,16 @@ fi
 
 INGEST="${LANTERN_INGEST_URL%/}"
 
+case "$INGEST" in
+  https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\[::1\]|http://\[::1\]:*) ;;
+  http://*)
+    if [ "${LANTERN_ALLOW_HTTP:-}" != "true" ]; then
+      echo "Lantern deploy marker skipped: plain HTTP ingest requires LANTERN_ALLOW_HTTP=true" >&2
+      exit 0
+    fi
+    ;;
+esac
+
 post() {
   curl -sS -m 10 -X POST "$1" \
     -H "Authorization: Bearer $LANTERN_TOKEN" \

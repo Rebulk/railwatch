@@ -235,4 +235,16 @@ RSpec.describe "exception record", type: :request do
       Lantern.config.capture_exception_locals = false
     end
   end
+
+  it "falls back to the class when a local value's inspect raises" do
+    explosive = stub_const("ExplosiveInspect", Class.new do
+      def inspect
+        raise "inspect failed"
+      end
+    end)
+
+    value = Lantern::Subscribers::Exceptions::Locals.inspect_value(explosive.new)
+
+    expect(value).to eq("#<ExplosiveInspect>")
+  end
 end

@@ -18,6 +18,15 @@ module Lantern
       Lantern::Console.silence!
     end
 
+    initializer "lantern.transport_security", after: :load_config_initializers do
+      next if Lantern.config.ingest_url_allowed?
+
+      Rails.logger.warn(
+        "Lantern will not send telemetry to #{Lantern.config.ingest_url}: plain HTTP is allowed only for loopback " \
+        "hosts unless LANTERN_ALLOW_HTTP=true"
+      )
+    end
+
     # Belt and braces for a console that reaches a prompt some other way than
     # `bin/rails console` (`require "rails/console/app"` then IRB.start, say),
     # where Rails::Console was not yet defined when the initializer above ran.

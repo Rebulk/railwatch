@@ -1,5 +1,11 @@
 # Changelog
 
+- Prepared the gem for its public `lantern-observability` distribution while
+  preserving the `Lantern` namespace and legacy Git-source `lantern` gemspec.
+  Added strict package verification, Trusted Publishing release automation,
+  public security/contribution guidance, TLS verification assertions, an
+  HTTPS-by-default ingest policy, and browser beacon payload hardening.
+
 ## 0.1.0 (unreleased)
 
 - Deploy detection follows a git worktree's `.git` file to its gitdir and
@@ -165,8 +171,6 @@
   until now those records had no parent at all. Head sampling is its own knob,
   `sample[:channels]` / `LANTERN_CHANNEL_SAMPLE_RATE`; an unhandled channel
   exception still ships with its parent when the channel rate is zero.
-  **lantern-cloud must accept the `channel_action` record type before this
-  ships** — that is being handled separately.
 
 - `Lantern.context` is now redacted with the same `ActiveSupport::ParameterFilter`
   that redacts request params. Context is application data and gets copied

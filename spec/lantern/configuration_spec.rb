@@ -18,6 +18,7 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_ENABLED" => [ :enabled, "0", false, true ],
       "LANTERN_TOKEN" => [ :token, "abc123", "abc123", nil ],
       "LANTERN_INGEST_URL" => [ :ingest_url, "https://custom.example", "https://custom.example", "https://lantern.rebulk.com" ],
+      "LANTERN_ALLOW_HTTP" => [ :allow_http, "1", true, false ],
       "LANTERN_SERVER" => [ :server, "web-1", "web-1", ENV["KAMAL_HOST"] || Socket.gethostname ],
       "LANTERN_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
       "LANTERN_CAPTURE_REQUEST_PAYLOAD" => [ :capture_request_payload, "1", true, false ],
@@ -157,6 +158,29 @@ RSpec.describe Lantern::Configuration do
       end
       %w[0 false no off garbage].each do |value|
         with_env("LANTERN_IGNORE_QUERIES" => value) { |c| expect(c.ignored?(:queries)).to be(false) }
+      end
+    end
+  end
+
+  describe "#ingest_url_allowed?" do
+    it "allows HTTPS and loopback HTTP, but refuses other HTTP by default" do
+      with_env("LANTERN_ALLOW_HTTP" => nil, "LANTERN_INGEST_URL" => "https://lantern.example") do |config|
+        expect(config.ingest_url_allowed?).to be(true)
+      end
+      %w[localhost 127.0.0.1 ::1].each do |host|
+        with_env("LANTERN_ALLOW_HTTP" => nil, "LANTERN_INGEST_URL" => "http://[#{host}]") do |config|
+          config.ingest_url = "http://#{host}" unless host == "::1"
+          expect(config.ingest_url_allowed?).to be(true)
+        end
+      end
+      with_env("LANTERN_ALLOW_HTTP" => nil, "LANTERN_INGEST_URL" => "http://lantern.example") do |config|
+        expect(config.ingest_url_allowed?).to be(false)
+      end
+    end
+
+    it "allows non-loopback HTTP only with the explicit escape hatch" do
+      with_env("LANTERN_ALLOW_HTTP" => "true", "LANTERN_INGEST_URL" => "http://lantern.example") do |config|
+        expect(config.ingest_url_allowed?).to be(true)
       end
     end
   end

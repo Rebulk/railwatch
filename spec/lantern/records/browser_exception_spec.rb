@@ -192,6 +192,14 @@ RSpec.describe "browser exception record", type: :request do
       expect(lantern_records(:exception)).to be_empty
     end
 
+    it "ignores a session that is not an object" do
+      post_beacon(session: [ "not", "an object" ], errors: [ { name: "TypeError", message: "boom" } ])
+
+      expect(response).to have_http_status(:no_content)
+      expect(lantern_records(:session)).to be_empty
+      expect(lantern_records(:exception).sole[:context]).not_to include("not an object")
+    end
+
     it "records an error whose stack is missing or unparseable, with no frames" do
       ex = post_error(stack: nil)
 

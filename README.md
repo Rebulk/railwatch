@@ -10,9 +10,17 @@ database.
 ## Install
 
 ```sh
-bundle add lantern                          # 1. add the gem
+bundle add lantern-observability            # 1. add the public gem
 bin/rails generate lantern:install --prompt-token  # 2. hidden token input plus app wiring
 bin/rails lantern:doctor                    # 3. check every piece is wired up after restart
+```
+
+The distribution name is `lantern-observability`; the Ruby namespace and
+explicit require paths remain `Lantern::*` and `require "lantern"`. For a
+self-hosted deployment or an unreleased revision, use the Git source instead:
+
+```ruby
+gem "lantern-observability", github: "Rebulk/lantern"
 ```
 
 The generator writes `config/initializers/lantern.rb`, mounts the beacon
@@ -53,6 +61,8 @@ prints ready-to-paste MCP client configuration.
 - [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired
   with the `lantern:doctor` line it shows up as.
 - [FAQ](docs/faq.md) — overhead numbers, retention, PII posture, SQLite.
+- [Security](docs/security.md) — transport, capture defaults, the browser
+  beacon, and application responsibilities.
 
 AI coding agents working on an app that uses Lantern: [`llms.txt`](llms.txt)
 and [`AGENTS.md`](AGENTS.md).

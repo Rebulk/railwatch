@@ -590,7 +590,7 @@ is on, for the same reason.
 | Field | Meaning |
 |---|---|
 | `level` | `"debug"`/`"info"`/`"warn"`/`"error"`/`"fatal"`/`"unknown"` for a logger line, `"event"` for a structured event. |
-| `message` | Logger line text (ANSI color codes stripped), or the event name, truncated to 8192 chars. |
+| `message` | Logger line text (ANSI color codes stripped), or the event name, truncated to 8192 chars. Message text is otherwise sent as written; parameter redaction does not parse secrets embedded in a line. |
 | `tags` | Active `Rails.logger.tagged` tags, for a logger line; the event's own tags, for a structured event. |
 | `context` | Serialized `Lantern.context(...)`, for a logger line; the event payload as JSON (truncated to 8192 chars), for a structured event. |
 | `source` | File:line the structured event fired from, when available (structured events only). |

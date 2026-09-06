@@ -13,6 +13,7 @@ win over the env var.
 | `enabled` | `LANTERN_ENABLED` | `true` | Master switch. `Lantern.enabled?` is also `false` whenever `token` is blank, so setting only `LANTERN_TOKEN` is enough to turn Lantern on. |
 | `token` | `LANTERN_TOKEN` | nil | Bearer token for `/ingest`. Required. |
 | `ingest_url` | `LANTERN_INGEST_URL` | `https://lantern.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
+| `allow_http` | `LANTERN_ALLOW_HTTP` | `false` | Permit a non-loopback plain HTTP ingest URL. HTTPS is required by default; `localhost`, `127.0.0.1`, and `::1` remain available for local self-hosted development. |
 | `deploy` | `LANTERN_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `lantern:deploy`. Full 40-character SHAs are shortened to 12 characters. |
 | `detect_deploy` | `LANTERN_DETECT_DEPLOY` | `true` | Detect deploys beyond `LANTERN_DEPLOY` and `KAMAL_VERSION`. Set false when the app deliberately reports no inferred deploy. |
 | `server` | `LANTERN_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
@@ -31,8 +32,9 @@ Deploy detection stops at the first value found: `LANTERN_DEPLOY`,
 never run as a subprocess. An initializer assignment to `config.deploy`
 always wins.
 
-The request middleware also recognizes the reporter's own `POST /ingest`
-when Lantern Cloud monitors itself. It bypasses that request only when the
+The request middleware also recognizes a reporter's own `POST /ingest` when
+the configured ingest endpoint runs in the instrumented application. It
+bypasses that request only when the
 method, bearer token, configured ingest path, and public scheme/host/port all
 match; an unrelated application route named `/ingest` remains observable.
 Rack's normalized forwarded origin is used so this works behind a trusted
@@ -225,7 +227,7 @@ other Lantern-instrumented services shows up as one trace.
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
 | `propagate_traces` | `LANTERN_PROPAGATE_TRACES` | `true` | Send a `traceparent` header on outgoing Net::HTTP and `Lantern::Faraday` requests. |
-| `trace_propagation_hosts` | `LANTERN_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.internal` matches `api.internal`); anything else must match the host exactly. |
+| `trace_propagation_hosts` | `LANTERN_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.services.example.com` matches `api.services.example.com`); anything else must match the host exactly. |
 
 Outgoing: `traceparent: 00-<trace_id>-<execution_id[0,16]>-<flags>`, with
 flags `01` when the execution is sampled and `00` when it isn't — a
@@ -381,7 +383,7 @@ database.
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
 | `timeout` | `LANTERN_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
-| `shutdown_timeout` | `LANTERN_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. This is the number a Kamal `drain_timeout` needs to clear — see `lantern-cloud/config/deploy.yml`'s own comment on this. |
+| `shutdown_timeout` | `LANTERN_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. A deployment drain timeout must be longer than this. |
 
 Delivery (`Lantern::Transport::Http`, `lib/lantern/transport/http.rb`):
 gzip NDJSON POST to `{ingest_url}/ingest`, one retry on a raised error or
@@ -398,6 +400,11 @@ seconds); it does not busy-loop. A 401 marks the transport
 permanently unauthorized (no further HTTP attempts for the process's
 lifetime); it and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
+
+HTTPS connections explicitly use OpenSSL `VERIFY_PEER`, and redirects are not
+followed. Plain HTTP is refused unless the host is loopback or
+`LANTERN_ALLOW_HTTP=true`; `lantern:doctor` reports the policy and boot logs a
+warning when an insecure URL is refused.
 
 On every reporter flush tick, adaptive backpressure doubles a process-local
 sample divisor while either buffer ceiling is at least 80% full or the retry
@@ -541,7 +548,7 @@ and Solid Queue jobs are never interactive.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Include source snippet lines with each exception's backtrace frames. |
+| `capture_exception_source` | `LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Send source snippet lines surrounding each in-application exception frame to Lantern Cloud. This is on by default for crash context; disable it when source disclosure is outside the application's telemetry policy. |
 | `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
 | `capture_job_arguments` | `LANTERN_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
@@ -578,6 +585,10 @@ Only `Rails.logger` lines at or above this level become `log` records.
 Rails' own per-request/job noise (`"Started GET"`, `"Processing by"`,
 `"Rendered"`, etc.) is filtered regardless of level, since the
 `request`/`job_attempt` records already carry that information.
+Message text is otherwise shipped as written and is not parsed for embedded
+secrets. Keep secrets out of logs, use `Lantern.redact_logs` for an
+application-specific scrub, or disable log records with
+`LANTERN_IGNORE_LOGS=true`.
 
 ## User resolution
 

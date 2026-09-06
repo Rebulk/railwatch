@@ -212,8 +212,7 @@ working *in a Rails app that uses Lantern*:
 - [`../llms.txt`](../llms.txt) — the [llmstxt.org](https://llmstxt.org)
   index: one paragraph on what Lantern is, then every document with a
   one-line description.
-- [`../AGENTS.md`](../AGENTS.md) (duplicated as
-  [`../CLAUDE.md`](../CLAUDE.md)) — how to install it, the facade methods,
+- [`../AGENTS.md`](../AGENTS.md) — how to install it, the facade methods,
   the spec matchers, `lantern:doctor`, and this MCP hookup, in under 120
   lines.
 

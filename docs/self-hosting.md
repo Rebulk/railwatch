@@ -9,7 +9,7 @@ same.
 ```ruby
 # config/initializers/lantern.rb
 Lantern.configure do |c|
-  c.ingest_url = "https://lantern.internal"   # LANTERN_INGEST_URL
+  c.ingest_url = "https://telemetry.example.com"   # LANTERN_INGEST_URL
   c.token      = ENV["LANTERN_TOKEN"]
 end
 ```
@@ -20,7 +20,7 @@ records, ping, deploys — hangs off that host. Pass `--url=` to the
 installer to have it written for you:
 
 ```sh
-bin/rails generate lantern:install --url=https://lantern.internal
+bin/rails generate lantern:install --url=https://telemetry.example.com
 ```
 
 ## Getting a token
@@ -48,13 +48,13 @@ so it works as a post-deploy smoke test.
 ## MCP
 
 Your install serves its own MCP endpoint at `<ingest host>/mcp` —
-`https://lantern.internal/mcp` for the example above. It authenticates
+`https://telemetry.example.com/mcp` for the example above. It authenticates
 with a per-user API token generated from Settings → Profile, the same
 token the public JSON API at `/api/v1` uses. See
 [`ai-and-mcp.md`](ai-and-mcp.md) for every client's configuration block.
 
 ## Running the platform
 
-Deploying it, Litestream replication, nightly snapshots and the restore
-drill, retention, and quotas are documented in the platform repo:
-[`lantern-cloud/docs/operations.md`](../../lantern-cloud/docs/operations.md).
+Lantern Cloud's backend is not part of this gem repository. Licensed
+self-hosted customers receive separate platform deployment, backup, retention,
+quota, and restore documentation from Rebulk.

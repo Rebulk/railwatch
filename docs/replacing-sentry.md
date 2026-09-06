@@ -30,8 +30,8 @@ capabilities are not implied by Rails/Nightwatch parity.
 | Ruby profiling | Conditional | Requires `vernier` or `stackprof`; there is no profiler bundled into the SDK. |
 | Browser monitoring | Partial | The optional Inertia client reports visits, Web Vitals, browser errors, and breadcrumbs. Session Replay, native/mobile SDKs, and Sentry's full browser/source-map workflow are outside the currently released Rails-server replacement. |
 | Runtime compatibility | Narrow today | The currently proved pair is Ruby 3.4 + Rails 8.1. A maintained compatibility matrix and any safe lowering of requirements are tracked by [#26](https://github.com/Rebulk/lantern/issues/26). |
-| Managed integrations and operations | Partial | Lantern Cloud supports its documented email/Slack/webhook paths and self-hosting. It does not promise Sentry's integration catalog; Linear completion is [Cloud #40](https://github.com/Rebulk/lantern-cloud/issues/40) and a versioned webhook contract is [Cloud #42](https://github.com/Rebulk/lantern-cloud/issues/42). |
-| SQL value privacy | Conditional | The current release records raw SQL text, including literals, by default. Use parameterized queries plus `Lantern.redact_queries` until private-by-default SQL capture in [#28](https://github.com/Rebulk/lantern/issues/28) ships. Query plans can also contain values; keep `capture_query_explain` off unless that output is acceptable. |
+| Managed integrations and operations | Partial | Lantern Cloud supports its documented email, Slack, and webhook paths plus self-hosting. It does not promise Sentry's broader integration catalog. |
+| SQL value privacy | Supported by default | Query records carry normalized SQL shapes without literal values, and Active Record binds are never sent. Raw SQL and query plans are separate opt-ins; either can contain values. |
 
 For a Rails 8.1 application whose work enters through Rack and Active Job,
 and which does not require Replay, native/mobile monitoring, or Sentry's

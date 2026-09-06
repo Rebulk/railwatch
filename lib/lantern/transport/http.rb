@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "net/http"
+require "openssl"
 require "zlib"
 require "json"
 
@@ -42,6 +43,9 @@ module Lantern
       end
 
       def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
+        unless @config.ingest_url_allowed?
+          return Result.new(ok: false, error: "plain HTTP ingest is disabled; use HTTPS or set LANTERN_ALLOW_HTTP=true")
+        end
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 
         body, sent, over_cap, over_cap_bytes = encode(records)
@@ -70,6 +74,8 @@ module Lantern
       end
 
       def ping
+        return false unless @config.ingest_url_allowed?
+
         response = request(Net::HTTP::Get.new(URI.join(@config.ingest_url, "/ingest/ping")))
         response.is_a?(Net::HTTPSuccess)
       rescue StandardError
@@ -125,11 +131,16 @@ module Lantern
       def request(req)
         req["Authorization"] = "Bearer #{@config.token}"
         req["User-Agent"] = "lantern-ruby/#{Lantern::VERSION}"
-        Net::HTTP.start(@uri.host, @uri.port,
-                        use_ssl: @uri.scheme == "https",
-                        open_timeout: @config.connect_timeout,
-                        read_timeout: @config.timeout,
-                        write_timeout: @config.timeout) do |http|
+        options = {
+          use_ssl: @uri.scheme == "https",
+          open_timeout: @config.connect_timeout,
+          read_timeout: @config.timeout,
+          write_timeout: @config.timeout
+        }
+        # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
+        # explicitly so a Ruby default change cannot silently weaken ingest.
+        options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
+        Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
           http.request(req)
         end
       end
