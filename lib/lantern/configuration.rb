@@ -63,6 +63,7 @@ module Lantern
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
+                  :backpressure,
                   :flush_interval, :flush_threshold,
                   :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
@@ -75,12 +76,12 @@ module Lantern
                   :capture_sql_values,
                   :ignored_exceptions, :capture_rescued_exceptions,
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
-                  :capture_job_arguments, :capture_response_body_on_error, :max_attachment_bytes,
+                  :capture_job_arguments, :capture_job_retry_errors, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths, :ignored_request_paths
 
     attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
-                :fingerprint_resolver, :redactors, :rejectors, :before_ingest
+                :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
 
     def initialize
       @enabled = env_bool("LANTERN_ENABLED", true)
@@ -122,6 +123,8 @@ module Lantern
       @buffer_bytes = env_int("LANTERN_BUFFER_BYTES", 16 * 1024 * 1024)
       @execution_buffer_bytes = env_int("LANTERN_EXECUTION_BUFFER_BYTES", 8 * 1024 * 1024)
       @batch_bytes = env_int("LANTERN_BATCH_BYTES", 8 * 1024 * 1024)
+      @backpressure = env_bool("LANTERN_BACKPRESSURE", true)
+      self.backpressure_high_water = env_float("LANTERN_BACKPRESSURE_HIGH_WATER", 0.8)
       @flush_interval = env_float("LANTERN_FLUSH_INTERVAL", 2.0)
       @flush_threshold = env_int("LANTERN_FLUSH_THRESHOLD", 500)
       @connect_timeout = env_float("LANTERN_CONNECT_TIMEOUT", 1.0)
@@ -169,6 +172,7 @@ module Lantern
       @profile_interval_us = env_int("LANTERN_PROFILE_INTERVAL_US", 1_000)
       @profiler = ENV["LANTERN_PROFILER"]&.to_sym
       @capture_job_arguments = env_bool("LANTERN_CAPTURE_JOB_ARGUMENTS", false)
+      @capture_job_retry_errors = env_bool("LANTERN_CAPTURE_JOB_RETRY_ERRORS", false)
       @capture_response_body_on_error = env_bool("LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR", false)
       @max_attachment_bytes = env_int("LANTERN_MAX_ATTACHMENT_BYTES", 1_048_576)
       # Release health: one `session` record per browser tab (the beacon
@@ -248,6 +252,15 @@ module Lantern
 
     def sample_rate(kind)
       @sample.fetch(kind, 1.0).to_f.clamp(0.0, 1.0)
+    end
+
+    def backpressure_high_water=(value)
+      fraction = Float(value, exception: false)
+      @backpressure_high_water = if fraction&.finite? && fraction.positive? && fraction <= 1.0
+        fraction
+      else
+        0.8
+      end
     end
 
     def environment_name

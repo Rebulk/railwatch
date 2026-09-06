@@ -103,6 +103,9 @@ where every option from `Sentry.init` lands. The mapping:
   user is. There is no "send everything" switch.
 - **`config.rails.report_rescued_exceptions`** becomes
   `c.capture_rescued_exceptions`, on by default.
+- **`config.rails.active_job_report_on_retry_error`** becomes
+  `c.capture_job_retry_errors`, off by default because retries are usually
+  expected and capturing them can flood the issues list.
 - **`before_send:`** becomes `Lantern.before_ingest` plus the
   `redact_*` / `reject_*` hooks — see step 8.
 - **Rack `X-Request-Start` queue time** needs no setting: it is parsed
@@ -131,6 +134,9 @@ Lantern.configure do |c|
 
   # was include_local_variables: true
   c.capture_exception_locals = true
+
+  # was config.rails.active_job_report_on_retry_error: true
+  c.capture_job_retry_errors = true
 
   # was send_default_pii: false, unpacked
   c.capture_request_payload = false

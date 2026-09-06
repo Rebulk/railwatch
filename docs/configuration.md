@@ -375,6 +375,8 @@ database.
 | `buffer_bytes` | `LANTERN_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
 | `execution_buffer_bytes` | `LANTERN_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
 | `batch_bytes` | `LANTERN_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
+| `backpressure` | `LANTERN_BACKPRESSURE` | `true` | Adapt every execution kind's effective sample rate when the reporter buffer reaches its high-water mark or ingest is in retry backoff. |
+| `backpressure_high_water` | `LANTERN_BACKPRESSURE_HIGH_WATER` | `0.8` | Fraction of either `buffer_size` or `buffer_bytes` that signals pressure. Values must be greater than `0.0` and at most `1.0`; invalid values use the default. |
 | `flush_interval` | `LANTERN_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
 | `flush_threshold` | `LANTERN_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `LANTERN_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
@@ -396,6 +398,17 @@ seconds); it does not busy-loop. A 401 marks the transport
 permanently unauthorized (no further HTTP attempts for the process's
 lifetime); it and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
+
+On every reporter flush tick, adaptive backpressure doubles a process-local
+sample divisor while either buffer ceiling is at least 80% full or the retry
+ladder is active, up to 8x. Clear ticks halve it back toward 1x. Eight is
+enough to create room after three pressured ticks and recovers in three clear
+ticks; a 16x ceiling would preserve less telemetry and take longer to recover.
+The sampler reads the reporter's Float without locking the request path; the
+reporter is its only writer, an ivar assignment is atomic, and one stale read
+only affects one probabilistic decision. Set `backpressure` false to keep the
+factor at 1. The current value is sent as
+`X-Lantern-Backpressure-Factor` whenever it is greater than 1.
 
 `Lantern.flush` forces an immediate flush (also called by the `command`
 patches after a rake task/runner invocation finishes, so short-lived
@@ -532,6 +545,7 @@ and Solid Queue jobs are never interactive.
 | `capture_exception_locals` | `LANTERN_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `LANTERN_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
 | `capture_job_arguments` | `LANTERN_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
+| `capture_job_retry_errors` | `LANTERN_CAPTURE_JOB_RETRY_ERRORS` | `false` | Capture the exception that caused an Active Job `retry_on` retry as handled, warning-level exception telemetry. Off by default because retries are usually expected and capturing them can flood the issues list. The retry log line is recorded either way. |
 | `capture_response_body_on_error` | `LANTERN_CAPTURE_RESPONSE_BODY_ON_ERROR` | `false` | Add the first 4 KiB of the response body to an `outgoing_request` record when the response was an error (status ≥ 400, or the call raised). A JSON object body is filtered like request params and re-serialized; anything else is stored as it arrived. Off by default — a third party's error body is arbitrary data you didn't write. |
 | `ignored_exceptions` | `LANTERN_IGNORED_EXCEPTIONS` (comma-separated) | `Configuration::DEFAULT_IGNORED_EXCEPTIONS` | Class names never captured, handled or not. The default list is Sentry's Rails-relevant exclusions plus `SignalException` (a SIGTERM/SIGINT ending a process is a shutdown, not an error; rake and runner also close their command record with exit code 128+signal instead of reporting). Matched against the error's class *and every named ancestor*, so your own subclass of a listed error is ignored too. Setting the env var replaces the default list; append instead with `c.ignored_exceptions += ["MyApp::Expected"]`. |
 | `capture_rescued_exceptions` | `LANTERN_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |

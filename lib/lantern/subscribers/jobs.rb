@@ -110,6 +110,11 @@ module Lantern
           # never escaped perform_now, so this is the only signal we get.
           p[:job]&.instance_variable_set(:@__lantern_released, true)
           next unless recording?
+          if Lantern.config.capture_job_retry_errors && p[:error]
+            Exceptions.capture(p[:error], handled: true, severity: :warning,
+                                context: { attempt: p[:job]&.executions, wait: p[:wait] },
+                                source: "application.active_job.enqueue_retry")
+          end
           Lantern.record(:log, level: "warn", message: "Retrying #{p[:job].class.name} in #{p[:wait]}s: #{p[:error]&.class}",
                          tags: [ "active_job", "retry" ], context: "{}")
         end

@@ -8,7 +8,7 @@ module Lantern
     module_function
 
     def decide(kind)
-      rate = Lantern.config.sample_rate(kind)
+      rate = Lantern.config.sample_rate(kind) / Lantern.reporter.backpressure_factor
       return true if rate >= 1.0
       return false if rate <= 0.0
       Random.rand < rate

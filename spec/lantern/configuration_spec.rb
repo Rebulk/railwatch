@@ -22,10 +22,13 @@ RSpec.describe Lantern::Configuration do
       "LANTERN_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
       "LANTERN_CAPTURE_REQUEST_PAYLOAD" => [ :capture_request_payload, "1", true, false ],
       "LANTERN_CAPTURE_EXCEPTION_SOURCE_CODE" => [ :capture_exception_source, "0", false, true ],
+      "LANTERN_CAPTURE_JOB_RETRY_ERRORS" => [ :capture_job_retry_errors, "1", true, false ],
       "LANTERN_BUFFER_SIZE" => [ :buffer_size, "9999", 9_999, 10_000 ],
       "LANTERN_BUFFER_BYTES" => [ :buffer_bytes, "999999", 999_999, 16 * 1024 * 1024 ],
       "LANTERN_EXECUTION_BUFFER_BYTES" => [ :execution_buffer_bytes, "777777", 777_777, 8 * 1024 * 1024 ],
       "LANTERN_BATCH_BYTES" => [ :batch_bytes, "555555", 555_555, 8 * 1024 * 1024 ],
+      "LANTERN_BACKPRESSURE" => [ :backpressure, "0", false, true ],
+      "LANTERN_BACKPRESSURE_HIGH_WATER" => [ :backpressure_high_water, "0.6", 0.6, 0.8 ],
       "LANTERN_FLUSH_INTERVAL" => [ :flush_interval, "7.5", 7.5, 2.0 ],
       "LANTERN_FLUSH_THRESHOLD" => [ :flush_threshold, "50", 50, 500 ],
       "LANTERN_CONNECT_TIMEOUT" => [ :connect_timeout, "0.5", 0.5, 1.0 ],
@@ -52,10 +55,24 @@ RSpec.describe Lantern::Configuration do
 
     it "keeps the documented default when a numeric variable is not a number, instead of silently zeroing it" do
       with_env("LANTERN_BUFFER_SIZE" => "12px", "LANTERN_FLUSH_INTERVAL" => "never",
+               "LANTERN_BACKPRESSURE_HIGH_WATER" => "most",
                "LANTERN_REQUEST_SAMPLE_RATE" => "half") do |config|
         expect(config.buffer_size).to eq(10_000)
         expect(config.flush_interval).to eq(2.0)
+        expect(config.backpressure_high_water).to eq(0.8)
         expect(config.sample[:requests]).to eq(1.0)
+      end
+    end
+
+    it "keeps the default when the backpressure high-water fraction is outside 0.0..1.0" do
+      with_env("LANTERN_BACKPRESSURE_HIGH_WATER" => "2") do |config|
+        expect(config.backpressure_high_water).to eq(0.8)
+      end
+      with_env("LANTERN_BACKPRESSURE_HIGH_WATER" => "-1") do |config|
+        expect(config.backpressure_high_water).to eq(0.8)
+      end
+      with_env("LANTERN_BACKPRESSURE_HIGH_WATER" => "NaN") do |config|
+        expect(config.backpressure_high_water).to eq(0.8)
       end
     end
 
