@@ -41,8 +41,9 @@ entry points before removing Sentry.
 
 Exception delivery has the same process boundary as the rest of Lantern's
 reporter. `Lantern.record_now` skips the execution buffer, enqueues the
-record, and wakes the reporter immediately; it does not synchronously POST
-on the application thread. The reporter retries during graceful shutdown,
+record, and asks the reporter for an urgent flush (within a quarter of a
+second, so an exception storm ships as full batches rather than one POST
+per request); it does not synchronously POST on the application thread. The reporter retries during graceful shutdown,
 but its buffer is memory-only. A hard kill, OOM, or exit after the shutdown
 deadline can lose records. See [Buffering, flushing, and
 transport](configuration.md#buffering-flushing-transport).

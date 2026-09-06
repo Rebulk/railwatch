@@ -601,6 +601,71 @@ RSpec.describe Lantern::Reporter do
       reporter&.shutdown
     end
 
+    it "coalesces a burst of urgent writes into one delivery inside the urgent window" do
+      # Every unhandled exception asks for an immediate flush. During an
+      # exception storm that used to mean one POST per request, each
+      # carrying the handful of records written since the last; the burst
+      # must instead go out as full batches once the window closes.
+      deliveries = Queue.new
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        deliveries << records.size
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      config = reporter_config
+      config.buffer_size = 100
+      config.flush_threshold = 100
+      reporter = described_class.new(config, transport: transport)
+
+      20.times { |i| reporter.write_now({ t: "exception", n: i }) }
+      first = Timeout.timeout(2) { deliveries.pop }
+
+      expect(first).to eq(20)
+      expect(deliveries).to be_empty
+    ensure
+      reporter&.shutdown
+    end
+
+    it "still ships a lone urgent write within the urgent window, not the flush interval" do
+      delivered_at = Queue.new
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        delivered_at << Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      config = reporter_config
+      config.flush_interval = 10
+      reporter = described_class.new(config, transport: transport)
+
+      written_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      reporter.write_now({ t: "exception" })
+      elapsed = Timeout.timeout(2) { delivered_at.pop } - written_at
+
+      expect(elapsed).to be_between(described_class::URGENT_FLUSH_DELAY * 0.5, 1.0)
+    ensure
+      reporter&.shutdown
+    end
+
+    it "flushes an urgent write at once when it fills the buffer to flush_threshold" do
+      delivered_at = Queue.new
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        delivered_at << Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        Lantern::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      config = reporter_config
+      config.flush_threshold = 1
+      reporter = described_class.new(config, transport: transport)
+
+      written_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      reporter.write_now({ t: "exception" })
+      elapsed = Timeout.timeout(2) { delivered_at.pop } - written_at
+
+      expect(elapsed).to be < described_class::URGENT_FLUSH_DELAY
+    ensure
+      reporter&.shutdown
+    end
+
     it "preserves a producer wakeup that arrives while delivery is in flight" do
       batches = Queue.new
       reporter = nil
@@ -770,6 +835,7 @@ RSpec.describe Lantern::Reporter do
       transport.instance_variable_set(:@unauthorized, true)
       reporter = described_class.new(Lantern.config, transport: transport)
       reporter.instance_variable_set(:@flush_requested, true)
+      reporter.instance_variable_set(:@urgent_at, 99.0)
       reporter.instance_variable_set(:@retry_attempt, 3)
       reporter.instance_variable_set(:@retry_at, 123.0)
       reporter.instance_variable_set(:@retry_batch, Object.new)
@@ -786,6 +852,7 @@ RSpec.describe Lantern::Reporter do
         writer.puts(JSON.generate(
           unauthorized: child_transport.unauthorized?,
           flush_requested: Lantern.reporter.instance_variable_get(:@flush_requested),
+          urgent_at: Lantern.reporter.instance_variable_get(:@urgent_at),
           retry_attempt: Lantern.reporter.instance_variable_get(:@retry_attempt),
           retry_at: Lantern.reporter.instance_variable_get(:@retry_at),
           retry_batch: Lantern.reporter.instance_variable_get(:@retry_batch),
@@ -805,6 +872,7 @@ RSpec.describe Lantern::Reporter do
       expect(child_state).to eq(
         "unauthorized" => false,
         "flush_requested" => false,
+        "urgent_at" => nil,
         "retry_attempt" => 0,
         "retry_at" => nil,
         "retry_batch" => nil,
