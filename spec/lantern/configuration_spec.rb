@@ -78,11 +78,15 @@ RSpec.describe Lantern::Configuration do
       end
     end
 
-    it "maps LANTERN_DEPLOY, falling back to KAMAL_VERSION then GIT_REV then nil" do
+    it "maps LANTERN_DEPLOY, falling back to KAMAL_VERSION then GIT_REV, then whatever the platform or checkout exposes" do
       with_env("LANTERN_DEPLOY" => "v1", "KAMAL_VERSION" => "kamal-v", "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("v1") }
       with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => "kamal-v", "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("kamal-v") }
       with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => nil, "GIT_REV" => "git-v") { |c| expect(c.deploy).to eq("git-v") }
-      with_env("LANTERN_DEPLOY" => nil, "KAMAL_VERSION" => nil, "GIT_REV" => nil) { |c| expect(c.deploy).to be_nil }
+      # With every env source cleared the value is whatever the checkout
+      # itself exposes (a CI runner sets GITHUB_SHA; a plain clone has
+      # .git/HEAD), so only the source is asserted, not the value.
+      cleared = Lantern::ReleaseDetector::ENV_KEYS.to_h { |key| [ key, nil ] }
+      with_env(cleared) { |c| expect([ nil, "git", "REVISION" ]).to include(c.deploy_source) }
     end
 
     it "uses only explicit and Kamal releases when deploy detection is disabled" do
