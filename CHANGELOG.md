@@ -2,6 +2,23 @@
 
 ## 0.1.0 (unreleased)
 
+- The browser client reports a dropped Inertia request (`networkError` on
+  Inertia 3, `exception` on 2) only while the user is waiting on a visit,
+  meaning one that shows Inertia's progress bar. A visit the page started by
+  itself — a poll, a refresh when the tab comes back, `router.reload`, a
+  prefetch on hover — runs without it, and when one drops its connection
+  nothing the user did has failed: the page keeps what it has and the next
+  tick refreshes it. A laptop waking on a new network used to open an issue
+  that way, and regress it every morning. The visit still lands in timing
+  data with `status: "cancelled"`. A click or a form submit is reported as
+  before, including a click Inertia serves from a prefetch already in
+  flight (which never gets a `start` of its own), and so is the load of a
+  page's deferred props, which the user watches as a skeleton; an app that
+  wants a particular background refresh reported passes `showProgress:
+  true`. Inertia re-rejects a failed request's error after firing the
+  event, and the client now drops that unhandled-rejection copy by identity
+  rather than relying on the reported record to dedupe it.
+
 - Boot with the gem enabled is now within noise of boot without it; it was
   about 300 ms and 10 MB slower.
   The `process` record read its adapter names through `ActiveRecord::Base`
