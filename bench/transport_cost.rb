@@ -27,7 +27,7 @@ puts "captured #{captured.size} records from #{requests} requests (#{(captured.s
 mix = captured.group_by { |r| r[:t] }.transform_values(&:size).sort_by { |_, n| -n }
 puts "mix: " + mix.map { |t, n| "#{t}=#{n}" }.join(" ")
 
-transport = Nightrail::Transport::Http.new(Nightrail.config)
+transport = Railwatch::Transport::Http.new(Railwatch.config)
 # encode returns [body, records written, records over batch_bytes, bytes over].
 encode = ->(records) { transport.send(:encode, records).first }
 raw = captured.sum { |r| JSON.generate(r).bytesize + 1 }
@@ -73,7 +73,7 @@ copies = captured.map { |r| r.transform_values(&:dup) }
 GC.start
 per_rec = (ObjectSpace.memsize_of_all - before) / copies.size.to_f
 puts format("\nheap per buffered record: ~%.0f bytes => a full buffer of %d records holds ~%.1f MB",
-            per_rec, Nightrail.config.buffer_size, per_rec * Nightrail.config.buffer_size / 1_048_576)
+            per_rec, Railwatch.config.buffer_size, per_rec * Railwatch.config.buffer_size / 1_048_576)
 
 work = -> { i = 0; s = +""; 200_000.times { i += 1; s << "x" if i % 1000 == 0 }; i }
 def wall = Process.clock_gettime(Process::CLOCK_MONOTONIC, :float_millisecond)

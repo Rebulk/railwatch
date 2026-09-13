@@ -5,10 +5,10 @@ require "fileutils"
 require "open3"
 require "rubygems/package"
 require "tmpdir"
-require_relative "../nightrail_specification"
+require_relative "../railwatch_specification"
 
 ROOT = File.expand_path("..", __dir__)
-PUBLIC_NAME = Nightrail::Packaging::PUBLIC_NAME
+PUBLIC_NAME = Railwatch::Packaging::PUBLIC_NAME
 
 def run!(*command, chdir:, env: {}, print_output: true)
   stdout, stderr, status = Open3.capture3(env, *command, chdir: chdir)
@@ -31,22 +31,22 @@ def without_bundler
   environment.merge("RUBYOPT" => nil, "RUBYLIB" => nil)
 end
 
-tmp = Dir.mktmpdir("nightrail-package-")
+tmp = Dir.mktmpdir("railwatch-package-")
 begin
-  version = Nightrail::VERSION
+  version = Railwatch::VERSION
   gem_file = File.join(tmp, "#{PUBLIC_NAME}-#{version}.gem")
 
-  run!("gem", "build", "nightrail.gemspec", "--strict", "--output", gem_file, chdir: ROOT)
+  run!("gem", "build", "railwatch.gemspec", "--strict", "--output", gem_file, chdir: ROOT)
 
   package_spec = Gem::Package.new(gem_file).spec
   assert!(package_spec.name == PUBLIC_NAME, "public gem name is #{package_spec.name.inspect}")
-  assert!(package_spec.version.to_s == version, "package version does not match Nightrail::VERSION")
+  assert!(package_spec.version.to_s == version, "package version does not match Railwatch::VERSION")
   assert!(package_spec.authors == [ "Cole Robertson" ], "package author changed")
   assert!(package_spec.licenses == [ "MIT" ], "package must use the MIT license")
-  assert!(package_spec.homepage == "https://nightrail.rebulk.com", "package homepage changed")
+  assert!(package_spec.homepage == "https://railwatch.rebulk.com", "package homepage changed")
   assert!(package_spec.required_ruby_version == Gem::Requirement.new(">= 3.4"), "supported Ruby constraint changed")
   assert!(package_spec.metadata["rubygems_mfa_required"] == "true", "RubyGems MFA must be required")
-  expected_source = "https://github.com/Rebulk/nightrail"
+  expected_source = "https://github.com/Rebulk/railwatch"
   assert!(package_spec.metadata["source_code_uri"] == expected_source, "source metadata changed")
 
   runtime_dependencies = package_spec.runtime_dependencies.to_h do |dependency|
@@ -63,14 +63,14 @@ begin
     CHANGELOG.md
     MIT-LICENSE
     README.md
-    app/controllers/nightrail/beacon_controller.rb
+    app/controllers/railwatch/beacon_controller.rb
     config/routes.rb
     docs/getting-started.md
     docs/security.md
-    lib/generators/nightrail/install/install_generator.rb
-    lib/generators/nightrail/install/templates/initializer.rb
-    lib/nightrail.rb
-    lib/nightrail/version.rb
+    lib/generators/railwatch/install/install_generator.rb
+    lib/generators/railwatch/install/templates/initializer.rb
+    lib/railwatch.rb
+    lib/railwatch/version.rb
     llms.txt
   ]
   missing = expected_files - package_spec.files
@@ -90,16 +90,16 @@ begin
   boot = <<~'RUBY'
     require "rubygems"
     gem ENV.fetch("PACKAGE_NAME"), ENV.fetch("PACKAGE_VERSION")
-    require "nightrail"
+    require "railwatch"
 
     spec = Gem.loaded_specs.fetch(ENV.fetch("PACKAGE_NAME"))
     unless File.realpath(spec.full_gem_path) == File.realpath(ENV.fetch("INSTALLED_ROOT"))
       abort "wrong installed gem activated: #{spec.full_gem_path}"
     end
-    abort "Nightrail::VERSION did not boot" unless Nightrail::VERSION == ENV.fetch("PACKAGE_VERSION")
+    abort "Railwatch::VERSION did not boot" unless Railwatch::VERSION == ENV.fetch("PACKAGE_VERSION")
     source_root = File.expand_path(ENV.fetch("SOURCE_ROOT"))
-    leaked = $LOADED_FEATURES.any? { |path| File.expand_path(path).start_with?("#{source_root}/lib/nightrail") }
-    abort "source checkout supplied Nightrail features" if leaked
+    leaked = $LOADED_FEATURES.any? { |path| File.expand_path(path).start_with?("#{source_root}/lib/railwatch") }
+    abort "source checkout supplied Railwatch features" if leaked
   RUBY
   smoke_env = without_bundler.merge(
     "GEM_HOME" => gem_home,

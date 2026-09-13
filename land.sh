@@ -23,7 +23,7 @@ PY
 done
 git push -q --force-with-lease origin "land-$pr:$br" || { echo "#$pr push failed"; exit 1; }
 sleep 15
-for i in $(seq 1 40); do out=$(gh pr checks "$pr" -R Rebulk/nightrail 2>/dev/null | grep -v CodeRabbit); [ -n "$out" ] && ! echo "$out" | grep -qE "pending|queued" && break; sleep 15; done
+for i in $(seq 1 40); do out=$(gh pr checks "$pr" -R Rebulk/railwatch 2>/dev/null | grep -v CodeRabbit); [ -n "$out" ] && ! echo "$out" | grep -qE "pending|queued" && break; sleep 15; done
 if echo "$out" | grep -v overhead | grep -qiE "fail|error"; then echo "#$pr CI RED:"; echo "$out"; exit 1; fi
 echo "$out" | grep -q overhead && echo "$out" | grep overhead | grep -qi fail && echo "#$pr overhead gate failed (flaky; allocations checked by fixer) - proceeding"
-gh pr merge "$pr" -R Rebulk/nightrail --squash $( [ -z "${KEEP_BRANCH:-}" ] && echo --delete-branch ) >/dev/null 2>&1 && echo "#$pr MERGED" || { echo "#$pr merge failed"; exit 1; }
+gh pr merge "$pr" -R Rebulk/railwatch --squash $( [ -z "${KEEP_BRANCH:-}" ] && echo --delete-branch ) >/dev/null 2>&1 && echo "#$pr MERGED" || { echo "#$pr merge failed"; exit 1; }

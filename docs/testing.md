@@ -1,6 +1,6 @@
-# Testing with Nightrail
+# Testing with Railwatch
 
-Nightrail already watches every query, N+1, span, exception, and outgoing
+Railwatch already watches every query, N+1, span, exception, and outgoing
 request your app makes. The same instrumentation works in your test suite,
 which means a spec can assert on them — and CI can fail a pull request that
 adds an N+1 or doubles a page's query count.
@@ -12,28 +12,28 @@ for you):
 
 ```ruby
 require "rspec/rails"
-require "nightrail/rspec"
+require "railwatch/rspec"
 ```
 
-That requires `nightrail/spec_helper`, includes `Nightrail::SpecHelper` into every
+That requires `railwatch/spec_helper`, includes `Railwatch::SpecHelper` into every
 example group, and defines the matchers below.
 
 Minitest — the same thing in `test/test_helper.rb`:
 
 ```ruby
 require "rails/test_help"
-require "nightrail/minitest"
+require "railwatch/minitest"
 
 class ActiveSupport::TestCase
-  include Nightrail::Minitest
+  include Railwatch::Minitest
 end
 ```
 
-Nightrail must be *enabled* in the test environment or every block would look
+Railwatch must be *enabled* in the test environment or every block would look
 empty. `config.enabled?` is true when `config.enabled` is set and a token is
-present, so set any non-blank `NIGHTRAIL_TOKEN` for the test env — records go to
-an in-memory transport, never over the network. If Nightrail is disabled, the
-matchers raise `Nightrail::SpecHelper::Disabled` rather than quietly passing.
+present, so set any non-blank `RAILWATCH_TOKEN` for the test env — records go to
+an in-memory transport, never over the network. If Railwatch is disabled, the
+matchers raise `Railwatch::SpecHelper::Disabled` rather than quietly passing.
 
 Sampling is forced on for the block, so a fractional `c.sample` in the app's
 test config can't turn an assertion into one that never fires either.
@@ -42,12 +42,12 @@ test config can't turn an assertion into one that never fires either.
 
 All of them are block matchers.
 
-### `have_nightrail_queries`
+### `have_railwatch_queries`
 
 ```ruby
-expect { OrderSummary.new(order).to_h }.to have_nightrail_queries(at_most: 5)
-expect { user.reload }.to have_nightrail_queries(exactly: 1)
-expect { Report.generate }.to have_nightrail_queries(at_least: 1)
+expect { OrderSummary.new(order).to_h }.to have_railwatch_queries(at_most: 5)
+expect { user.reload }.to have_railwatch_queries(exactly: 1)
+expect { Report.generate }.to have_railwatch_queries(at_least: 1)
 ```
 
 Exactly one of `at_most:`, `exactly:`, `at_least:` — passing two (or none)
@@ -63,54 +63,54 @@ expected the block to run at most 1 database queries, but it ran 3:
 
 Cached queries don't count — they never become `query` records.
 
-### `have_nightrail_n_plus_one`
+### `have_railwatch_n_plus_one`
 
 ```ruby
-expect { get "/widgets" }.not_to have_nightrail_n_plus_one
+expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 ```
 
-Matches when the block trips Nightrail's own N+1 detector: the same normalized
+Matches when the block trips Railwatch's own N+1 detector: the same normalized
 query shape repeated `config.n_plus_one_threshold` times (default 5) inside one
 execution. The negated failure message names the shape, the repeat count, and
 the app-code line that issued it.
 
-### `record_nightrail_span`
+### `record_railwatch_span`
 
 ```ruby
-expect { Checkout.new(cart).total }.to record_nightrail_span("checkout.total")
-expect { Checkout.new(cart).total }.to record_nightrail_span(nil) # any span
+expect { Checkout.new(cart).total }.to record_railwatch_span("checkout.total")
+expect { Checkout.new(cart).total }.to record_railwatch_span(nil) # any span
 ```
 
-### `record_nightrail_exception` / `record_nightrail_exceptions`
+### `record_railwatch_exception` / `record_railwatch_exceptions`
 
 ```ruby
-expect { importer.run }.to record_nightrail_exception(ArgumentError)
-expect { importer.run }.not_to record_nightrail_exceptions
+expect { importer.run }.to record_railwatch_exception(ArgumentError)
+expect { importer.run }.not_to record_railwatch_exceptions
 ```
 
 These see anything that reaches `Rails.error` — `Rails.error.handle`,
-`Rails.error.report`, `Nightrail.report`, and unhandled exceptions a request
+`Rails.error.report`, `Railwatch.report`, and unhandled exceptions a request
 spec's middleware catches. A block that raises out of the matcher still
 raises; nothing is swallowed.
 
-### `have_nightrail_outgoing_requests`
+### `have_railwatch_outgoing_requests`
 
 ```ruby
-expect { SyncCustomers.run }.to have_nightrail_outgoing_requests(at_most: 1)
+expect { SyncCustomers.run }.to have_railwatch_outgoing_requests(at_most: 1)
 ```
 
-Same bounds as `have_nightrail_queries`. Failures list the method and URL of
+Same bounds as `have_railwatch_queries`. Failures list the method and URL of
 every request the block made.
 
 ## Minitest assertions
 
 ```ruby
-assert_nightrail_queries(at_most: 5) { OrderSummary.new(order).to_h }
-refute_nightrail_n_plus_one { get widgets_url }
-assert_nightrail_span("checkout.total") { Checkout.new(cart).total }
+assert_railwatch_queries(at_most: 5) { OrderSummary.new(order).to_h }
+refute_railwatch_n_plus_one { get widgets_url }
+assert_railwatch_span("checkout.total") { Checkout.new(cart).total }
 ```
 
-`assert_nightrail_queries` takes `exactly:`/`at_most:`/`at_least:` too, and
+`assert_railwatch_queries` takes `exactly:`/`at_most:`/`at_least:` too, and
 produces the same statement listing on failure.
 
 ## Where the matchers work
@@ -120,7 +120,7 @@ execution, so its whole tree — queries, N+1s, outgoing HTTP — is visible by
 the time the block returns:
 
 ```ruby
-expect { get "/widgets" }.to have_nightrail_queries(at_most: 6)
+expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
 ```
 
 A model or service spec has nothing executing, so the block is wrapped in an
@@ -128,15 +128,15 @@ execution for the duration of the assertion and closed afterwards. No parent
 `command` record is written for it. A block running *inside* an execution you
 opened yourself has its records read straight off that execution's buffer.
 
-Under the hood every matcher calls `Nightrail::SpecHelper#nightrail_capture`,
+Under the hood every matcher calls `Railwatch::SpecHelper#railwatch_capture`,
 which is public — use it directly for anything the matchers don't cover:
 
 ```ruby
-records = nightrail_capture { get "/widgets" }
+records = railwatch_capture { get "/widgets" }
 expect(records.select { |r| r[:t] == "cache_event" }.size).to eq(2)
 ```
 
-`nightrail_records(type = nil)` is still there for assertions about the whole
+`railwatch_records(type = nil)` is still there for assertions about the whole
 example rather than one block.
 
 ## CI performance gate
@@ -151,15 +151,15 @@ RSpec.describe "performance budgets", type: :request do
   before { create_list(:widget, 25) }
 
   it "renders the widget index within its query budget" do
-    expect { get "/widgets" }.to have_nightrail_queries(at_most: 6)
+    expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
   end
 
   it "renders the widget index without an N+1" do
-    expect { get "/widgets" }.not_to have_nightrail_n_plus_one
+    expect { get "/widgets" }.not_to have_railwatch_n_plus_one
   end
 
   it "renders the widget index without calling out to anyone" do
-    expect { get "/widgets" }.to have_nightrail_outgoing_requests(exactly: 0)
+    expect { get "/widgets" }.to have_railwatch_outgoing_requests(exactly: 0)
   end
 end
 ```
