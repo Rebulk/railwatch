@@ -1,46 +1,46 @@
 # Replacing Sentry
 
-A step-by-step migration from `sentry-ruby` / `sentry-rails` to Nightrail.
-Nightrail is a genuine alternative for the Rails server workloads in the
+A step-by-step migration from `sentry-ruby` / `sentry-rails` to Railwatch.
+Railwatch is a genuine alternative for the Rails server workloads in the
 matrix below; it is not a drop-in replacement for every product Sentry
 sells. Keep both SDKs enabled during an evaluation if your application
 depends on a conditional row.
 
-Install Nightrail first ([`getting-started.md`](getting-started.md)); you
+Install Railwatch first ([`getting-started.md`](getting-started.md)); you
 can run both for a day if you want to compare, since neither knows about
 the other.
 
-## Decide whether Nightrail covers your workload
+## Decide whether Railwatch covers your workload
 
 Nightwatch parity and Sentry parity are different targets. Laravel
 Nightwatch is an application-monitoring product built around framework
-executions; Nightrail deliberately maps that model onto Rails. Sentry is a
+executions; Railwatch deliberately maps that model onto Rails. Sentry is a
 broader, multi-language managed platform with browser replay, native/mobile
 SDKs, a large integration catalog, and generic tracing. Those broader
 capabilities are not implied by Rails/Nightwatch parity.
 
 | Workload or capability | Status | Boundary |
 |---|---|---|
-| Rails HTML/API request performance and errors | Supported | Controller/action, route, SQL, cache, render, mail, HTTP, storage, logs, and exceptions share one execution. Work performed while a streaming Rack body enumerates is tracked by [#22](https://github.com/Rebulk/nightrail/issues/22). |
-| Handled and unhandled Ruby exceptions | Supported | Rails.error, Rack, Active Job, manual `Nightrail.report`, grouping, context, attachments, issue lifecycle, and regression detection. Delivery is memory-buffered, not a durable crash spool. |
-| Active Job | Supported | Works above Solid Queue, Sidekiq, GoodJob, and other Active Job adapters. Direct `Sidekiq::Worker` and non-Solid Queue schedulers are tracked by [#29](https://github.com/Rebulk/nightrail/issues/29). |
-| Recurring/scheduled work | Conditional | Solid Queue recurring tasks include schedule and drift. Other schedulers need [#29](https://github.com/Rebulk/nightrail/issues/29). |
-| Action Cable channel actions | Conditional | Broadcast/transmit records exist; a complete action parent and child lifecycle is tracked by [#15](https://github.com/Rebulk/nightrail/issues/15). |
-| Distributed Rails traces | Conditional | Outgoing propagation and request/job linking exist. Upstream-sampled W3C continuity is tracked by [#16](https://github.com/Rebulk/nightrail/issues/16). This is not a general OpenTelemetry collector. |
+| Rails HTML/API request performance and errors | Supported | Controller/action, route, SQL, cache, render, mail, HTTP, storage, logs, and exceptions share one execution. Work performed while a streaming Rack body enumerates is tracked by [#22](https://github.com/Rebulk/railwatch/issues/22). |
+| Handled and unhandled Ruby exceptions | Supported | Rails.error, Rack, Active Job, manual `Railwatch.report`, grouping, context, attachments, issue lifecycle, and regression detection. Delivery is memory-buffered, not a durable crash spool. |
+| Active Job | Supported | Works above Solid Queue, Sidekiq, GoodJob, and other Active Job adapters. Direct `Sidekiq::Worker` and non-Solid Queue schedulers are tracked by [#29](https://github.com/Rebulk/railwatch/issues/29). |
+| Recurring/scheduled work | Conditional | Solid Queue recurring tasks include schedule and drift. Other schedulers need [#29](https://github.com/Rebulk/railwatch/issues/29). |
+| Action Cable channel actions | Conditional | Broadcast/transmit records exist; a complete action parent and child lifecycle is tracked by [#15](https://github.com/Rebulk/railwatch/issues/15). |
+| Distributed Rails traces | Conditional | Outgoing propagation and request/job linking exist. Upstream-sampled W3C continuity is tracked by [#16](https://github.com/Rebulk/railwatch/issues/16). This is not a general OpenTelemetry collector. |
 | Ruby profiling | Conditional | Requires `vernier` or `stackprof`; there is no profiler bundled into the SDK. |
 | Browser monitoring | Partial | The optional Inertia client reports visits, Web Vitals, browser errors, and breadcrumbs. Session Replay, native/mobile SDKs, and Sentry's full browser/source-map workflow are outside the currently released Rails-server replacement. |
-| Runtime compatibility | Narrow today | The currently proved pair is Ruby 3.4 + Rails 8.1. A maintained compatibility matrix and any safe lowering of requirements are tracked by [#26](https://github.com/Rebulk/nightrail/issues/26). |
-| Managed integrations and operations | Partial | Nightrail Cloud supports its documented email, Slack, and webhook paths plus self-hosting. It does not promise Sentry's broader integration catalog. |
+| Runtime compatibility | Narrow today | The currently proved pair is Ruby 3.4 + Rails 8.1. A maintained compatibility matrix and any safe lowering of requirements are tracked by [#26](https://github.com/Rebulk/railwatch/issues/26). |
+| Managed integrations and operations | Partial | Railwatch Cloud supports its documented email, Slack, and webhook paths plus self-hosting. It does not promise Sentry's broader integration catalog. |
 | SQL value privacy | Supported by default | Query records carry normalized SQL shapes without literal values, and Active Record binds are never sent. Raw SQL and query plans are separate opt-ins; either can contain values. |
 
 For a Rails 8.1 application whose work enters through Rack and Active Job,
 and which does not require Replay, native/mobile monitoring, or Sentry's
-managed integration catalog, Nightrail is a useful and valid server-side
+managed integration catalog, Railwatch is a useful and valid server-side
 replacement. Evaluate the conditional rows against your own production
 entry points before removing Sentry.
 
-Exception delivery has the same process boundary as the rest of Nightrail's
-reporter. `Nightrail.record_now` skips the execution buffer, enqueues the
+Exception delivery has the same process boundary as the rest of Railwatch's
+reporter. `Railwatch.record_now` skips the execution buffer, enqueues the
 record, and asks the reporter for an urgent flush (within a quarter of a
 second, so an exception storm ships as full batches rather than one POST
 per request); it does not synchronously POST on the application thread. The reporter retries during graceful shutdown,
@@ -67,16 +67,16 @@ deploy config once the app boots without it.
 
 ## 2. Port the initializer
 
-`config/initializers/nightrail.rb` (written by the install generator) is
+`config/initializers/railwatch.rb` (written by the install generator) is
 where every option from `Sentry.init` lands. The mapping:
 
-- **`dsn:`** becomes `NIGHTRAIL_TOKEN`, one token per environment, created
-  in Nightrail Cloud. Self-hosting adds `NIGHTRAIL_INGEST_URL`. The token is
-  also the on/off switch: with it blank, Nightrail installs nothing.
+- **`dsn:`** becomes `RAILWATCH_TOKEN`, one token per environment, created
+  in Railwatch Cloud. Self-hosting adds `RAILWATCH_INGEST_URL`. The token is
+  also the on/off switch: with it blank, Railwatch installs nothing.
 - **`environment:`** becomes `c.environment`, which defaults to
   `Rails.env` — set it only to report under a different name.
 - **`release:`** becomes `c.deploy`, which auto-detects the release from
-  `NIGHTRAIL_DEPLOY`, the deploy platform, `REVISION`, or the Git checkout in
+  `RAILWATCH_DEPLOY`, the deploy platform, `REVISION`, or the Git checkout in
   the order documented in [`configuration.md`](configuration.md#core). It is
   stamped on every record, and it is also the release for release health,
   below.
@@ -85,12 +85,12 @@ where every option from `Sentry.init` lands. The mapping:
   `scheduled_tasks`, `exceptions`. The decision is made once per
   execution, not per event, so a sampled-in request ships its whole tree
   and a sampled-out one ships nothing but an unhandled exception. Per
-  route, use the `nightrail_sample` / `nightrail_never_sample` controller
+  route, use the `railwatch_sample` / `railwatch_never_sample` controller
   macros.
 - **`profiles_sample_rate:`** becomes `c.profile_sample` (and/or
   `c.profile_slow_ms`) — see step 6, since it also needs a profiler gem.
 - **`excluded_exceptions:`** becomes `c.ignored_exceptions`, which starts
-  from the Rails-relevant subset of Sentry's own default list. Nightrail
+  from the Rails-relevant subset of Sentry's own default list. Railwatch
   matches the error's class *and every named ancestor*, so your own
   subclass of a listed error is ignored too. Assigning replaces the list;
   `+=` extends it.
@@ -106,7 +106,7 @@ where every option from `Sentry.init` lands. The mapping:
 - **`config.rails.active_job_report_on_retry_error`** becomes
   `c.capture_job_retry_errors`, off by default because retries are usually
   expected and capturing them can flood the issues list.
-- **`before_send:`** becomes `Nightrail.before_ingest` plus the
+- **`before_send:`** becomes `Railwatch.before_ingest` plus the
   `redact_*` / `reject_*` hooks — see step 8.
 - **Rack `X-Request-Start` queue time** needs no setting: it is parsed
   into `queue_time` on every `request` record.
@@ -114,9 +114,9 @@ where every option from `Sentry.init` lands. The mapping:
 A worked initializer, roughly what a `Sentry.init` block turns into:
 
 ```ruby
-# config/initializers/nightrail.rb
-Nightrail.configure do |c|
-  c.token       = ENV["NIGHTRAIL_TOKEN"]           # was dsn:
+# config/initializers/railwatch.rb
+Railwatch.configure do |c|
+  c.token       = ENV["RAILWATCH_TOKEN"]           # was dsn:
   c.environment = ENV["APP_ENV"] || Rails.env    # was environment:
   c.deploy      = ENV["GIT_REV"]                 # was release:
 
@@ -149,7 +149,7 @@ Nightrail.configure do |c|
 end
 ```
 
-Nightrail also masks credential-shaped header names (`api-key`, `access-key`,
+Railwatch also masks credential-shaped header names (`api-key`, `access-key`,
 `private-key`, `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`,
 `secret`, and `signature`) automatically, including concatenated Rack aliases
 such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`, `X-ClientToken`,
@@ -157,20 +157,20 @@ such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`, `X-ClientToken`,
 `X-CSRFToken`. During migration, add application-specific aliases that do not
 use those names to `c.redact_headers`.
 
-`Rails.error` needs no wiring: Nightrail subscribes to it on install, so
+`Rails.error` needs no wiring: Railwatch subscribes to it on install, so
 every `Rails.error.report` / `Rails.error.handle` call already in the app
 — which is how `sentry-rails` itself is normally hooked up — keeps
 working unchanged.
 
 ## 3. Rewrite the call sites
 
-| Sentry call | Nightrail |
+| Sentry call | Railwatch |
 |---|---|
-| `Sentry.capture_exception(e)` | `Nightrail.report(e)` |
+| `Sentry.capture_exception(e)` | `Railwatch.report(e)` |
 | `Sentry.capture_message("...")` | `Rails.logger.warn("...")` |
-| `Sentry.set_user(id: ...)` | `Nightrail.user { \|u\| ... }` (once, in the initializer) |
-| `Sentry.set_tags(...)` / `set_context(...)` / `set_extras(...)` | `Nightrail.context(...)` |
-| `Sentry.with_scope { }` / `configure_scope { }` | `Nightrail.context(...)` inside the block; `Nightrail.ignore { }` where the scope existed to suppress |
+| `Sentry.set_user(id: ...)` | `Railwatch.user { \|u\| ... }` (once, in the initializer) |
+| `Sentry.set_tags(...)` / `set_context(...)` / `set_extras(...)` | `Railwatch.context(...)` |
+| `Sentry.with_scope { }` / `configure_scope { }` | `Railwatch.context(...)` inside the block; `Railwatch.ignore { }` where the scope existed to suppress |
 
 ```ruby
 # before
@@ -178,13 +178,13 @@ Sentry.capture_exception(e)
 Sentry.capture_exception(e, extra: { order_id: order.id })
 
 # after
-Nightrail.report(e)
-Nightrail.report(e, context: { order_id: order.id })
+Railwatch.report(e)
+Railwatch.report(e, context: { order_id: order.id })
 ```
 
-`Nightrail.report` defaults `severity` to `:warning` when `handled: true`
+`Railwatch.report` defaults `severity` to `:warning` when `handled: true`
 (the default) and `:error` otherwise, and tags the exception
-`source: "nightrail.manual"`.
+`source: "railwatch.manual"`.
 
 **Messages.** There is no `capture_message`. Log it: every `Rails.logger`
 line at or above `c.log_level` (default `:info`) becomes a `log` record,
@@ -215,7 +215,7 @@ writes through to `ActiveSupport::ExecutionContext`,
 time:
 
 ```ruby
-Nightrail.context(tenant: org.slug, plan: org.plan, feature: :new_checkout)
+Railwatch.context(tenant: org.slug, plan: org.plan, feature: :new_checkout)
 ```
 
 Context is serialized onto the parent record and every exception in the
@@ -223,12 +223,12 @@ execution. `tenant` is special: it is picked up automatically from
 `ActiveRecord::Base.current_tenant` / `TenantRecord.current_tenant` when
 the app uses `activerecord-tenanted`, and it drives the Tenants page.
 
-**Scopes.** A `with_scope` that added data becomes a `Nightrail.context`
+**Scopes.** A `with_scope` that added data becomes a `Railwatch.context`
 call inside the same block — there is no scope stack to push and pop,
 because context is per execution and an execution is already the unit.
 A `with_scope` that existed to *suppress* reporting becomes
-`Nightrail.ignore { }`, which pauses recording for the block and restores
-it afterwards (nestable, via `Nightrail.pause` / `Nightrail.resume`).
+`Railwatch.ignore { }`, which pauses recording for the block and restores
+it afterwards (nestable, via `Railwatch.pause` / `Railwatch.resume`).
 
 ## 4. Breadcrumbs
 
@@ -251,7 +251,7 @@ code, that is a span (next section), not a breadcrumb.
 Sentry.with_child_span(op: "pdf.render") { renderer.call }
 
 # after
-Nightrail.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
+Railwatch.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
 ```
 
 The block's value is returned untouched. Keyword arguments become the
@@ -259,13 +259,13 @@ span's attributes (up to 25, each truncated to 200 characters and run
 through the same parameter filter as request params). The span records
 its own duration and a `status` of `"ok"` or `"failed"`, counts toward
 the parent's `spans` counter, and shows up in the execution waterfall
-alongside the queries it contains. When Nightrail is disabled or nothing
-is recording, the block still runs — `Nightrail.span` is never a behaviour
+alongside the queries it contains. When Railwatch is disabled or nothing
+is recording, the block still runs — `Railwatch.span` is never a behaviour
 change.
 
 ## 6. Profiling
 
-`profiles_sample_rate:` becomes two settings and one gem. Nightrail does
+`profiles_sample_rate:` becomes two settings and one gem. Railwatch does
 not vendor a profiler; add the backend you want:
 
 ```ruby
@@ -279,7 +279,7 @@ c.profile_slow_ms = 500     # plus every tail-kept execution over 500ms
 c.tail_sample_slow_ms = 500 # ...which profile_slow_ms requires
 ```
 
-With neither gem installed, `Nightrail::Profiler.available?` is false and
+With neither gem installed, `Railwatch::Profiler.available?` is false and
 both settings are inert. `profile_sample` decides at the start of an
 execution and is cheap. `profile_slow_ms` cannot know an execution is
 slow until it ends, so it profiles every tail-buffering execution and
@@ -298,15 +298,15 @@ a flamegraph on the Profiles page and inline on the execution.
 Sentry.add_attachment(filename: "payload.json", bytes: request.raw_post)
 
 # after
-Nightrail.attach("payload.json", request.raw_post)
-Nightrail.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf"))
-Nightrail.attach("payload.json", body, exception: error)
-Nightrail.report(error, attachments: { "payload.json" => body })
+Railwatch.attach("payload.json", request.raw_post)
+Railwatch.attach("invoice.pdf", Rails.root.join("tmp/invoice.pdf"))
+Railwatch.attach("payload.json", body, exception: error)
+Railwatch.report(error, attachments: { "payload.json" => body })
 ```
 
 Data can be a String, a `Pathname`, or any IO. `content_type` is guessed
 from the extension and can be passed explicitly. Passing `exception:`
-(or using `Nightrail.report(..., attachments:)`) files the attachment
+(or using `Railwatch.report(..., attachments:)`) files the attachment
 against that error's issue, using the same fingerprint the exception
 itself was grouped by. Payloads are gzipped on the wire and capped at
 `c.max_attachment_bytes` (1 MiB by default); over the cap the record is
@@ -314,18 +314,18 @@ flagged `truncated: true` rather than dropped.
 
 ## 8. before_send
 
-`before_send` did three different jobs. Nightrail splits them, so each one
+`before_send` did three different jobs. Railwatch splits them, so each one
 runs at the cheapest point:
 
 ```ruby
 # Scrub one record type in place, at build time.
-Nightrail.redact_queries { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
+Railwatch.redact_queries { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
 
 # Drop records by predicate, at build time.
-Nightrail.reject_outgoing_requests { |r| r[:host] == "127.0.0.1" }
+Railwatch.reject_outgoing_requests { |r| r[:host] == "127.0.0.1" }
 
 # Inspect or drop a whole batch, right before it's POSTed.
-Nightrail.before_ingest { |batch| batch.size < 10_000 }
+Railwatch.before_ingest { |batch| batch.size < 10_000 }
 ```
 
 The `redact_*` hooks — exactly these eight, one per record type that has
@@ -339,10 +339,10 @@ The `reject_*` hooks — exactly these eight — return truthy to drop the
 record: `reject_queries`, `reject_cache_events`, `reject_mail`,
 `reject_notifications`, `reject_broadcasts`, `reject_outgoing_requests`,
 `reject_enqueued_jobs`, `reject_logs`. A rejector that raises fails open
-(the record is kept). `Nightrail.reject_cache_keys(patterns)` is the
+(the record is kept). `Railwatch.reject_cache_keys(patterns)` is the
 shortcut for cache keys specifically.
 
-`Nightrail.before_ingest` runs per batch; returning `false` drops the whole
+`Railwatch.before_ingest` runs per batch; returning `false` drops the whole
 batch, returning an Array replaces it. Multiple hooks chain.
 
 To drop a whole record type before it is ever built — cheaper than any
@@ -354,26 +354,26 @@ Sentry's `fingerprint` and grouping rules become one block, or a
 per-call argument:
 
 ```ruby
-Nightrail.fingerprint do |error, default|
+Railwatch.fingerprint do |error, default|
   error.is_a?(Faraday::Error) ? [ "upstream", error.response_status, :default ] : nil
 end
 
-Nightrail.report(error, fingerprint: [ "billing", "stripe-timeout" ])
+Railwatch.report(error, fingerprint: [ "billing", "stripe-timeout" ])
 ```
 
 The block is called with the error and `default` — the array of parts
-Nightrail would otherwise have hashed (class, file, line, normalized
+Railwatch would otherwise have hashed (class, file, line, normalized
 message). Return an array of strings; return nil to fall back to the
 default grouping, so a resolver that doesn't recognise an error can just
 say so. The literal `:default` splices the default parts in wherever you
 put it, like Sentry's `{{ default }}`. A per-call `fingerprint:` wins
 over the global block, and an error class of your own can define
-`nightrail_fingerprint` so every raise site agrees.
+`railwatch_fingerprint` so every raise site agrees.
 
 ## 10. Release health
 
 Automatic, and there is nothing to port. `session` records come from two
-places — the browser client (`startNightrail()`, one session per tab) and
+places — the browser client (`startRailwatch()`, one session per tab) and
 a per-user server-side fallback in the request middleware, which is also
 the only source that can see an unhandled exception and mark a session
 `crashed`. Both key on the same id when the browser cookie is present,
@@ -385,7 +385,7 @@ session and crash-free user rates are shown per release on the platform's
 Releases page.
 
 ```ruby
-c.track_sessions = false          # NIGHTRAIL_TRACK_SESSIONS — turns both sources off
+c.track_sessions = false          # RAILWATCH_TRACK_SESSIONS — turns both sources off
 c.session_flush_interval = 60.0   # seconds between server-session flushes
 c.session_timeout = 1800.0        # idle seconds before a server session ends
 ```
@@ -393,40 +393,40 @@ c.session_timeout = 1800.0        # idle seconds before a server session ends
 ## 11. Browser errors (`@sentry/react`)
 
 Delete `@sentry/react` too. The browser client the generator installs
-(`app/frontend/lib/nightrail.ts`) reports JavaScript errors on the same
+(`app/frontend/lib/railwatch.ts`) reports JavaScript errors on the same
 beacon it already uses for visit timing and Core Web Vitals — one
 transport, one batch, one flush on `pagehide` or every 5s. There is no
 second SDK to load and no second quota.
 
 ```ts
 // app/frontend/entrypoints/application.ts
-import { startNightrail } from "@/lib/nightrail"
+import { startRailwatch } from "@/lib/railwatch"
 
-startNightrail({
+startRailwatch({
   // Added to the defaults, not instead of them.
   ignoreErrors: [/Failed to fetch dynamically imported module/],
   denyUrls: [/analytics\./],
   // Only if the app scopes tenants by path or subdomain: the beacon posts
-  // to /nightrail/beacon, which is outside that scoping, so the server
+  // to /railwatch/beacon, which is outside that scoping, so the server
   // cannot work the tenant out for itself.
   tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
 })
 ```
 
-| Sentry | Nightrail |
+| Sentry | Railwatch |
 |---|---|
-| `Sentry.init({ dsn })` | `startNightrail()`. There is no DSN: the beacon posts to the app's own origin and the *server* decides whether to record it (`c.beacon_enabled`, `NIGHTRAIL_TOKEN`). The gate you already have on whether `startNightrail()` runs at all is the only gate. |
+| `Sentry.init({ dsn })` | `startRailwatch()`. There is no DSN: the beacon posts to the app's own origin and the *server* decides whether to record it (`c.beacon_enabled`, `RAILWATCH_TOKEN`). The gate you already have on whether `startRailwatch()` runs at all is the only gate. |
 | `release` | Automatic. The record is stamped with `c.deploy`, the same release the server records carry, so a browser issue and a server issue from one deploy line up without a matching pair of settings to get wrong. |
 | `environment` | Automatic — the ingest token identifies the environment. |
-| `ignoreErrors` | `startNightrail({ ignoreErrors })`. Strings match anywhere in the message; regexes are tested against it. Both `ResizeObserver` messages are ignored by default. |
-| `denyUrls` | `startNightrail({ denyUrls })`, matched against the top stack frame's URL. `/extensions\//i`, `/^chrome:\/\//i`, and `/^moz-extension:\/\//i` are denied by default, **and** any frame from an origin that isn't the app's own is dropped — extensions, injected widgets, tag managers. |
-| `Sentry.setUser` | Server-side. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Nightrail.user`) when `Current.user` or Warden is set by middleware; an app that authenticates in a `before_action` gives Nightrail the same lookup with `c.beacon_user { \|request\| ... }`. Nothing the browser sends names the user, so it cannot be forged. |
-| `Sentry.setTag("org", …)` | `startNightrail({ tenant })`, and `Nightrail.context(...)` for everything else. |
+| `ignoreErrors` | `startRailwatch({ ignoreErrors })`. Strings match anywhere in the message; regexes are tested against it. Both `ResizeObserver` messages are ignored by default. |
+| `denyUrls` | `startRailwatch({ denyUrls })`, matched against the top stack frame's URL. `/extensions\//i`, `/^chrome:\/\//i`, and `/^moz-extension:\/\//i` are denied by default, **and** any frame from an origin that isn't the app's own is dropped — extensions, injected widgets, tag managers. |
+| `Sentry.setUser` | Server-side. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Railwatch.user`) when `Current.user` or Warden is set by middleware; an app that authenticates in a `before_action` gives Railwatch the same lookup with `c.beacon_user { \|request\| ... }`. Nothing the browser sends names the user, so it cannot be forged. |
+| `Sentry.setTag("org", …)` | `startRailwatch({ tenant })`, and `Railwatch.context(...)` for everything else. |
 | `Sentry.captureException(e)` | `reportError(e)`. |
-| `Sentry.captureMessage(text)` | `reportError(new Error(text))` — Nightrail has one shape for a browser problem, not two. |
+| `Sentry.captureMessage(text)` | `reportError(new Error(text))` — Railwatch has one shape for a browser problem, not two. |
 | Breadcrumbs (automatic) | Automatic: the last 20 of console errors/warnings, clicks, and Inertia navigations ride along on every error and are shown on the issue page. Click crumbs record the element, never an input's value. |
-| `Sentry.ErrorBoundary` | Your own boundary plus `nightrailRootOptions()` (React 19) or `reportError` (React 18) — see below. |
-| `tracesSampleRate`, `replaysSessionSampleRate` | No equivalent. Nightrail reports visit timing and Core Web Vitals instead of browser traces, and does not record sessions. |
+| `Sentry.ErrorBoundary` | Your own boundary plus `railwatchRootOptions()` (React 19) or `reportError` (React 18) — see below. |
+| `tracesSampleRate`, `replaysSessionSampleRate` | No equivalent. Railwatch reports visit timing and Core Web Vitals instead of browser traces, and does not record sessions. |
 
 ### What is and is not captured
 
@@ -448,11 +448,11 @@ anything the app hands to `reportError`.
 Not captured: browser traces and session replay; failed resource loads
 (a 404 on an `<img>` or `<script>`); errors from a cross-origin script,
 which the browser reports as a bare `"Script error."` with no stack and
-Nightrail drops as not the app's to fix; and anything thrown before
-`startNightrail()` runs.
+Railwatch drops as not the app's to fix; and anything thrown before
+`startRailwatch()` runs.
 
 Minified frames are shown as the browser named them
-(`assets/index-Bq1x9K.js:41`) — Nightrail does not yet upload source maps,
+(`assets/index-Bq1x9K.js:41`) — Railwatch does not yet upload source maps,
 so a production frame does not link to a line in your repository.
 
 ### Error boundaries: keep them, and wire the root
@@ -461,24 +461,24 @@ An error boundary is not what gets an error reported, and outside a
 development build React does **not** hand a caught error back to
 `window.onerror`. React 18 stops at `componentDidCatch`; React 19 routes
 it to the root's `onCaughtError`, whose default is `console.error`. So a
-boundary on a plain `startNightrail()` app silently swallows every render
+boundary on a plain `startRailwatch()` app silently swallows every render
 error it catches. Two lines fix that.
 
-**React 19** — pass Nightrail's root options where you create the root:
+**React 19** — pass Railwatch's root options where you create the root:
 
 ```tsx
 import { createRoot } from "react-dom/client"
-import { nightrailRootOptions, startNightrail } from "@/lib/nightrail"
+import { railwatchRootOptions, startRailwatch } from "@/lib/railwatch"
 
-createRoot(el, nightrailRootOptions()).render(<App {...props} />)
-startNightrail()
+createRoot(el, railwatchRootOptions()).render(<App {...props} />)
+startRailwatch()
 ```
 
 That covers `onCaughtError` (the one React would otherwise only log) and
 `onUncaughtError` (which would reach the window listener anyway, but this
 way it arrives with the component stack attached). `onRecoverableError`
 is deliberately left alone: React's default already routes a hydration
-mismatch through `window.reportError`, so it reaches Nightrail without help,
+mismatch through `window.reportError`, so it reaches Railwatch without help,
 and overriding it would take React's own console warning away from
 whoever is debugging one.
 
@@ -486,7 +486,7 @@ whoever is debugging one.
 boundary, which is also where the component stack lives:
 
 ```tsx
-import { reportError } from "@/lib/nightrail"
+import { reportError } from "@/lib/railwatch"
 
 class MapErrorBoundary extends Component<Props, State> {
   static getDerivedStateFromError() {
@@ -510,12 +510,12 @@ flattened to strings.
 
 Sentry never hooked `bin/rails console`: sentry-rails has no console railtie
 block, so an engineer's typo at a production prompt was never an issue.
-Nightrail subscribes to far more than Sentry did — every query, every log line,
+Railwatch subscribes to far more than Sentry did — every query, every log line,
 `Rails.error` — and starts reporter/health/session threads at boot, so it has
 to say this out loud rather than inherit it by accident. It does: a console
 process **captures nothing, starts no thread, and sends no `process` or
 `health` record**. Turn that off with `c.capture_console = true`
-(`NIGHTRAIL_CAPTURE_CONSOLE=1`) when you actually want to trace a console
+(`RAILWATCH_CAPTURE_CONSOLE=1`) when you actually want to trace a console
 session.
 
 `bin/rails runner` is the case that needs a rule rather than a switch.
@@ -546,11 +546,11 @@ An interactive run is still *recorded*: its `command` record ships with
 `exception_preview`, so the run is visible on the platform without opening an
 issue. Only the exception is withheld.
 
-If your app carried an app-side version of this (a `Nightrail.before_ingest`
+If your app carried an app-side version of this (a `Railwatch.before_ingest`
 hook matching `rails runner …` previews, or `sentry_runner_noise.rb` under
 `before_send`), delete it — this is the gem's job now.
 
-## What Nightrail does that Sentry doesn't
+## What Railwatch does that Sentry doesn't
 
 | | |
 |---|---|
@@ -559,8 +559,8 @@ hook matching `rails runner …` previews, or `sentry_runner_noise.rb` under
 | Scheduled-task drift | Solid Queue recurring tasks report `task_key`, `schedule`, and `drift` (scheduled vs actual start) with nothing to instrument — no cron check-in calls to add or forget. |
 | Rails surfaces Sentry has no record for | `cache_event`, `mail`, `broadcast`, `notification`, `storage_op`, `view_render`, `transaction`, `deprecation`, `enqueued_job`. |
 | Inertia visit timing | Real browser page-visit duration, prop byte size, partial reloads, SSR time, and Core Web Vitals, from a client the generator installs. |
-| Spec matchers as a CI gate | `have_nightrail_queries`, `have_nightrail_n_plus_one`, `have_nightrail_outgoing_requests` fail the pull request that regresses a hot path. |
-| Zero app-DB writes | The gem holds records in memory and ships them from a background thread; a bench gate asserts no `INSERT`/`UPDATE`/`DELETE` ever originates in `lib/nightrail`. This is why it is safe on single-writer SQLite. |
+| Spec matchers as a CI gate | `have_railwatch_queries`, `have_railwatch_n_plus_one`, `have_railwatch_outgoing_requests` fail the pull request that regresses a hot path. |
+| Zero app-DB writes | The gem holds records in memory and ships them from a background thread; a bench gate asserts no `INSERT`/`UPDATE`/`DELETE` ever originates in `lib/railwatch`. This is why it is safe on single-writer SQLite. |
 | One SQLite database per environment | The platform stores each monitored environment's telemetry in its own database file, which makes retention pruning, backup, and restore per-environment operations. |
 | An MCP server | AI assistants can ask what broke after the last deploy, list slow routes, read an execution's timeline, and search logs ([`ai-and-mcp.md`](ai-and-mcp.md)). |
 

@@ -1,0 +1,98 @@
+#!/bin/sh
+# Kamal post-deploy hook: records the deploy in Railwatch so charts and issues
+# get a deploy marker, regressions are attributed to a version, and the
+# platform can show a diff of the commits that shipped.
+#
+# This runs on the deployer machine, which -- unlike the app containers -- has
+# both the git history and the KAMAL_* environment
+# (https://kamal-deploy.org/docs/hooks/overview/), so it POSTs straight to the
+# ingest host instead of shelling into a container. Never fails a deploy.
+set -e
+[ -z "$RAILWATCH_TOKEN" ] && exit 0
+
+# Optional: .kamal/hooks/post-deploy --sourcemaps, or set
+# RAILWATCH_SOURCEMAPS=true. Requires the build artifacts on the deployer.
+# Prefer uploading in CI before publishing the image. Deletion is opt-in
+# with RAILWATCH_SOURCEMAPS_DELETE=true and happens only after acknowledgment.
+if [ "${1:-}" = "--sourcemaps" ] || [ "${RAILWATCH_SOURCEMAPS:-}" = "true" ]; then
+  RAILWATCH_DEPLOY="$KAMAL_VERSION" bin/rails railwatch:sourcemaps || echo "Railwatch source map upload failed" >&2
+fi
+
+if ! command -v curl >/dev/null 2>&1 || ! command -v ruby >/dev/null 2>&1 || [ -z "$RAILWATCH_INGEST_URL" ]; then
+  # Fall back to the rake task inside the deployed container. It records the
+  # same deploy minus the commit list, which a container has no git history
+  # to build.
+  bin/kamal app exec --primary --reuse "bin/rails railwatch:deploy[$KAMAL_VERSION]" || true
+  exit 0
+fi
+
+INGEST="${RAILWATCH_INGEST_URL%/}"
+
+case "$INGEST" in
+  https://*|http://localhost|http://localhost:*|http://127.0.0.1|http://127.0.0.1:*|http://\[::1\]|http://\[::1\]:*) ;;
+  http://*)
+    if [ "${RAILWATCH_ALLOW_HTTP:-}" != "true" ]; then
+      echo "Railwatch deploy marker skipped: plain HTTP ingest requires RAILWATCH_ALLOW_HTTP=true" >&2
+      exit 0
+    fi
+    ;;
+esac
+
+post() {
+  curl -sS -m 10 -X POST "$1" \
+    -H "Authorization: Bearer $RAILWATCH_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$2" >/dev/null 2>&1 || true
+}
+
+git_log() {
+  if [ -d .git ] && command -v git >/dev/null 2>&1; then
+    git log -n 50 --format='%H%x1f%an%x1f%s%x1f%cI' 2>/dev/null || true
+  fi
+}
+
+# Set RAILWATCH_DEPLOY_URL to link the marker at a CI run or a release page.
+DEPLOY_BODY=$(git_log | ruby -rjson -e '
+  commits = $stdin.read.split("\n").reject(&:empty?).map do |line|
+    sha, author, message, at = line.split("\x1f")
+    { sha: sha, author: author, message: message, at: at }
+  end
+  puts JSON.generate(
+    deploy: ENV["KAMAL_VERSION"],
+    ref: ENV["KAMAL_VERSION"],
+    name: ENV["KAMAL_SERVICE_VERSION"],
+    url: ENV["RAILWATCH_DEPLOY_URL"],
+    server: ENV["KAMAL_HOSTS"].to_s.split(",").first,
+    timestamp: ENV["KAMAL_RECORDED_AT"],
+    performer: ENV["KAMAL_PERFORMER"],
+    destination: ENV["KAMAL_DESTINATION"],
+    service: ENV["KAMAL_SERVICE"],
+    commits: commits)
+') || DEPLOY_BODY=""
+
+if [ -n "$DEPLOY_BODY" ]; then
+  post "$INGEST/ingest/deploys" "$DEPLOY_BODY"
+fi
+
+# Which servers this deploy targeted, so the platform knows who should be
+# reporting. The docs name the role variable KAMAL_ROLE; KAMAL_ROLES is read
+# first because some Kamal versions set the plural.
+KAMAL_BODY=$(ruby -rjson -e '
+  list = ->(value) { value.to_s.split(",").map(&:strip).reject(&:empty?) }
+  puts JSON.generate(
+    version: ENV["KAMAL_VERSION"],
+    hosts: list.call(ENV["KAMAL_HOSTS"]),
+    roles: list.call(ENV["KAMAL_ROLES"] || ENV["KAMAL_ROLE"]),
+    performer: ENV["KAMAL_PERFORMER"],
+    destination: ENV["KAMAL_DESTINATION"],
+    service: ENV["KAMAL_SERVICE"],
+    recorded_at: ENV["KAMAL_RECORDED_AT"],
+    command: ENV["KAMAL_COMMAND"],
+    subcommand: ENV["KAMAL_SUBCOMMAND"])
+') || KAMAL_BODY=""
+
+if [ -n "$KAMAL_BODY" ]; then
+  post "$INGEST/ingest/kamal" "$KAMAL_BODY"
+fi
+
+exit 0

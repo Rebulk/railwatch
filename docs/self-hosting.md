@@ -1,26 +1,26 @@
 # Self-hosting
 
-Nightrail Cloud is a Rails app you can run yourself. The gem doesn't care
+Railwatch Cloud is a Rails app you can run yourself. The gem doesn't care
 which install it talks to — point it at yours and everything works the
 same.
 
 ## Point the gem at your platform
 
 ```ruby
-# config/initializers/nightrail.rb
-Nightrail.configure do |c|
-  c.ingest_url = "https://telemetry.example.com"   # NIGHTRAIL_INGEST_URL
-  c.token      = ENV["NIGHTRAIL_TOKEN"]
+# config/initializers/railwatch.rb
+Railwatch.configure do |c|
+  c.ingest_url = "https://telemetry.example.com"   # RAILWATCH_INGEST_URL
+  c.token      = ENV["RAILWATCH_TOKEN"]
 end
 ```
 
-`ingest_url` defaults to `https://nightrail.rebulk.com`, so this is the one
+`ingest_url` defaults to `https://railwatch.rebulk.com`, so this is the one
 setting a self-hosted install always needs; everything the gem sends —
 records, ping, deploys — hangs off that host. Pass `--url=` to the
 installer to have it written for you:
 
 ```sh
-bin/rails generate nightrail:install --url=https://telemetry.example.com
+bin/rails generate railwatch:install --url=https://telemetry.example.com
 ```
 
 ## Getting a token
@@ -31,17 +31,17 @@ token is shown once, right after you create the environment; a lost one
 is rotated from the environment's settings, not recovered.
 
 ```sh
-bin/rails nightrail:token    # prints the URL to create/copy a token
+bin/rails railwatch:token    # prints the URL to create/copy a token
 ```
 
 ## Check the connection
 
 ```sh
-bin/rails nightrail:status   # pings {ingest_url}/ingest/ping with your token
-bin/rails nightrail:doctor   # the full checklist: token, URL, reachability, wiring
+bin/rails railwatch:status   # pings {ingest_url}/ingest/ping with your token
+bin/rails railwatch:doctor   # the full checklist: token, URL, reachability, wiring
 ```
 
-`nightrail:status` aborts if the token is unset or the host is unreachable,
+`railwatch:status` aborts if the token is unset or the host is unreachable,
 so it works as a post-deploy smoke test.
 [`troubleshooting.md`](troubleshooting.md) covers each doctor line.
 
@@ -55,6 +55,6 @@ token the public JSON API at `/api/v1` uses. See
 
 ## Running the platform
 
-Nightrail Cloud's backend is not part of this gem repository. Licensed
+Railwatch Cloud's backend is not part of this gem repository. Licensed
 self-hosted customers receive separate platform deployment, backup, retention,
 quota, and restore documentation from Rebulk.

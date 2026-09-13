@@ -39,7 +39,7 @@ jobs:
           ruby-version: "3.4"
 
       - name: Build gem
-        run: gem build nightrail.gemspec --strict
+        run: gem build railwatch.gemspec --strict
 
       - name: Publish gem with RubyGems Trusted Publishing
         uses: rubygems/release-gem@v1

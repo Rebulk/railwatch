@@ -1,32 +1,32 @@
-# Nightrail
+# Railwatch
 
 First-class monitoring for Rails. One gem instruments requests, jobs,
 scheduled tasks, commands, queries, exceptions, cache, mail, broadcasts,
 outgoing HTTP, storage, views, and logs, links them into one trace per
-execution, and ships them to Nightrail Cloud for about half a millisecond
+execution, and ships them to Railwatch Cloud for about half a millisecond
 per request plus tens of microseconds per query, with zero writes to your
 database.
 
 ## Install
 
 ```sh
-bundle add nightrail            # 1. add the public gem
-bin/rails generate nightrail:install --prompt-token  # 2. hidden token input plus app wiring
-bin/rails nightrail:doctor                    # 3. check every piece is wired up after restart
+bundle add railwatch            # 1. add the public gem
+bin/rails generate railwatch:install --prompt-token  # 2. hidden token input plus app wiring
+bin/rails railwatch:doctor                    # 3. check every piece is wired up after restart
 ```
 
 The gem, its Ruby namespace, and its require path share one name:
-`nightrail`, `Nightrail::*`, `require "nightrail"`. For a self-hosted
+`railwatch`, `Railwatch::*`, `require "railwatch"`. For a self-hosted
 deployment or an unreleased revision, use the Git source instead:
 
 ```ruby
-gem "nightrail", github: "Rebulk/nightrail"
+gem "railwatch", github: "Rebulk/railwatch"
 ```
 
-The generator writes `config/initializers/nightrail.rb`, mounts the beacon
+The generator writes `config/initializers/railwatch.rb`, mounts the beacon
 engine, and — where the app already has them — adds a Kamal `post-deploy`
-hook, the Inertia browser client with its `startNightrail()` call, and
-`require "nightrail/rspec"` in `spec/rails_helper.rb`. `nightrail:doctor` prints
+hook, the Inertia browser client with its `startRailwatch()` call, and
+`require "railwatch/rspec"` in `spec/rails_helper.rb`. `railwatch:doctor` prints
 a ✓/✗ checklist of all of it and exits non-zero if the token is missing or
 the ingest host is unreachable.
 
@@ -34,9 +34,9 @@ Pass `--prompt-token` (and `--url=` when self-hosting) to read the token
 without echo or process-argument exposure. The generator writes it to `.env`
 only when Git confirms that file is ignored; otherwise it points you to Rails
 credentials or your deployment secret manager without printing the value. Add
-`--kamal-secrets` to wire `NIGHTRAIL_TOKEN` through `.kamal/secrets` and
-`config/deploy.yml`. It finishes by running `nightrail:doctor` for you.
-`bin/rails nightrail:token` says where to get a token; `bin/rails nightrail:mcp`
+`--kamal-secrets` to wire `RAILWATCH_TOKEN` through `.kamal/secrets` and
+`config/deploy.yml`. It finishes by running `railwatch:doctor` for you.
+`bin/rails railwatch:token` says where to get a token; `bin/rails railwatch:mcp`
 prints ready-to-paste MCP client configuration.
 
 ## Documentation
@@ -44,9 +44,9 @@ prints ready-to-paste MCP client configuration.
 - [Getting started](docs/getting-started.md) — five-minute install for a
   Rails 8 app, the three optional lines, and deploying with Kamal, Docker,
   Heroku, Render, or none of them.
-- [Configuration](docs/configuration.md) — every option and `NIGHTRAIL_*`
+- [Configuration](docs/configuration.md) — every option and `RAILWATCH_*`
   variable, field by field.
-- [Record types](docs/records.md) — every record Nightrail ships and every
+- [Record types](docs/records.md) — every record Railwatch ships and every
   attribute on it, sourced from the code that builds it.
 - [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
   performance gate.
@@ -57,43 +57,43 @@ prints ready-to-paste MCP client configuration.
 - [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md) — the
   record-type mapping and the sampling model, for Laravel people.
 - [Self-hosting](docs/self-hosting.md) — pointing the gem at your own
-  Nightrail Cloud.
+  Railwatch Cloud.
 - [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired
-  with the `nightrail:doctor` line it shows up as.
+  with the `railwatch:doctor` line it shows up as.
 - [FAQ](docs/faq.md) — overhead numbers, retention, PII posture, SQLite.
 - [Security](docs/security.md) — transport, capture defaults, the browser
   beacon, and application responsibilities.
 
-AI coding agents working on an app that uses Nightrail: [`llms.txt`](llms.txt)
+AI coding agents working on an app that uses Railwatch: [`llms.txt`](llms.txt)
 and [`AGENTS.md`](AGENTS.md).
 
-Configuration lives in `config/initializers/nightrail.rb`; every option has
-a `NIGHTRAIL_*` environment variable. Sampling is decided once per execution:
+Configuration lives in `config/initializers/railwatch.rb`; every option has
+a `RAILWATCH_*` environment variable. Sampling is decided once per execution:
 a sampled-in request ships its whole tree, a sampled-out one ships nothing
 except unhandled exceptions.
 
 ```ruby
-Nightrail.configure do |c|
+Railwatch.configure do |c|
   c.sample = { requests: 0.1, jobs: 1.0 }
   c.user { |u| { id: u.id, name: u.name, email: u.email } }
 end
 
 class ReportsController < ApplicationController
-  nightrail_sample 0.01, only: :index
+  railwatch_sample 0.01, only: :index
 end
 
-Nightrail.ignore { ExpensiveSync.run }
-Nightrail.context(tenant: org.slug, plan: org.plan)
+Railwatch.ignore { ExpensiveSync.run }
+Railwatch.context(tenant: org.slug, plan: org.plan)
 ```
 
 Time any block of your own code as a `span` on the surrounding request,
 job, or command — the block's value is returned untouched:
 
 ```ruby
-Nightrail.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
+Railwatch.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
 ```
 
-When a span isn't enough to say where the time went, Nightrail can attach a
+When a span isn't enough to say where the time went, Railwatch can attach a
 real stack profile to an execution. Add `gem "vernier"` (Ruby ≥ 3.2) or
 `gem "stackprof"` to the Gemfile and set `c.profile_sample = 0.01` to
 profile 1% of executions, or `c.profile_slow_ms = 500` alongside
@@ -103,24 +103,24 @@ belongs to is marked `profiled`. Off by default, and one Float comparison
 per execution while it stays off.
 
 Sampling can also be decided at the *end* of an execution instead of the
-start: set `c.tail_sample_slow_ms = 500` (or call `Nightrail.keep!`) and a
+start: set `c.tail_sample_slow_ms = 500` (or call `Railwatch.keep!`) and a
 head-sampled-out request that turns out to be slow, or to have raised,
 ships its whole tree anyway. Outgoing HTTP carries a W3C `traceparent`,
 and an inbound one is adopted, so a trace spans services.
 
-Inertia apps get real page-visit timing by calling `startNightrail()` from the
-generated `app/frontend/lib/nightrail.ts`. Server-side rendering is timed
+Inertia apps get real page-visit timing by calling `startRailwatch()` from the
+generated `app/frontend/lib/railwatch.ts`. Server-side rendering is timed
 automatically wherever `inertia_rails` SSR is already enabled — no extra
 configuration needed.
 
 Outgoing HTTP made through Faraday is instrumented by adding
-`Nightrail::Faraday` to the connection's middleware stack (`Net::HTTP` is
+`Railwatch::Faraday` to the connection's middleware stack (`Net::HTTP` is
 already covered globally, with no setup); any other client can be wrapped
-with `Nightrail.instrument_outgoing`:
+with `Railwatch.instrument_outgoing`:
 
 ```ruby
-Faraday.new(url) { |f| f.use Nightrail::Faraday }
-Nightrail.instrument_outgoing(:get, url) { http_client.get(url) }
+Faraday.new(url) { |f| f.use Railwatch::Faraday }
+Railwatch.instrument_outgoing(:get, url) { http_client.get(url) }
 ```
 
 ## Testing
@@ -132,8 +132,8 @@ The same instrumentation runs in your test suite, so a spec can hold a hot
 path to a query budget and CI can fail the pull request that regresses it:
 
 ```ruby
-expect { get "/widgets" }.to have_nightrail_queries(at_most: 6)
-expect { get "/widgets" }.not_to have_nightrail_n_plus_one
+expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
+expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 ```
 
 Failures list the offending SQL. Set-up, every matcher (RSpec and Minitest),
@@ -144,13 +144,13 @@ and a CI performance-gate recipe are in [`docs/testing.md`](docs/testing.md).
 Every attribute, the full public facade, sampling, redaction/rejection,
 transport/buffering behavior, the overhead gate, and the Kamal deploy hook
 are documented field-by-field in [`docs/configuration.md`](docs/configuration.md).
-Every record type Nightrail ships — `request`, `job_attempt`, `query`,
+Every record type Railwatch ships — `request`, `job_attempt`, `query`,
 `exception`, and the rest — is documented field-by-field, sourced directly
 from the code that builds it, in [`docs/records.md`](docs/records.md).
 
 ## Replacing Sentry
 
-Nightrail subscribes to `Rails.error` on install
+Railwatch subscribes to `Rails.error` on install
 (`Rails.error.subscribe`), so any existing `Rails.error.report` or
 `Rails.error.handle` call — which is how Sentry's own Rails integration
 is normally wired in — is captured with no code changes. An unhandled
@@ -164,29 +164,29 @@ isolation — each one is linked (`execution_id`/`trace_id`) to the request,
 job, or command it happened inside, alongside every query, cache read,
 outgoing request, and log line from that same execution. There's no
 separate error-tracking SDK/config to maintain — `severity`, `handled`,
-and `context` all come from the same `Nightrail.configure` block and
-`Nightrail.context` calls used for everything else the gem instruments.
+and `context` all come from the same `Railwatch.configure` block and
+`Railwatch.context` calls used for everything else the gem instruments.
 
 ### Coming from Sentry
 
-| Sentry | Nightrail |
+| Sentry | Railwatch |
 |---|---|
-| `dsn:` | `NIGHTRAIL_TOKEN` (+ `NIGHTRAIL_INGEST_URL` for a self-hosted platform). |
+| `dsn:` | `RAILWATCH_TOKEN` (+ `RAILWATCH_INGEST_URL` for a self-hosted platform). |
 | `environment:` | `config.environment` — defaults to `Rails.env`, set it only to report under a different name. |
 | `release:` | `config.deploy` — auto-detected from the deploy platform or Git checkout. Stamped on every record. |
-| `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `nightrail_sample 0.01, only: :index`. |
+| `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `railwatch_sample 0.01, only: :index`. |
 | `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
-| `before_send:` / `before_send_transaction:` | `Nightrail.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Nightrail.redact_queries`/`redact_logs`/... to scrub one record type in place; `Nightrail.reject_queries`/`reject_logs`/... to drop records by predicate. |
-| `fingerprint` / grouping rules | `Nightrail.fingerprint { \|error, default\| ... }` globally, `def nightrail_fingerprint` on your own error class, or `Nightrail.report(error, fingerprint: [...])` per call. The literal `:default` splices in the parts Nightrail would have hashed, like Sentry's `{{ default }}`. |
+| `before_send:` / `before_send_transaction:` | `Railwatch.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Railwatch.redact_queries`/`redact_logs`/... to scrub one record type in place; `Railwatch.reject_queries`/`reject_logs`/... to drop records by predicate. |
+| `fingerprint` / grouping rules | `Railwatch.fingerprint { \|error, default\| ... }` globally, `def railwatch_fingerprint` on your own error class, or `Railwatch.report(error, fingerprint: [...])` per call. The literal `:default` splices in the parts Railwatch would have hashed, like Sentry's `{{ default }}`. |
 | `include_local_variables:` | `config.capture_exception_locals`. |
 | `config.rails.active_job_report_on_retry_error` | `config.capture_job_retry_errors` (off by default). |
-| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.capture_job_arguments` for job arguments, `config.capture_response_body_on_error` for what a failing upstream sent back, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Nightrail.user { ... }` block for who. There is no single "send everything" switch. |
+| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.capture_job_arguments` for job arguments, `config.capture_response_body_on_error` for what a failing upstream sent back, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Railwatch.user { ... }` block for who. There is no single "send everything" switch. |
 | Breadcrumbs | Not a separate concept — every query, cache read, outgoing request, log line, and view render is already a first-class record linked to its execution by `execution_id`/`trace_id`. The execution *is* the breadcrumb trail, and it's queryable. |
-| `Sentry.capture_message` | `Nightrail.report(error, ...)` for an exception; plain `Rails.logger` for a message — log lines at or above `config.log_level` become `log` records automatically. |
-| `Sentry.set_user` | `Nightrail.user { ... }` (a resolver block, evaluated per execution). |
-| `Sentry.set_tags` / `set_context` / `set_extras` | `Nightrail.context(key: value)` — serialized onto the parent record and every exception. |
-| `Sentry.with_child_span` | `Nightrail.span("name") { ... }`. |
-| `Sentry.add_attachment` | `Nightrail.attach("payload.json", data)` — a String, `Pathname`, or IO, gzipped on the wire and capped at `config.max_attachment_bytes`. `exception:` files it against that error's issue, and `Nightrail.report(error, attachments: { "payload.json" => data })` captures and attaches in one call. |
+| `Sentry.capture_message` | `Railwatch.report(error, ...)` for an exception; plain `Rails.logger` for a message — log lines at or above `config.log_level` become `log` records automatically. |
+| `Sentry.set_user` | `Railwatch.user { ... }` (a resolver block, evaluated per execution). |
+| `Sentry.set_tags` / `set_context` / `set_extras` | `Railwatch.context(key: value)` — serialized onto the parent record and every exception. |
+| `Sentry.with_child_span` | `Railwatch.span("name") { ... }`. |
+| `Sentry.add_attachment` | `Railwatch.attach("payload.json", data)` — a String, `Pathname`, or IO, gzipped on the wire and capped at `config.max_attachment_bytes`. `exception:` files it against that error's issue, and `Railwatch.report(error, attachments: { "payload.json" => data })` captures and attaches in one call. |
 | `Sentry.capture_check_in` (cron monitoring) | Automatic: Solid Queue recurring tasks become `scheduled_task` records with `task_key`, `schedule`, and `drift`. Nothing to instrument. |
 | `config.rails.report_rescued_exceptions` | `config.capture_rescued_exceptions` (on by default). |
 | Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
@@ -199,24 +199,24 @@ Use the supported-workload matrix in
 [`docs/replacing-sentry.md`](docs/replacing-sentry.md) before removing
 Sentry from an application that depends on those capabilities.
 
-`config.deploy` checks `NIGHTRAIL_DEPLOY`, `KAMAL_VERSION`, common Git and
+`config.deploy` checks `RAILWATCH_DEPLOY`, `KAMAL_VERSION`, common Git and
 platform environment variables, `REVISION`, then `.git/HEAD`. Full 40-character
 SHAs are consistently shortened to 12 characters. Set
-`NIGHTRAIL_DETECT_DEPLOY=false` (or `c.detect_deploy = false`) to keep only the
-explicit `NIGHTRAIL_DEPLOY` and Kamal defaults.
+`RAILWATCH_DETECT_DEPLOY=false` (or `c.detect_deploy = false`) to keep only the
+explicit `RAILWATCH_DEPLOY` and Kamal defaults.
 
 To report an exception manually (the `Rails.error.report`-equivalent):
 
 ```ruby
-Nightrail.report(error, handled: true, context: { order_id: order.id })
+Railwatch.report(error, handled: true, context: { order_id: order.id })
 ```
 
 `severity` defaults to `:warning` when `handled: true`, `:error`
 otherwise. See the `exception` section of
 [`docs/records.md`](docs/records.md) for the full field list, and
 [`docs/configuration.md`](docs/configuration.md) for redaction
-(`Nightrail.redact_exceptions`), `capture_exception_source`, and
-`Nightrail.on_unrecoverable` (Nightrail watching its own internal failures).
+(`Railwatch.redact_exceptions`), `capture_exception_source`, and
+`Railwatch.on_unrecoverable` (Railwatch watching its own internal failures).
 
 ## Development
 

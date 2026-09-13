@@ -13,7 +13,7 @@ require "action_view/railtie"
 require "action_cable/engine"
 
 Bundler.require(*Rails.groups)
-require "nightrail"
+require "railwatch"
 
 module Dummy
   class Application < Rails::Application

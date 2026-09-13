@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-gemspec name: "nightrail"
+gemspec name: "railwatch"
 
 gem "puma"
 gem "sqlite3", ">= 2.1"
