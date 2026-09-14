@@ -23,10 +23,10 @@ prints every block below with your platform's host already filled in.
 
 MCP tokens are **per person**, not per application: sign in to the platform,
 go to **Settings → Profile → "API & MCP token"**, and press *Generate token*.
-The token starts with `lnt_` and is shown once. It can reach every account
+The token starts with `rwp_` and is shown once. It can reach every account
 your user belongs to, and nothing else.
 
-This is a different token from the `lt_...` ingest token the gem uses. The
+This is a different token from the `rw_...` ingest token the gem uses. The
 ingest token writes telemetry for one environment; the MCP token reads it
 back as you.
 
@@ -36,13 +36,13 @@ each with a copy button — so the fastest path is: generate, copy, paste.
 ## 2. Connect a client
 
 Everything below uses `https://railwatch.rebulk.com/mcp`; substitute your own
-host if you self-host, and `lnt_your_token_here` for the token.
+host if you self-host, and `rwp_your_token_here` for the token.
 
 ### Claude Code
 
 ```sh
 claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
-  --header "Authorization: Bearer lnt_your_token_here"
+  --header "Authorization: Bearer rwp_your_token_here"
 ```
 
 ### Claude Desktop
@@ -60,7 +60,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
         "mcp-remote",
         "https://railwatch.rebulk.com/mcp",
         "--header",
-        "Authorization: Bearer lnt_your_token_here"
+        "Authorization: Bearer rwp_your_token_here"
       ]
     }
   }
@@ -76,7 +76,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
   "mcpServers": {
     "railwatch": {
       "url": "https://railwatch.rebulk.com/mcp",
-      "headers": { "Authorization": "Bearer lnt_your_token_here" }
+      "headers": { "Authorization": "Bearer rwp_your_token_here" }
     }
   }
 }
@@ -92,7 +92,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
     "railwatch": {
       "type": "http",
       "url": "https://railwatch.rebulk.com/mcp",
-      "headers": { "Authorization": "Bearer lnt_your_token_here" }
+      "headers": { "Authorization": "Bearer rwp_your_token_here" }
     }
   }
 }
@@ -113,7 +113,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
         "mcp-remote",
         "https://railwatch.rebulk.com/mcp",
         "--header",
-        "Authorization: Bearer lnt_your_token_here"
+        "Authorization: Bearer rwp_your_token_here"
       ]
     }
   }
@@ -124,7 +124,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 
 ```sh
 curl -sS https://railwatch.rebulk.com/mcp \
-  -H "Authorization: Bearer lnt_your_token_here" \
+  -H "Authorization: Bearer rwp_your_token_here" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```

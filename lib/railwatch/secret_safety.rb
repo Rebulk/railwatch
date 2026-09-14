@@ -6,7 +6,9 @@ module Railwatch
   # Read-only Git checks used by the installer and doctor. Tokens are never
   # returned in diagnostics: callers get a path or a short prefix only.
   module SecretSafety
-    TOKEN_PATTERN = /\blt_[A-Za-z0-9_-]{6,}\b/
+    # rw_ is the ingest token prefix; lt_ was the prefix before 0.1.1 and is
+    # still matched so a token minted earlier is still caught in a tracked file.
+    TOKEN_PATTERN = /\b(?:rw|lt)_[A-Za-z0-9_-]{6,}\b/
     TOKEN_FILE_GLOBS = [ ".env", ".env.*", ".kamal/secrets", "config/deploy.yml",
                          "config/initializers/*.rb" ].freeze
 

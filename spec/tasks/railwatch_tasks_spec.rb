@@ -376,7 +376,7 @@ RSpec.describe "railwatch rake tasks" do
 
       expect(output).to include("Railwatch platform: http://railwatch.test")
       expect(output).to include("http://railwatch.test/dashboard")
-      expect(output).to include("RAILWATCH_TOKEN=lt_...")
+      expect(output).to include("RAILWATCH_TOKEN=rw_...")
     end
 
     it "tells a self-hosted app to set RAILWATCH_INGEST_URL as well" do
@@ -409,8 +409,8 @@ RSpec.describe "railwatch rake tasks" do
     it "prints a paste-ready block for every supported client" do
       output = capture_task("railwatch:mcp")
 
-      expect(output).to include(%(claude mcp add railwatch --transport http http://railwatch.test/mcp --header "Authorization: Bearer lnt_your_token_here"))
-      expect(output).to include(%("args": ["-y", "mcp-remote", "http://railwatch.test/mcp", "--header", "Authorization: Bearer lnt_your_token_here"]))
+      expect(output).to include(%(claude mcp add railwatch --transport http http://railwatch.test/mcp --header "Authorization: Bearer rwp_your_token_here"))
+      expect(output).to include(%("args": ["-y", "mcp-remote", "http://railwatch.test/mcp", "--header", "Authorization: Bearer rwp_your_token_here"]))
       expect(output).to include(%("mcpServers")) # Claude Desktop + Cursor
       expect(output).to include(%("servers"))    # VS Code
       expect(output).to include(%("context_servers")) # Zed

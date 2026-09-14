@@ -207,7 +207,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     def env_file = File.join(destination_root, ".env")
 
     def install(*extra)
-      Dir.chdir(destination_root) { run_generator(%w[--no-doctor --token=lt_abc123 --url=https://railwatch.example.com] + extra) }
+      Dir.chdir(destination_root) { run_generator(%w[--no-doctor --token=rw_abc123 --url=https://railwatch.example.com] + extra) }
     end
 
     it "appends both variables to an existing .env, leaving what was there alone" do
@@ -215,7 +215,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       install
 
-      expect(File.read(env_file)).to eq("FOO=bar\nRAILWATCH_TOKEN=lt_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
+      expect(File.read(env_file)).to eq("FOO=bar\nRAILWATCH_TOKEN=rw_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
     end
 
     it "separates the appended block when the existing .env has no trailing newline" do
@@ -223,7 +223,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       install
 
-      expect(File.read(env_file)).to eq("FOO=bar\nRAILWATCH_TOKEN=lt_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
+      expect(File.read(env_file)).to eq("FOO=bar\nRAILWATCH_TOKEN=rw_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
     end
 
     it "creates .env when there is none but dotenv is in the Gemfile" do
@@ -231,7 +231,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       install
 
-      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=lt_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
+      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_abc123\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
     end
 
     it "writes each variable once when run again" do
@@ -244,19 +244,19 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     end
 
     it "leaves a variable the app already set alone" do
-      File.write(env_file, "RAILWATCH_TOKEN=lt_existing\n")
+      File.write(env_file, "RAILWATCH_TOKEN=rw_existing\n")
 
       install
 
-      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=lt_existing\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
+      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_existing\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
     end
 
     it "prints only a token prefix, and writes no file, when the app has no dotenv" do
       output = install
 
       expect(File).not_to exist(env_file)
-      expect(output).to include("RAILWATCH_TOKEN=lt_abc... (9 chars) (value hidden)")
-      expect(output).not_to include("RAILWATCH_TOKEN=lt_abc123")
+      expect(output).to include("RAILWATCH_TOKEN=rw_abc... (9 chars) (value hidden)")
+      expect(output).not_to include("RAILWATCH_TOKEN=rw_abc123")
       expect(output).to include("RAILWATCH_INGEST_URL=https://railwatch.example.com")
       expect(output).to include(".kamal/secrets")
     end
@@ -275,11 +275,11 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "reads an exported token without putting it in command arguments" do
       File.write(env_file, "")
       previous_token = ENV["RAILWATCH_TOKEN"]
-      ENV["RAILWATCH_TOKEN"] = "lt_from_environment"
+      ENV["RAILWATCH_TOKEN"] = "rw_from_environment"
 
       Dir.chdir(destination_root) { run_generator }
 
-      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=lt_from_environment\n")
+      expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_from_environment\n")
     ensure
       previous_token.nil? ? ENV.delete("RAILWATCH_TOKEN") : ENV["RAILWATCH_TOKEN"] = previous_token
     end
@@ -287,8 +287,8 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "warns about the legacy command-line token without printing it" do
       output = install
 
-      expect(output).to include("--token exposes lt_abc... (9 chars) in process arguments")
-      expect(output).not_to include("--token exposes lt_abc123")
+      expect(output).to include("--token exposes rw_abc... (9 chars) in process arguments")
+      expect(output).not_to include("--token exposes rw_abc123")
     end
 
     it "refuses a token when .env is tracked, while still writing the non-secret URL" do
@@ -300,9 +300,9 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       output = install
 
-      expect(output).to include("Refusing to write lt_abc... (9 chars) to .env")
+      expect(output).to include("Refusing to write rw_abc... (9 chars) to .env")
       expect(File.read(env_file)).to eq("FOO=bar\nRAILWATCH_INGEST_URL=https://railwatch.example.com\n")
-      expect(File.read(env_file)).not_to include("lt_abc123")
+      expect(File.read(env_file)).not_to include("rw_abc123")
     end
 
     it "refuses a token when .env is not ignored" do
@@ -324,20 +324,20 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       install
 
-      expect(File.read(env_file)).to include("RAILWATCH_TOKEN=lt_abc123\n")
+      expect(File.read(env_file)).to include("RAILWATCH_TOKEN=rw_abc123\n")
     end
 
     it "reads a token from stdin without echoing it" do
       File.write(env_file, "")
       previous_stdin = $stdin
-      $stdin = StringIO.new("lt_from_stdin\n")
+      $stdin = StringIO.new("rw_from_stdin\n")
 
       output = Dir.chdir(destination_root) do
         run_generator %w[--no-doctor --token-stdin --url=https://railwatch.example.com]
       end
 
-      expect(File.read(env_file)).to include("RAILWATCH_TOKEN=lt_from_stdin\n")
-      expect(output).not_to include("lt_from_stdin")
+      expect(File.read(env_file)).to include("RAILWATCH_TOKEN=rw_from_stdin\n")
+      expect(output).not_to include("rw_from_stdin")
     ensure
       $stdin = previous_stdin if previous_stdin
     end

@@ -103,7 +103,7 @@ token at Settings → Profile → "API & MCP token", then:
 
 ```sh
 claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
-  --header "Authorization: Bearer lnt_your_token_here"
+  --header "Authorization: Bearer rwp_your_token_here"
 ```
 
 `bin/rails railwatch:mcp` prints this and the Claude Desktop, Cursor, VS Code, and

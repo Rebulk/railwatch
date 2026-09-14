@@ -54,7 +54,7 @@ them and cannot resolve minified locations accurately.
 
 For a custom release uploader, POST the raw `.map` bytes to
 `/ingest/sourcemaps` with `Content-Type: application/octet-stream`,
-`Authorization: Bearer lt_...`, `X-Railwatch-Deploy`, and
+`Authorization: Bearer rw_...`, `X-Railwatch-Deploy`, and
 `X-Railwatch-Filename` (the generated JavaScript URL path without a leading
 slash). A successful response is HTTP 201 with
 `{"ok":true,"filename":"vite/assets/index-abc.js","bytes":1234}`.
