@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 (2026-09-14)
+
+- Token prefixes are `rw_` for an environment's ingest token and `rwp_`
+  for a personal API and MCP token. They were `lt_` and `lnt_`, Lantern's
+  initials, which no longer name anything a user can see. The platform
+  authenticates by digest, so tokens minted before this keep working; the
+  doctor's plaintext-token scan matches both the old and the new ingest
+  prefix.
+
 ## 0.1.0 (2026-09-14)
 
 First public release.

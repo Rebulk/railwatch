@@ -73,7 +73,7 @@ update `RAILWATCH_TOKEN`.
 bin/rails railwatch:token   # prints the URL to create/copy a token
 ```
 
-A token looks like `lt_` followed by 40 characters. The gem is
+A token looks like `rw_` followed by 40 characters. The gem is
 completely inert without one: `Railwatch.enabled?` is `config.enabled &&
 token.present?`, so an app with no token installs no subscribers and
 ships nothing.
@@ -85,7 +85,7 @@ bin/rails railwatch:doctor
 ```
 
 ```
-✓ token: lt_9Qv... (43 chars)
+✓ token: rw_9Qv... (43 chars)
 ✓ ingest url: https://railwatch.rebulk.com
 ✓ ingest reachable: GET https://railwatch.rebulk.com/ingest/ping
 ✓ request middleware: Railwatch::Middleware::Request at position 0
@@ -234,7 +234,7 @@ run or a release page.
 Environment variables only:
 
 ```sh
-RAILWATCH_TOKEN=lt_...
+RAILWATCH_TOKEN=rw_...
 RAILWATCH_INGEST_URL=https://railwatch.rebulk.com   # only when self-hosting
 RAILWATCH_DEPLOY=<release identifier>
 ```

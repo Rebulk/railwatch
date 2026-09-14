@@ -186,11 +186,11 @@ namespace :railwatch do
 
       1. Sign in (or sign up) at #{base.url("/dashboard")}
       2. New application, then New environment (production, staging, ...)
-      3. The environment's token (lt_...) is shown once, right after it is created.
+      3. The environment's token (rw_...) is shown once, right after it is created.
 
       Then set it where this app reads its environment:
 
-        RAILWATCH_TOKEN=lt_...#{"\n  RAILWATCH_INGEST_URL=#{base.host_url}" if base.self_hosted?}
+        RAILWATCH_TOKEN=rw_...#{"\n  RAILWATCH_INGEST_URL=#{base.host_url}" if base.self_hosted?}
 
       With Kamal:  bin/rails generate railwatch:install --prompt-token --kamal-secrets
       Verify:      bin/rails railwatch:doctor
@@ -204,12 +204,12 @@ namespace :railwatch do
   task mcp: :environment do
     base = Railwatch::Endpoints.new(Railwatch.config)
     mcp = base.url("/mcp")
-    token = "lnt_your_token_here"
+    token = "rwp_your_token_here"
     puts <<~TEXT
       Railwatch MCP server: #{mcp}
 
       An MCP token is per person, not per app: Settings -> Profile -> "API & MCP
-      token" at #{base.url("/settings/profile")}. It starts with lnt_ and is
+      token" at #{base.url("/settings/profile")}. It starts with rwp_ and is
       shown once. Everything below is scoped to whatever accounts that user
       belongs to.
 
