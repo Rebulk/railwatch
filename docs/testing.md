@@ -2,13 +2,13 @@
 
 Railwatch already watches every query, N+1, span, exception, and outgoing
 request your app makes. The same instrumentation works in your test suite,
-which means a spec can assert on them — and CI can fail a pull request that
+which means a spec can assert on them. CI can fail a pull request that
 adds an N+1 or doubles a page's query count.
 
 ## Set-up
 
-RSpec — add one line to `spec/rails_helper.rb` (the install generator adds it
-for you):
+RSpec: add one line to `spec/rails_helper.rb`. The install generator adds it
+for you.
 
 ```ruby
 require "rspec/rails"
@@ -18,7 +18,7 @@ require "railwatch/rspec"
 That requires `railwatch/spec_helper`, includes `Railwatch::SpecHelper` into every
 example group, and defines the matchers below.
 
-Minitest — the same thing in `test/test_helper.rb`:
+Minitest: the same thing in `test/test_helper.rb`.
 
 ```ruby
 require "rails/test_help"
@@ -31,7 +31,7 @@ end
 
 Railwatch must be *enabled* in the test environment or every block would look
 empty. `config.enabled?` is true when `config.enabled` is set and a token is
-present, so set any non-blank `RAILWATCH_TOKEN` for the test env — records go to
+present, so set any non-blank `RAILWATCH_TOKEN` for the test env. Records go to
 an in-memory transport, never over the network. If Railwatch is disabled, the
 matchers raise `Railwatch::SpecHelper::Disabled` rather than quietly passing.
 
@@ -50,9 +50,9 @@ expect { user.reload }.to have_railwatch_queries(exactly: 1)
 expect { Report.generate }.to have_railwatch_queries(at_least: 1)
 ```
 
-Exactly one of `at_most:`, `exactly:`, `at_least:` — passing two (or none)
-raises `ArgumentError`. On failure the message lists every statement, each
-truncated to 120 characters, so CI output says what to go and fix:
+Pass exactly one of `at_most:`, `exactly:`, `at_least:`. Passing two, or
+none, raises `ArgumentError`. On failure the message lists every statement,
+each truncated to 120 characters, so CI output says what to go and fix:
 
 ```
 expected the block to run at most 1 database queries, but it ran 3:
@@ -61,7 +61,7 @@ expected the block to run at most 1 database queries, but it ran 3:
   3. SELECT "gadgets".* FROM "gadgets" WHERE "gadgets"."id" = ?
 ```
 
-Cached queries don't count — they never become `query` records.
+Cached queries don't count. They never become `query` records.
 
 ### `have_railwatch_n_plus_one`
 
@@ -88,7 +88,7 @@ expect { importer.run }.to record_railwatch_exception(ArgumentError)
 expect { importer.run }.not_to record_railwatch_exceptions
 ```
 
-These see anything that reaches `Rails.error` — `Rails.error.handle`,
+These see anything that reaches `Rails.error`: `Rails.error.handle`,
 `Rails.error.report`, `Railwatch.report`, and unhandled exceptions a request
 spec's middleware catches. A block that raises out of the matcher still
 raises; nothing is swallowed.
@@ -116,8 +116,8 @@ produces the same statement listing on failure.
 ## Where the matchers work
 
 Anywhere. A request spec's `get "/widgets"` opens and closes its own
-execution, so its whole tree — queries, N+1s, outgoing HTTP — is visible by
-the time the block returns:
+execution. So its whole tree is visible by the time the block returns:
+queries, N+1s, outgoing HTTP.
 
 ```ruby
 expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
@@ -129,7 +129,7 @@ execution for the duration of the assertion and closed afterwards. No parent
 opened yourself has its records read straight off that execution's buffer.
 
 Under the hood every matcher calls `Railwatch::SpecHelper#railwatch_capture`,
-which is public — use it directly for anything the matchers don't cover:
+which is public. Use it directly for anything the matchers don't cover:
 
 ```ruby
 records = railwatch_capture { get "/widgets" }
@@ -164,12 +164,12 @@ RSpec.describe "performance budgets", type: :request do
 end
 ```
 
-Two ways to run it: tag these examples and run them as their own CI step
-(`bundle exec rspec --tag performance`) so a budget failure is obvious in the
-job list, or leave them in the main suite so any pull request that adds a
+Two ways to run it. Tag these examples and run them as their own CI step
+with `bundle exec rspec --tag performance`, so a budget failure is obvious in
+the job list. Or leave them in the main suite so any pull request that adds a
 query fails immediately. Either way the failure message names the statements,
 so the fix is usually an `includes` one line away.
 
 Seed enough rows in `before` that an N+1 actually crosses
-`config.n_plus_one_threshold` — with three records, a five-query threshold
+`config.n_plus_one_threshold`. With three records, a five-query threshold
 never fires and the gate passes on code that would melt in production.

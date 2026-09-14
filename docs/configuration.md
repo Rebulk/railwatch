@@ -1,10 +1,12 @@
 # Configuration
 
-Everything below lives on `Railwatch::Configuration` (`lib/railwatch/configuration.rb`),
-set via `Railwatch.configure { |c| ... }` in `config/initializers/railwatch.rb`
-(created by `bin/rails generate railwatch:install`). Every setting has a
-`RAILWATCH_*` env var default; explicit values set in the initializer always
-win over the env var.
+Everything below lives on `Railwatch::Configuration`, in
+`lib/railwatch/configuration.rb`. Set it via
+`Railwatch.configure { |c| ... }` in `config/initializers/railwatch.rb`.
+That file is created by
+`bin/rails generate railwatch:install`. Most settings have a `RAILWATCH_*`
+env var default; the tables below show which. Explicit values set in the
+initializer always win over the env var.
 
 ## Core
 
@@ -22,32 +24,33 @@ win over the env var.
 | `beacon_rate_limit` | `RAILWATCH_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /railwatch/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
 `Railwatch.enabled?` delegates to `config.enabled?`, which is `@enabled &&
-token.present?` — there is no separate "is configured" check elsewhere.
+token.present?`. There is no separate "is configured" check elsewhere.
 
 Deploy detection stops at the first value found: `RAILWATCH_DEPLOY`,
 `KAMAL_VERSION`, `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
 `HEROKU_SLUG_COMMIT`, `RENDER_GIT_COMMIT`, the tag from `FLY_IMAGE_REF`,
 `VERCEL_GIT_COMMIT_SHA`, `CI_COMMIT_SHA`, `GITHUB_SHA`, a Capistrano
-`REVISION` file, then `.git/HEAD` (including loose and packed refs). Git is
+`REVISION` file, then `.git/HEAD`, including loose and packed refs. Git is
 never run as a subprocess. An initializer assignment to `config.deploy`
 always wins.
 
 The request middleware also recognizes a reporter's own `POST /ingest` when
 the configured ingest endpoint runs in the instrumented application. It
-bypasses that request only when the
-method, bearer token, configured ingest path, and public scheme/host/port all
-match; an unrelated application route named `/ingest` remains observable.
-Rack's normalized forwarded origin is used so this works behind a trusted
-TLS-terminating proxy with `Forwarded` or `X-Forwarded-*` headers.
+bypasses that request only when the method, bearer token, configured
+ingest path, and public scheme/host/port all match. An unrelated
+application route named `/ingest` remains observable. Rack's normalized
+forwarded origin is used, so this works behind a trusted TLS-terminating
+proxy with `Forwarded` or `X-Forwarded-*` headers.
 
 ## Sampling
 
-`sample` is a hash of rate per execution kind, each `0.0`–`1.0`, decided
-once per execution (`Railwatch::Sampler.decide`, `lib/railwatch/sampler.rb`) —
-not per record. A sampled-in execution ships every child record it
-buffered; a sampled-out one ships nothing except an unhandled exception
-(governed by its own `exceptions` rate, decided once and memoized per
-execution — see `docs/records.md`'s `exception` section).
+`sample` is a hash of rate per execution kind, each `0.0`–`1.0`. The rate
+is decided once per execution, not per record, by
+`Railwatch::Sampler.decide` in `lib/railwatch/sampler.rb`. A sampled-in
+execution ships every child record it buffered. A sampled-out one ships
+nothing except an unhandled exception. That exception is governed by its
+own `exceptions` rate, decided once and memoized per execution. See
+`docs/records.md`'s `exception` section.
 
 | Key | Env var | Default |
 |---|---|---|
@@ -58,12 +61,13 @@ execution — see `docs/records.md`'s `exception` section).
 | `channels` | `RAILWATCH_CHANNEL_SAMPLE_RATE` | `1.0` |
 | `exceptions` | `RAILWATCH_EXCEPTION_SAMPLE_RATE` | `1.0` |
 
-Set as a whole hash: `c.sample = { requests: 0.1, jobs: 1.0 }` — keys you
-omit keep their default (`config.sample_rate` falls back to `1.0` for an
-unset kind).
+Set as a whole hash: `c.sample = { requests: 0.1, jobs: 1.0 }`. Keys you
+omit keep their default, since `config.sample_rate` falls back to `1.0`
+for an unset kind.
 
-**Per-route overrides**, from `ControllerHelpers`
-(`lib/railwatch/controller_helpers.rb`), included into every controller:
+**Per-route overrides** come from `ControllerHelpers`, in
+`lib/railwatch/controller_helpers.rb`, which is included into every
+controller:
 
 ```ruby
 class ReportsController < ApplicationController
@@ -72,30 +76,30 @@ class ReportsController < ApplicationController
 end
 ```
 
-Both accept the same options as `before_action` (`only:`, `except:`, ...).
-Programmatically: `Railwatch.sample(rate)` re-rolls the current execution's
-sampling decision; `Railwatch.dont_sample` forces it off; `Railwatch.sampling?`
-reads the current decision.
+Both accept the same options as `before_action`: `only:`, `except:`, and
+so on. Programmatically, `Railwatch.sample(rate)` re-rolls the current
+execution's sampling decision. `Railwatch.dont_sample` forces it off.
+`Railwatch.sampling?` reads the current decision.
 
 ### Tail-based sampling
 
 Head sampling decides at the *start* of an execution, before anything is
-known about it — cheap, but it throws away exactly the slow requests you
-wanted to see. Tail sampling keeps buffering a head-sampled-out
-execution's child records and decides at the *end*, once the duration and
-outcome are known.
+known about it. That is cheap, but it throws away exactly the slow
+requests you wanted to see. Tail sampling keeps buffering a
+head-sampled-out execution's child records and decides at the *end*, once
+the duration and outcome are known.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
 | `tail_sample_slow_ms` | `RAILWATCH_TAIL_SAMPLE_SLOW_MS` | nil (off) | Keep a head-sampled-out execution that ran at least this many milliseconds. |
 
-With it set (or after `Railwatch.keep!`), a head-sampled-out execution
-ships its whole tree when it ran at least `tail_sample_slow_ms`, when
-`Railwatch.keep!` was called, or when it raised an unhandled exception
-(subject to the `exceptions` rate); otherwise the buffered records are
-discarded at the end and nothing ships. Such a tree's parent record
-carries `tail_sampled: true`, so a tail-kept execution is
-distinguishable from a head-sampled one.
+With it set, or after `Railwatch.keep!`, a head-sampled-out execution
+ships its whole tree in three cases: it ran at least
+`tail_sample_slow_ms`, `Railwatch.keep!` was called, or it raised an
+unhandled exception. The exception case is subject to the `exceptions`
+rate. Otherwise the buffered records are discarded at the end and nothing
+ships. Such a tree's parent record carries `tail_sampled: true`, so a
+tail-kept execution is distinguishable from a head-sampled one.
 
 ```ruby
 c.sample = { requests: 0.05 }   # keep 5% of requests...
@@ -103,22 +107,23 @@ c.tail_sample_slow_ms = 500     # ...plus every request slower than 500ms
 Railwatch.keep!                   # keep this one, whatever the head decision was
 ```
 
-**The trade-off is memory**: with tail sampling on, every sampled-out
-execution buffers its child records (queries, logs, cache events, ...)
-for its lifetime instead of discarding them as they happen, capped at
-`Execution::MAX_RECORDS` (10,000) per execution. With it off — the
-default — `Execution#recording?` is false for a sampled-out execution and
-nothing is built or buffered at all, which is the cheapest path and
-exactly the behaviour Railwatch had before. `Railwatch.keep!` can only keep
-records made *after* the call unless tail sampling was already on: what
-was never buffered can't be resurrected.
+**The trade-off is memory.** With tail sampling on, every sampled-out
+execution buffers its child records for its lifetime instead of
+discarding them as they happen. Those are queries, logs, cache events,
+and so on. The buffer is capped at `Execution::MAX_RECORDS` per
+execution, which is 10,000. With it off, the default,
+`Execution#recording?` is false for a sampled-out execution and nothing
+is built or buffered at all. That is the cheapest path and exactly the
+behaviour Railwatch had before. `Railwatch.keep!` can only keep records
+made *after* the call unless tail sampling was already on. What was never
+buffered can't be resurrected.
 
 ### Failure context
 
 Tail sampling buys diagnosability for sampled-out executions with the
 memory to buffer *every* one of them. Failure context is the same trade
-on a much shorter leash: keep a bounded ring of a head-sampled-out
-execution's most recent child records, and ship it only if that
+on a much shorter leash. It keeps a bounded ring of a head-sampled-out
+execution's most recent child records, and ships it only if that
 execution reports an unhandled exception.
 
 | Attribute | Env var | Default | Meaning |
@@ -132,33 +137,34 @@ c.failure_context = 200         # ...and the last 200 records of any that fails
 
 With this set, a head-sampled-out request, job attempt, scheduled task,
 or command buffers its child records in a ring of that many. If it
-reports an unhandled exception — the same policy that decides whether
-the exception itself ships, i.e. subject to the `exceptions` rate — the
-ring is promoted, and the parent, the exception, and the retained
-children all ship together, with `tail_sampled: true` on the parent. If
-it completes normally the ring is discarded at the end and nothing ships,
-exactly as before.
+reports an unhandled exception, the ring is promoted. The parent, the
+exception, and the retained children then all ship together, with
+`tail_sampled: true` on the parent. Whether it "reports" one follows the
+same policy that decides whether the exception itself ships, i.e. it is
+subject to the `exceptions` rate. If it completes normally the ring is
+discarded at the end and nothing ships, exactly as before.
 
-Nothing else promotes a ring. `exceptions: 0`, an exception in
-`ignored_exceptions`, an exception `Railwatch.report`s as handled or that a
-controller's `rescue_from` swallowed, one reported inside
-`Railwatch.ignore` / between `Railwatch.pause` and `Railwatch.resume`, and an
-interactive `bin/rails runner`'s error all leave the sampled-out
-execution shipping exactly what it shipped before the ring existed
-(nothing, or the lone parent record that gives an unhandled exception
-somewhere to hang). `Railwatch.sample(1.0)` and `Railwatch.keep!` still work
-from inside the execution, and now ship the ring's contents with it
-rather than only what followed the call.
+Nothing else promotes a ring. The following all leave the sampled-out
+execution shipping exactly what it shipped before the ring existed:
+`exceptions: 0`, an exception in `ignored_exceptions`, an exception
+`Railwatch.report`s as handled or that a controller's `rescue_from`
+swallowed, one reported inside `Railwatch.ignore` or between
+`Railwatch.pause` and `Railwatch.resume`, and an interactive
+`bin/rails runner`'s error. That is nothing, or the lone parent record
+that gives an unhandled exception somewhere to hang.
+`Railwatch.sample(1.0)` and `Railwatch.keep!` still work from inside the
+execution. They now ship the ring's contents with it rather than only
+what followed the call.
 
 **The cost** is that a sampled-out execution builds and buffers child
-records again — the ring bounds how many are *kept*, not how many are
-built — so this is a fraction of what tail sampling costs, but it is not
+records again. The ring bounds how many are *kept*, not how many are
+built. So this is a fraction of what tail sampling costs, but it is not
 free, which is why it is off by default. There is no separate byte
-limit: every record type is already truncated where it is built (SQL at
-16 KB, exception messages at 4 KB, attributes at 200 bytes), so
-`failure_context` records is also the memory bound, and overflow
-increments the same dropped-record counter tail sampling uses, reported
-with the batch rather than swallowed.
+limit. Every record type is already truncated where it is built: SQL at
+16 KB, exception messages at 4 KB, attributes at 200 bytes. So
+`failure_context` records is also the memory bound. Overflow increments
+the same dropped-record counter tail sampling uses, reported with the
+batch rather than swallowed.
 
 `failure_context` and `tail_sample_slow_ms` are independent. With both
 set, tail sampling's larger buffer wins for the whole execution: it keeps
@@ -167,9 +173,9 @@ well as on failure.
 
 ### Profiling
 
-Sampling and tail sampling say *which* executions ship; profiling says
-which of them also ship a stack profile — where the time inside a slow
-request or job actually went (`docs/records.md`'s `profile` record).
+Sampling and tail sampling say *which* executions ship. Profiling says
+which of them also ship a stack profile: where the time inside a slow
+request or job actually went. See `docs/records.md`'s `profile` record.
 
 The backend is an optional dependency the app installs itself, because
 neither belongs in every Gemfile:
@@ -193,16 +199,16 @@ The two triggers are different bargains:
 
 - **`profile_sample`** decides at the *start*, like head sampling. A
   profiler runs for that fraction of executions and every profile it takes
-  is shipped. Cheap and predictable — 1% of requests pay for a profiler,
+  is shipped. Cheap and predictable: 1% of requests pay for a profiler,
   99% pay for one `Random.rand`.
-- **`profile_slow_ms`** can't know an execution is slow until it is over,
-  so it profiles *every* tail-buffering execution from its first line and
+- **`profile_slow_ms`** can't know an execution is slow until it is over.
+  So it profiles *every* tail-buffering execution from its first line and
   throws away the ones that turn out to be fast. That means it only works
-  together with `tail_sample_slow_ms` (nothing tail-buffers without it),
-  and **the CPU cost is paid on every execution, not just the slow ones**
-  — the profiler's sampling thread runs throughout, and the stack table it
-  builds is held for the execution's lifetime. Raise
-  `profile_interval_us` if that shows up in your latency; a 5000µs
+  together with `tail_sample_slow_ms`, since nothing tail-buffers without
+  it. It also means **the CPU cost is paid on every execution, not just
+  the slow ones**. The profiler's sampling thread runs throughout, and the
+  stack table it builds is held for the execution's lifetime. Raise
+  `profile_interval_us` if that shows up in your latency. A 5000µs
   interval still resolves a 500ms request perfectly well.
 
 ```ruby
@@ -212,10 +218,10 @@ c.profile_slow_ms = 500         # ...and profile it
 c.profile_sample = 0.01         # plus a profile of 1% of everything else
 ```
 
-Both backends are process-global, so there is one profiler per process:
-an execution that starts while another is being profiled simply isn't
+Both backends are process-global, so there is one profiler per process.
+An execution that starts while another is being profiled simply isn't
 profiled. In the Rails `test` env profiling is skipped entirely unless
-`profile_sample` is explicitly non-zero, so a suite that inherits the
+`profile_sample` is explicitly non-zero. So a suite that inherits the
 app's `RAILWATCH_*` environment doesn't start a real profiler on every
 example.
 
@@ -230,27 +236,28 @@ other Railwatch-instrumented services shows up as one trace.
 | `trace_propagation_hosts` | `RAILWATCH_TRACE_PROPAGATION_HOSTS` (comma-separated) | nil (every host) | Allow list of hostnames. An entry starting with `.` matches as a suffix (`.services.example.com` matches `api.services.example.com`); anything else must match the host exactly. |
 
 Outgoing: `traceparent: 00-<trace_id>-<execution_id[0,16]>-<flags>`, with
-flags `01` when the execution is sampled and `00` when it isn't — a
+flags `01` when the execution is sampled and `00` when it isn't. A
 sampled-out execution still propagates, it just says so. A `traceparent`
 the app set itself is never overwritten.
 
 Inbound: the Rack middleware parses `HTTP_TRACEPARENT` and adopts its
 trace id and parent id for this execution. A header the W3C spec calls
-invalid is ignored and the execution starts its own trace: wrong lengths or
-non-hex characters, the forbidden version `ff`, an all-zero trace id, an
-all-zero parent id, and anything trailing the flags on version `00`. A
-future version may append fields after the flags, which are accepted and
-never interpreted as long as they are dash-delimited, so a newer upstream
-still links to this service instead of losing the trace. If the upstream
-flags say the trace is sampled, the downstream execution is kept
-(`Railwatch.keep!`, above) whatever its own head decision was — otherwise
-the trace would have a hole exactly where this service should be.
+invalid is ignored and the execution starts its own trace. Invalid means
+wrong lengths or non-hex characters, the forbidden version `ff`, an
+all-zero trace id, an all-zero parent id, or anything trailing the flags
+on version `00`. A future version may append fields after the flags.
+Those are accepted and never interpreted as long as they are
+dash-delimited, so a newer upstream still links to this service instead
+of losing the trace. If the upstream flags say the trace is sampled, the
+downstream execution is kept whatever its own head decision was, as with
+`Railwatch.keep!` above. Otherwise the trace would have a hole exactly
+where this service should be.
 
 ## Ignoring whole record types
 
-`ignore` drops a record type before it's ever built — cheaper than
+`ignore` drops a record type before it's ever built. That is cheaper than
 filtering after the fact, and the only way to stop the highest-volume
-types (`query`, `cache_event`, `log`) at the source.
+types at the source: `query`, `cache_event`, `log`.
 
 | Value | Env var |
 |---|---|
@@ -271,12 +278,12 @@ types (`query`, `cache_event`, `log`) at the source.
 c.ignore = [:cache_events, :transactions]
 ```
 
-Setting an unknown type raises `ArgumentError` immediately (this is
-validated at assignment, not silently dropped). Note `query` and
-`n_plus_one` records both key off `:queries`; `notification` off
-`:notifications`; see `Railwatch::PLURALS` in `lib/railwatch.rb` for the full
-singular-to-plural mapping used everywhere ignore/redact/reject hooks key
-by plural.
+Setting an unknown type raises `ArgumentError` immediately. This is
+validated at assignment, not silently dropped. Note `query` and
+`n_plus_one` records both key off `:queries`, and `notification` off
+`:notifications`. See `Railwatch::PLURALS` in `lib/railwatch.rb` for the
+full singular-to-plural mapping used everywhere ignore/redact/reject
+hooks key by plural.
 
 ## Redaction
 
@@ -289,22 +296,23 @@ already hides:
 | `redact_params` | `RAILWATCH_REDACT_PARAMS` (comma-separated) | `password,password_confirmation,authenticity_token,_token` |
 
 `redact_params` is merged with `Rails.application.config.filter_parameters`
-at first use (`Railwatch::Redactor#param_filter`), so anything the app
+at first use, in `Railwatch::Redactor#param_filter`. So anything the app
 already scrubs from its own logs is scrubbed here too, with no extra
 config. Request params are only captured at all when
 `capture_request_payload` is on, and even then only for a request that
-raised an exception (see `request` in `docs/records.md`).
+raised an exception. See `request` in `docs/records.md`.
 
-Header names containing a credential-shaped segment (`api-key`, `access-key`,
-`private-key`, `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`,
-`secret`, or `signature`) are always masked as a safe default, even when they
-arrive as concatenated Rack aliases such as `X-AuthToken`, `X-ApiToken`,
-`X-AccessToken`, `X-ClientToken`, `X-SessionToken`, `X-RefreshToken`,
-`X-SecretKey`, `X-HmacSignature`, or `X-CSRFToken`. Add application-specific
-aliases to `redact_headers`; ordinary diagnostic headers remain available.
+Header names containing a credential-shaped segment are always masked as
+a safe default. The segments are `api-key`, `access-key`, `private-key`,
+`auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`, `secret`, and
+`signature`. This holds even when they arrive as concatenated Rack
+aliases such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`,
+`X-ClientToken`, `X-SessionToken`, `X-RefreshToken`, `X-SecretKey`,
+`X-HmacSignature`, or `X-CSRFToken`. Add application-specific aliases to
+`redact_headers`. Ordinary diagnostic headers remain available.
 
 **Per-field redaction blocks** run after a record is built, before it's
-buffered — the block receives and can mutate the record hash in place:
+buffered. The block receives and can mutate the record hash in place:
 
 ```ruby
 Railwatch.redact_queries    { |q| q[:sql] = q[:sql].gsub(/email = '[^']+'/, "email = '?'") }
@@ -317,12 +325,12 @@ Railwatch.redact_outgoing_requests { |o| ... }
 Railwatch.redact_logs       { |l| ... }
 ```
 
-A redactor that raises drops the record entirely (logged via
-`Railwatch.debug`, never raised into app code).
+A redactor that raises drops the record entirely. The error is logged via
+`Railwatch.debug`, never raised into app code.
 
 ## Rejection
 
-Drop a record entirely based on its content — for the record types that
+Drop a record entirely based on its content, for the record types that
 don't have a matching `redact_*`:
 
 ```ruby
@@ -337,39 +345,41 @@ Railwatch.reject_logs               { |l| ... }
 ```
 
 `Railwatch.reject_cache_keys(prefixes)` is a shortcut that appends to
-`config.ignored_cache_key_prefixes`, matched by `Configuration.match_cache_key?`:
-a `Regexp` matches as-is; a `String` starting with `^` (or containing
-another regex metacharacter) is compiled as one; a `String` ending in `*`
-matches as a prefix; anything else must match the key exactly.
+`config.ignored_cache_key_prefixes`. Entries are matched by
+`Configuration.match_cache_key?`. A `Regexp` matches as-is. A `String`
+starting with `^`, or containing another regex metacharacter, is compiled
+as one. A `String` ending in `*` matches as a prefix. Anything else must
+match the key exactly.
 
 ```ruby
 Railwatch.reject_cache_keys %w[session: rack::attack* ^feature_flag_\d+$]
 ```
 
-A rejector block returning truthy drops the record before it's buffered;
-a raising rejector is treated as "don't reject" (fails open, logged via
-`Railwatch.debug`).
+A rejector block returning truthy drops the record before it's buffered.
+A raising rejector is treated as "don't reject": it fails open and is
+logged via `Railwatch.debug`.
 
 ## before_ingest
 
-Runs once per batch, right before it's POSTed — the last chance to
-inspect or drop records as a group (redact/reject hooks above run
-per-record, earlier, at record-build time):
+Runs once per batch, right before it's POSTed. This is the last chance to
+inspect or drop records as a group. The redact/reject hooks above run
+per-record, earlier, at record-build time:
 
 ```ruby
 Railwatch.before_ingest { |batch| batch.size < 10_000 }   # return false to drop the whole batch
 Railwatch.before_ingest { |batch| batch.reject { |r| r[:t] == "log" } }  # return an Array to replace it
 ```
 
-Multiple hooks chain; any hook returning `false` drops the batch and
-skips remaining hooks (`Railwatch.run_before_ingest`, `lib/railwatch.rb`).
+Multiple hooks chain. Any hook returning `false` drops the batch and
+skips remaining hooks. See `Railwatch.run_before_ingest` in
+`lib/railwatch.rb`.
 
 ## Buffering, flushing, transport
 
-One background thread per process (`Railwatch::Reporter`,
-`lib/railwatch/reporter.rb`), re-armed after fork so each Puma cluster
-worker / Solid Queue forked worker gets its own. Never touches the app
-database.
+One background thread per process: `Railwatch::Reporter`, in
+`lib/railwatch/reporter.rb`. It is re-armed after fork so each Puma
+cluster worker / Solid Queue forked worker gets its own. Never touches
+the app database.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
@@ -385,50 +395,52 @@ database.
 | `timeout` | `RAILWATCH_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
 | `shutdown_timeout` | `RAILWATCH_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. A deployment drain timeout must be longer than this. |
 
-Delivery (`Railwatch::Transport::Http`, `lib/railwatch/transport/http.rb`):
-gzip NDJSON POST to `{ingest_url}/ingest`, one retry on a raised error or
-a 5xx within each delivery attempt. If that still fails — or ingest returns
-402, 408, or 429 — the immutable batch and its prior drop count are retained
-for retry. Every newly formed batch gets an `X-Railwatch-Batch-Id` UUID which is
-reused for the immediate HTTP retry and every later reporter retry; the
-platform can therefore return the first committed result without inserting
-the payload twice. Records written while a request is in flight collect in a
-separate bounded buffer, so they never change the retained request's identity.
-At most one retained batch plus one live buffer are held in memory. The
-reporter retries with jittered exponential backoff (one second up to 60
-seconds); it does not busy-loop. A 401 marks the transport
-permanently unauthorized (no further HTTP attempts for the process's
-lifetime); it and other permanent client rejections are reported through
+Delivery is `Railwatch::Transport::Http`, in
+`lib/railwatch/transport/http.rb`: a gzip NDJSON POST to
+`{ingest_url}/ingest`, with one retry on a raised error or a 5xx within
+each delivery attempt. If that still fails, or ingest returns 402, 408,
+or 429, the immutable batch and its prior drop count are retained for
+retry. Every newly formed batch gets an `X-Railwatch-Batch-Id` UUID. It is
+reused for the immediate HTTP retry and every later reporter retry, so
+the platform can return the first committed result without inserting the
+payload twice. Records written while a request is in flight collect in a
+separate bounded buffer, so they never change the retained request's
+identity. At most one retained batch plus one live buffer are held in
+memory. The reporter retries with jittered exponential backoff, from one
+second up to 60 seconds. It does not busy-loop. A 401 marks the transport
+permanently unauthorized: no further HTTP attempts for the process's
+lifetime. It and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
 
-HTTPS connections explicitly use OpenSSL `VERIFY_PEER`, and redirects are not
-followed. Plain HTTP is refused unless the host is loopback or
-`RAILWATCH_ALLOW_HTTP=true`; `railwatch:doctor` reports the policy and boot logs a
-warning when an insecure URL is refused.
+HTTPS connections explicitly use OpenSSL `VERIFY_PEER`, and redirects are
+not followed. Plain HTTP is refused unless the host is loopback or
+`RAILWATCH_ALLOW_HTTP=true`. `railwatch:doctor` reports the policy, and
+boot logs a warning when an insecure URL is refused.
 
-On every reporter flush tick, adaptive backpressure doubles a process-local
-sample divisor while either buffer ceiling is at least 80% full or the retry
-ladder is active, up to 8x. Clear ticks halve it back toward 1x. Eight is
-enough to create room after three pressured ticks and recovers in three clear
-ticks; a 16x ceiling would preserve less telemetry and take longer to recover.
-The sampler reads the reporter's Float without locking the request path; the
-reporter is its only writer, an ivar assignment is atomic, and one stale read
-only affects one probabilistic decision. Set `backpressure` false to keep the
+On every reporter flush tick, adaptive backpressure doubles a
+process-local sample divisor, up to 8x. It does so while either buffer
+ceiling is at least 80% full or the retry ladder is active. Clear ticks
+halve it back toward 1x. Eight is enough to create room after three
+pressured ticks and recovers in three clear ticks. A 16x ceiling would
+preserve less telemetry and take longer to recover. The sampler reads the
+reporter's Float without locking the request path. The reporter is its
+only writer, an ivar assignment is atomic, and one stale read only
+affects one probabilistic decision. Set `backpressure` false to keep the
 factor at 1. The current value is sent as
 `X-Railwatch-Backpressure-Factor` whenever it is greater than 1.
 
-`Railwatch.flush` forces an immediate flush (also called by the `command`
-patches after a rake task/runner invocation finishes, so short-lived
-processes don't lose their last batch to the flush interval). An unhandled
-exception (`Railwatch.record_now` → `Reporter#write_now`) enqueues the record
-and asks for an urgent flush; it never performs network I/O or a timeout
-cycle on the application thread. Urgent means within a quarter of a second
-(`Reporter::URGENT_FLUSH_DELAY`), not instantly: during an exception storm
-every request would otherwise wake the reporter for a handful of records,
-and a burst that produced 4,000 records went out as 400 POSTs of ten. A
-lone exception still ships inside that window; a storm coalesces into full
-batches, and a buffer that crosses `flush_threshold` flushes at once
-regardless.
+`Railwatch.flush` forces an immediate flush. The `command` patches also
+call it after a rake task/runner invocation finishes, so short-lived
+processes don't lose their last batch to the flush interval. An unhandled
+exception goes through `Railwatch.record_now` → `Reporter#write_now`,
+which enqueues the record and asks for an urgent flush. It never performs
+network I/O or a timeout cycle on the application thread. Urgent means
+within a quarter of a second, `Reporter::URGENT_FLUSH_DELAY`, not
+instantly. During an exception storm every request would otherwise wake
+the reporter for a handful of records, and a burst that produced 4,000
+records went out as 400 POSTs of ten. A lone exception still ships inside
+that window. A storm coalesces into full batches, and a buffer that
+crosses `flush_threshold` flushes at once regardless.
 
 During shutdown the reporter immediately attempts any retained batch and
 keeps retrying within `shutdown_timeout`. If the deadline expires, the batch
@@ -453,32 +465,33 @@ process exit after that deadline cannot preserve records for the next boot.
 |---|---|---|---|
 | `health_interval` | `RAILWATCH_HEALTH_INTERVAL` | `15.0` | Seconds between `health` records (Puma thread pool, Active Record pool, Solid Queue backlog — see `health` in `docs/records.md`). One background thread per web/worker process; never runs in a console, a rake task, or the `test` env. |
 
-Railwatch re-arms the reporter, sampler, and profiler after `fork` (one
-`ActiveSupport::ForkTracker` callback, Rails' own `Process._fork` hook), so
-clustered Puma workers and forked Solid Queue workers each get a fresh
-buffer, transport policy state, process record, health thread, and profiler
-slot. The child never flushes records or drop accounting inherited from its
-parent, and no `on_worker_boot` configuration is needed.
+Railwatch re-arms the reporter, sampler, and profiler after `fork`. It
+uses one `ActiveSupport::ForkTracker` callback, Rails' own `Process._fork`
+hook. So clustered Puma workers and forked Solid Queue workers each get a
+fresh buffer, transport policy state, process record, health thread, and
+profiler slot. The child never flushes records or drop accounting
+inherited from its parent, and no `on_worker_boot` configuration is
+needed.
 
 The `process` record is written from `config.after_initialize`, after the
 app's own initializers, so `boot_seconds` covers them. A Puma master that
-preloads the app runs those initializers too, so it writes its own
+preloads the app runs those initializers too. So it writes its own
 `process` record and starts its own reporter, health, and session threads
-before forking; Puma prints "Detected N Thread(s) started in app boot"
+before forking. Puma prints "Detected N Thread(s) started in app boot"
 for them. That is advisory: the threads it is warning about are exactly
 the ones the fork callback replaces in every worker. The Rake and
 `bin/rails runner` patches are installed from the engine's `rake_tasks`
-and `runner` hooks, which only a rake or runner process fires, so a web or
-worker boot does not require rake or railties' runner command.
+and `runner` hooks, which only a rake or runner process fires. So a web
+or worker boot does not require rake or railties' runner command.
 
-A numeric `RAILWATCH_*` value that is not a number (`RAILWATCH_BUFFER_SIZE=12px`)
-falls back to the default documented in the tables above rather than being
-coerced to `0`.
+A numeric `RAILWATCH_*` value that is not a number, such as
+`RAILWATCH_BUFFER_SIZE=12px`, falls back to the default documented in the
+tables above rather than being coerced to `0`.
 
 ### Release health
 
 `session` records count sessions per deploy, which is what the platform's
-crash-free session and crash-free user rates are computed from — the
+crash-free session and crash-free user rates are computed from. The
 `deploy` on every record *is* the release.
 
 | Attribute | Env var | Default | Meaning |
@@ -489,16 +502,17 @@ crash-free session and crash-free user rates are computed from — the
 
 There are two sources, and they meet on the same id:
 
-- **The browser client** (`app/frontend/lib/railwatch.ts`, installed by
-  `railwatch:install`) mints one id per tab in `sessionStorage` and mirrors it
-  into a `railwatch_session` cookie. It rides along on the beacon flushes the
-  client already sends for visits, so this costs no extra requests. This is
-  the primary source for a web app, and it is what makes session duration
-  mean "how long the tab was open".
-- **The request middleware** aggregates, in memory, every request that either
-  resolves a user or carries that cookie (or an `X-Railwatch-Session` header) —
-  the only source for an API-only app, and the only one that can see an
-  unhandled exception, which is what makes a session `crashed`.
+- **The browser client** is `app/frontend/lib/railwatch.ts`, installed by
+  `railwatch:install`. It mints one id per tab in `sessionStorage` and
+  mirrors it into a `railwatch_session` cookie. It rides along on the
+  beacon flushes the client already sends for visits, so this costs no
+  extra requests. This is the primary source for a web app, and it is
+  what makes session duration mean "how long the tab was open".
+- **The request middleware** aggregates, in memory, every request that
+  either resolves a user or carries that cookie or an
+  `X-Railwatch-Session` header. It is the only source for an API-only
+  app. It is also the only one that can see an unhandled exception, which
+  is what makes a session `crashed`.
 
 When a browser session's requests carry the cookie both sources produce
 records under the same id and the platform dedupes them.
@@ -514,15 +528,15 @@ dominated by Rails' own housekeeping:
 | `capture_default_vendor_cache_keys` | `RAILWATCH_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS` | `false` | `Configuration::DEFAULT_VENDOR_CACHE_KEYS`: `rack::attack`, `flipper`, `solid_cable`, `active_storage`, `migration_`, `schema_cache` prefixes. |
 | `capture_framework_events` | `RAILWATCH_CAPTURE_FRAMEWORK_EVENTS` | `false` | Rails 8.1 structured `Rails.event` events under `action_controller.*`, `active_record.*`, etc. — already redundant with the `request`/`job_attempt` records, so off by default. |
 
-`ignored_cache_key_prefixes` (code only, no env var — use
-`Railwatch.reject_cache_keys` above) is separate from these vendor
-defaults and always applies.
+`ignored_cache_key_prefixes` is separate from these vendor defaults and
+always applies. It is code only, with no env var; use
+`Railwatch.reject_cache_keys` above.
 
 ## Interactive sessions: console and runner
 
 An engineer poking at production from a shell is not the application failing.
 Sentry never hooked `bin/rails console` at all, and Railwatch keeps that
-behaviour — while making sure a deployed script still reports.
+behaviour, while making sure a deployed script still reports.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
@@ -539,10 +553,10 @@ the only thing that separates a typo from a cron job:
 | `rails runner /tmp/probe.rb` | interactive | same (a `.rb` file under `interactive_runner_paths`) |
 | `rails runner script/nightly.rb` | deployed | `command` record and the exception, as before |
 
-An interactive run is still recorded: the `command` record ships with its
-`exit_code`, duration, and `exception_preview`, so you can see that someone
-ran something and that it died — it just doesn't open an issue. Rake tasks
-and Solid Queue jobs are never interactive.
+An interactive run is still recorded. The `command` record ships with its
+`exit_code`, duration, and `exception_preview`, so you can see that
+someone ran something and that it died. It just doesn't open an issue.
+Rake tasks and Solid Queue jobs are never interactive.
 
 ## Exception source and request payload
 
@@ -558,7 +572,7 @@ and Solid Queue jobs are never interactive.
 | `capture_rescued_exceptions` | `RAILWATCH_CAPTURE_RESCUED_EXCEPTIONS` | `true` | Capture exceptions a controller swallows with `rescue_from` (Rails' `rescue_from_callback.action_controller` notification) as `handled: true`, `severity: :warning`, `source: "action_controller.rescue_from"`. Sentry calls this `report_rescued_exceptions`. |
 
 `DEFAULT_IGNORED_EXCEPTIONS` is the Rails-relevant subset of Sentry's own
-`excluded_exceptions` defaults — routine 4xx plumbing rather than
+`excluded_exceptions` defaults, routine 4xx plumbing rather than
 application bugs:
 
 `ActionController::BadRequest`, `ActionController::InvalidAuthenticityToken`,
@@ -571,9 +585,9 @@ application bugs:
 `Rack::QueryParser::ParameterTypeError`.
 
 Note that Rails never reports an exception that has a `rescue_response`
-(`ActiveRecord::RecordNotFound` → 404) to `Rails.error` in the first
-place, so several of these are belt-and-braces for the paths that *do*
-reach Railwatch — jobs, `Railwatch.report`, and `rescue_from`.
+to `Rails.error` in the first place. `ActiveRecord::RecordNotFound` → 404
+is one such. So several of these are belt-and-braces for the paths that
+*do* reach Railwatch: jobs, `Railwatch.report`, and `rescue_from`.
 
 ## Logging
 
@@ -582,9 +596,9 @@ reach Railwatch — jobs, `Railwatch.report`, and `rescue_from`.
 | `log_level` | `RAILWATCH_LOG_LEVEL` | `:info` |
 
 Only `Rails.logger` lines at or above this level become `log` records.
-Rails' own per-request/job noise (`"Started GET"`, `"Processing by"`,
-`"Rendered"`, etc.) is filtered regardless of level, since the
-`request`/`job_attempt` records already carry that information.
+Rails' own per-request/job noise is filtered regardless of level, since
+the `request`/`job_attempt` records already carry that information. That
+noise is `"Started GET"`, `"Processing by"`, `"Rendered"`, etc.
 Message text is otherwise shipped as written and is not parsed for embedded
 secrets. Keep secrets out of logs, use `Railwatch.redact_logs` for an
 application-specific scrub, or disable log records with
@@ -596,44 +610,46 @@ application-specific scrub, or disable log records with
 c.user { |user| { id: user.id, name: user.name, email: user.email } }
 ```
 
-Default (no block set): reads `Current.user` (authentication-zero /
-Rails 8 auth generator convention) if defined, else Warden's `env["warden"].user`
-(Devise). The resolved id is memoized per user per process-hour so a
-`user` record ships once, not once per request (`Railwatch::Subscribers::Users`,
-`docs/records.md`'s `user` section).
+The default, with no block set, reads `Current.user` if defined. That is
+the authentication-zero / Rails 8 auth generator convention. Otherwise it
+reads Warden's `env["warden"].user`, which is Devise. The resolved id is
+memoized per user per process-hour so a `user` record ships once, not
+once per request. See `Railwatch::Subscribers::Users` and
+`docs/records.md`'s `user` section.
 
 Ids are tenant-scoped: with a tenant bound, `1` is recorded as `acme:1`. It
 does not matter whether the tenant binds before or after the user is
-resolved — an app that resolves the user in one `before_action` and the
-tenant in the next still gets `acme:1`, on the records already buffered as
-well as the ones after. Return an already-scoped value from the block (an
-external id, or `"#{org.slug}:#{user.id}"`) and it is left alone.
+resolved. An app that resolves the user in one `before_action` and the
+tenant in the next still gets `acme:1`, on the records already buffered
+as well as the ones after. Return an already-scoped value from the block
+and it is left alone. That might be an external id, or
+`"#{org.slug}:#{user.id}"`.
 
-A request resolves its user at the end, but a job enqueued mid-action needs
-one immediately, so `JobTracing#serialize` resolves the enqueuing
-execution's user and tenant and puts those two identifier strings into the
-Active Job payload (`railwatch_user`/`railwatch_tenant`). The worker restores
-them before the attempt records anything, so a `job_attempt` and every
-child record under it are attributed to the person whose request enqueued
-the job rather than to a worker process that has no signed-in user — and a
-job that enqueues a job passes the same identity on. Nothing but the two
-strings crosses the queue; no model is serialized or hydrated. Payloads
-carry the keys only when there is something to carry, and a payload without
-them falls back to local resolution, so a queue drained across a deploy
-keeps working. See `docs/records.md`'s `job_attempt` section for retries,
-scheduled jobs, and the cardinality note.
+A request resolves its user at the end, but a job enqueued mid-action
+needs one immediately. So `JobTracing#serialize` resolves the enqueuing
+execution's user and tenant and puts those two identifier strings into
+the Active Job payload, as `railwatch_user`/`railwatch_tenant`. The worker
+restores them before the attempt records anything. So a `job_attempt` and
+every child record under it are attributed to the person whose request
+enqueued the job, rather than to a worker process that has no signed-in
+user. A job that enqueues a job passes the same identity on. Nothing but
+the two strings crosses the queue; no model is serialized or hydrated.
+Payloads carry the keys only when there is something to carry. A payload
+without them falls back to local resolution, so a queue drained across a
+deploy keeps working. See `docs/records.md`'s `job_attempt` section for
+retries, scheduled jobs, and the cardinality note.
 
 ```ruby
 c.beacon_user { |request| Session.find_by(id: request.cookie_jar.signed[:session_token])&.user }
 ```
 
-Who is behind a browser beacon (visits, browser sessions, JavaScript
-errors). The beacon is handled by the gem's engine controller, outside your
-`ApplicationController`, so an app that authenticates in a `before_action`
--- a signed session cookie looked up per request -- has not run it when the
-beacon arrives, and `Current.user` is nil there. Give Railwatch the same
-lookup; it hands the result to the `user` block above. Not needed when
-`Current.user` is set in middleware or by Warden.
+Who is behind a browser beacon: visits, browser sessions, JavaScript
+errors. The beacon is handled by the gem's engine controller, outside
+your `ApplicationController`. So an app that authenticates in a
+`before_action`, such as a signed session cookie looked up per request,
+has not run it when the beacon arrives, and `Current.user` is nil there.
+Give Railwatch the same lookup; it hands the result to the `user` block
+above. Not needed when `Current.user` is set in middleware or by Warden.
 
 ## Tenant / context
 
@@ -641,46 +657,48 @@ lookup; it hands the result to the `user` block above. Not needed when
 Railwatch.context(tenant: org.slug, plan: org.plan)
 ```
 
-Writes through to `ActiveSupport::ExecutionContext`, `Rails.error.set_context`,
-and `Rails.event.set_context` in one call (`Railwatch::Context.set`,
-`lib/railwatch/context.rb`) — so context set for Railwatch also shows up
-anywhere else Rails' own context stores are read. Serialized onto every
-record's `context` field, through the same `ActiveSupport::ParameterFilter`
-that redacts request params (`c.redact_params` plus Rails'
-`config.filter_parameters`) — so a token or password put in context is
-`[FILTERED]` on the wire, not written verbatim onto every record made while
-it was set. A context over 64KB is rebuilt smaller rather than cut: whole
-values are kept while they fit, an oversized string value ends with
-`[TRUNCATED]`, anything that still does not fit is dropped, and the result
-carries `"_railwatch_truncated": true`. It is always parseable JSON — the
-previous behaviour sliced the encoded string at 64KB, which produced a
-fragment the platform could not read at all. `tenant` specifically is
-auto-detected with no explicit `Railwatch.context` call needed when the app
-uses `activerecord-tenanted` (`ActiveRecord::Base.current_tenant`) or
-`TenantRecord` (`TenantRecord.current_tenant`) — `Context.current_tenant`
-checks both. The tenant is re-read while it is still nil, so a tenant bound
-*inside* the execution (activerecord-tenanted's `TenantSelector` middleware
-sits under Railwatch's, as do `around_action`s and a job's `with_tenant`
-block) still lands on the request/job record and every child made after
-the bind. Records made before the bind (a `before_action` that loads the
-user, say) keep `tenant: nil`.
+Writes through to `ActiveSupport::ExecutionContext`,
+`Rails.error.set_context`, and `Rails.event.set_context` in one call, via
+`Railwatch::Context.set` in `lib/railwatch/context.rb`. So context set for
+Railwatch also shows up anywhere else Rails' own context stores are read.
+It is serialized onto every record's `context` field, through the same
+`ActiveSupport::ParameterFilter` that redacts request params. That filter
+is `c.redact_params` plus Rails' `config.filter_parameters`. So a token or
+password put in context is `[FILTERED]` on the wire, not written verbatim
+onto every record made while it was set. A context over 64KB is rebuilt
+smaller rather than cut. Whole values are kept while they fit, an
+oversized string value ends with `[TRUNCATED]`, anything that still does
+not fit is dropped, and the result carries `"_railwatch_truncated": true`.
+It is always parseable JSON. The previous behaviour sliced the encoded
+string at 64KB, which produced a fragment the platform could not read at
+all. `tenant` specifically is auto-detected with no explicit
+`Railwatch.context` call needed when the app uses `activerecord-tenanted`,
+via `ActiveRecord::Base.current_tenant`, or `TenantRecord`, via
+`TenantRecord.current_tenant`. `Context.current_tenant` checks both. The
+tenant is re-read while it is still nil. So a tenant bound *inside* the
+execution still lands on the request/job record and every child made
+after the bind. activerecord-tenanted's `TenantSelector` middleware sits
+under Railwatch's, as do `around_action`s and a job's `with_tenant` block.
+Records made before the bind keep `tenant: nil`. A `before_action` that
+loads the user, say, is one such.
 
 ## Inertia: beacon and SSR
 
-`beacon_enabled` (`RAILWATCH_BEACON`, default `true`) gates
-`POST /railwatch/beacon`, mounted by the install generator
-(`mount Railwatch::Engine, at: "/railwatch"`) — see `visit` and `exception` in
-`docs/records.md` for the full field lists and client batching behavior.
-The same beacon carries visit timing, Core Web Vitals, browser sessions,
-and every JavaScript error the page throws; turning `beacon_enabled` off
-turns off all four. The endpoint takes no credential, so it is throttled
-per client IP (`beacon_rate_limit`, default 120 a minute, `0` to disable);
-a client past the limit gets a 429 with `Retry-After` and nothing from that
-POST is recorded. Client setup: call `startRailwatch()` (generated at
-`app/frontend/lib/railwatch.ts`) from your Inertia entrypoint.
+`beacon_enabled`, env var `RAILWATCH_BEACON`, default `true`, gates
+`POST /railwatch/beacon`. The install generator mounts that route with
+`mount Railwatch::Engine, at: "/railwatch"`. See `visit` and `exception`
+in `docs/records.md` for the full field lists and client batching
+behavior. The same beacon carries visit timing, Core Web Vitals, browser
+sessions, and every JavaScript error the page throws. Turning
+`beacon_enabled` off turns off all four. The endpoint takes no
+credential, so it is throttled per client IP by `beacon_rate_limit`,
+default 120 a minute, `0` to disable. A client past the limit gets a 429
+with `Retry-After` and nothing from that POST is recorded. Client setup:
+call `startRailwatch()` from your Inertia entrypoint. It is generated at
+`app/frontend/lib/railwatch.ts`.
 
 `startRailwatch` takes three optional settings, none of which has a
-server-side equivalent — they are decisions about the browser the code is
+server-side equivalent. They are decisions about the browser the code is
 running in:
 
 ```ts
@@ -703,8 +721,8 @@ startRailwatch({
 ```
 
 The same file exports two more things. `railwatchRootOptions()` returns
-React 19's `onCaughtError`/`onUncaughtError` root options —
-`createRoot(el, railwatchRootOptions())` — which is what reports an error a
+React 19's `onCaughtError`/`onUncaughtError` root options, used as
+`createRoot(el, railwatchRootOptions())`. That is what reports an error a
 boundary caught, since React only sends those to `console.error` outside
 a development build. `reportError(error, context?)` reports an error the
 app caught itself, and is how a React 18 boundary's `componentDidCatch`
@@ -712,9 +730,9 @@ does the same thing. See
 [`docs/replacing-sentry.md`](replacing-sentry.md) for what is and is not
 captured versus `@sentry/react`.
 
-SSR timing needs no configuration: `Railwatch::Patches::Inertia` prepends
+SSR timing needs no configuration. `Railwatch::Patches::Inertia` prepends
 `InertiaRails::Renderer#ssr_render` whenever `inertia_rails` SSR is
-enabled, and the resulting `ssr_ms` lands on the `request` record's
+enabled. The resulting `ssr_ms` lands on the `request` record's
 `inertia` field automatically.
 
 ## Manual reporting and instrumentation
@@ -728,16 +746,16 @@ Railwatch.instrument_outgoing(:get, url) { http_client.get(url) }  # for HTTP cl
 `Railwatch.report` defaults `severity` to `:warning` when `handled: true`,
 `:error` otherwise, and tags `source: "railwatch.manual"`.
 `Railwatch.instrument_outgoing` records an `outgoing_request` only if the
-block's return value responds to `#status` — for Faraday-alike client
-objects that aren't Net::HTTP and don't already go through
+block's return value responds to `#status`. It is for Faraday-alike
+client objects that aren't Net::HTTP and don't already go through
 `Railwatch::Faraday` middleware.
 
 ### Fingerprinting
 
 How an exception is bucketed into an issue. The default is class + top
-in-app frame + normalized message (see
+in-app frame + normalized message. See
 [`docs/records.md`](records.md)'s `exception` section for what
-normalization removes). Three ways to override it, in precedence order:
+normalization removes. Three ways to override it, in precedence order:
 
 ```ruby
 # 1. Per call, when you already know the bucket.
@@ -754,23 +772,24 @@ Railwatch.fingerprint do |error, default|
 end
 ```
 
-The block is called with the error and `default` — the Array of parts
-Railwatch would have hashed (`[class, file, line, normalized message]`). It
-returns an Array of strings/symbols/numbers; the literal `:default`
-splices those default parts in wherever you put it (Sentry's
-`{{ default }}`). Parts are stringified, empty ones dropped, and the
-result capped at 10 parts of 200 chars. Returning nil or an empty Array —
-or raising — falls back to the default, so a bad resolver can never lose
-an exception. Every `exception` record carries the parts it was hashed on
-(`fingerprint`) and where they came from (`fingerprint_source`), and an
-attachment filed against the error (`Railwatch.attach(..., exception:)`)
-follows the same rule, so it lands on the same issue.
+The block is called with the error and `default`. `default` is the Array
+of parts Railwatch would have hashed:
+`[class, file, line, normalized message]`. It returns an Array of
+strings/symbols/numbers. The literal `:default` splices those default
+parts in wherever you put it, like Sentry's `{{ default }}`. Parts are
+stringified, empty ones dropped, and the result capped at 10 parts of 200
+chars. Returning nil or an empty Array, or raising, falls back to the
+default, so a bad resolver can never lose an exception. Every `exception`
+record carries the parts it was hashed on, as `fingerprint`, and where
+they came from, as `fingerprint_source`. An attachment filed against the
+error with `Railwatch.attach(..., exception:)` follows the same rule, so
+it lands on the same issue.
 
 ### Attachments
 
-Ship an arbitrary blob — the payload that failed to parse, a rendered PDF,
-the webhook body a customer swears they sent — as its own `attachment`
-record (Sentry's `Sentry.add_attachment`):
+Ship an arbitrary blob as its own `attachment` record, like Sentry's
+`Sentry.add_attachment`. That might be the payload that failed to parse,
+a rendered PDF, or the webhook body a customer swears they sent:
 
 ```ruby
 Railwatch.attach("payload.json", request.raw_post)                  # a String
@@ -780,13 +799,13 @@ Railwatch.attach("payload.json", body, exception: error)            # file it ag
 Railwatch.report(error, attachments: { "payload.json" => body })    # capture + attach in one call
 ```
 
-`content_type` defaults to whatever Marcel makes of the name's extension
-(`application/octet-stream` if it can't tell). Passing `exception:` sets
-the record's `exception_group_hash` to the same group hash the `exception`
-record is filed under, so the platform shows the attachment on that issue.
-An attachment made inside a recording execution belongs to it; made with
-nothing executing, it ships standalone. Returns nil and records nothing
-when Railwatch is disabled or the payload is empty.
+`content_type` defaults to whatever Marcel makes of the name's extension,
+or `application/octet-stream` if it can't tell. Passing `exception:` sets
+the record's `exception_group_hash` to the same group hash the
+`exception` record is filed under, so the platform shows the attachment
+on that issue. An attachment made inside a recording execution belongs to
+it. Made with nothing executing, it ships standalone. Returns nil and
+records nothing when Railwatch is disabled or the payload is empty.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
@@ -799,16 +818,17 @@ Railwatch.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 ```
 
 Called whenever Railwatch rescues one of its own internal errors, ingest
-permanently rejects a batch, or shutdown expires with retained records that
-could not be sent. Retryable delivery failures stay buffered and do not fire
-the callback on every attempt. With no callback registered, this falls back
-to `Railwatch.debug` (stderr, gated on `RAILWATCH_DEBUG`, never `Rails.logger` —
-so gem-internal failures can never themselves become `log` records).
+permanently rejects a batch, or shutdown expires with retained records
+that could not be sent. Retryable delivery failures stay buffered and do
+not fire the callback on every attempt. With no callback registered, this
+falls back to `Railwatch.debug`. That goes to stderr, gated on
+`RAILWATCH_DEBUG`, never `Rails.logger`, so gem-internal failures can
+never themselves become `log` records.
 
 ## Faraday
 
-Opt in per connection (only needed for a non-default Faraday adapter;
-the default adapter is Net::HTTP, already covered globally):
+Opt in per connection. This is only needed for a non-default Faraday
+adapter; the default adapter is Net::HTTP, already covered globally:
 
 ```ruby
 Faraday.new(url) { |f| f.use Railwatch::Faraday }
@@ -820,98 +840,104 @@ Faraday.new(url) { |f| f.use Railwatch::Faraday }
 |---|---|---|
 | `debug` | `RAILWATCH_DEBUG` | `false` |
 
-Internal diagnostics to stderr (`warn`, prefixed `[railwatch]`) — deliberately
-not `Rails.logger`, so turning this on can't create a feedback loop of
-`log` records about Railwatch's own failures.
+Internal diagnostics to stderr, via `warn`, prefixed `[railwatch]`. This
+is deliberately not `Rails.logger`, so turning this on can't create a
+feedback loop of `log` records about Railwatch's own failures.
 
 ## Public facade — full method list
 
-Mirrors Laravel Nightwatch's facade shape. All on the `Railwatch` module
-(`lib/railwatch.rb`) unless noted:
+Mirrors Laravel Nightwatch's facade shape. All on the `Railwatch` module,
+in `lib/railwatch.rb`, unless noted:
 
 `configure`, `config`, `enabled?`, `sample(rate)`, `dont_sample`,
-`keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` / `pause` / `resume` / `paused?` (pause/resume
-are the ignore block's building blocks — nestable), `record(type, **fields)`,
+`keep!`, `sampling?`, `span(name, **attributes) { }`, `ignore { }` /
+`pause` / `resume` / `paused?`, `record(type, **fields)`,
 `report(error, ..., attachments: {}, fingerprint: [])`, `attach(name, data, ...)`, `context(**attrs)`, `user(&block)`,
 `fingerprint(&block)`, `redact_*`,
 `reject_*`, `reject_cache_keys`, `before_ingest`, `on_unrecoverable`,
-`instrument_outgoing`, `flush`, `debug { }`.
+`instrument_outgoing`, `flush`, `debug { }`. `pause`/`resume` are the
+ignore block's building blocks, and are nestable.
 
 ## Rake tasks
 
-Ship with the gem via Rails::Engine's default `lib/tasks` convention
-(`lib/tasks/railwatch_tasks.rake`):
+Ship with the gem via Rails::Engine's default `lib/tasks` convention, in
+`lib/tasks/railwatch_tasks.rake`:
 
-- **`railwatch:status`** — pings `{ingest_url}/ingest/ping` with the
-  configured token; aborts if `RAILWATCH_TOKEN` is unset or the ping fails.
-- **`railwatch:doctor`** — prints a ✓/✗ checklist of the whole install: token,
-  ingest URL, `GET /ingest/ping`, `Railwatch::Middleware::Request` in the
-  middleware stack, the mounted engine's beacon route, `config.deploy` and
-  its environment, `REVISION`, Git, or initializer source, sample rates,
-  ignored record types, the Kamal
-  `post-deploy` hook, `app/frontend/lib/railwatch.ts`, and whether
-  `railwatch/rspec` (or `railwatch/minitest`) is required by the test helper.
-  The last five are informational; it exits non-zero only when the token is
-  missing or the ping fails.
-- **`railwatch:deploy[ref,name,url]`** — POSTs `{deploy, ref, name, url,
+- **`railwatch:status`** pings `{ingest_url}/ingest/ping` with the
+  configured token. It aborts if `RAILWATCH_TOKEN` is unset or the ping
+  fails.
+- **`railwatch:doctor`** prints a ✓/✗ checklist of the whole install:
+  token, ingest URL, `GET /ingest/ping`, `Railwatch::Middleware::Request`
+  in the middleware stack, the mounted engine's beacon route,
+  `config.deploy` and its environment, `REVISION`, Git, or initializer
+  source, sample rates, ignored record types, the Kamal `post-deploy`
+  hook, `app/frontend/lib/railwatch.ts`, and whether `railwatch/rspec` or
+  `railwatch/minitest` is required by the test helper. The last five are
+  informational. It exits non-zero only when the token is missing or the
+  ping fails.
+- **`railwatch:deploy[ref,name,url]`** POSTs `{deploy, ref, name, url,
   server, timestamp, performer, destination, service, commits}` to
-  `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`; aborts
-  if that's unset. `ref` defaults to `git rev-parse HEAD` when not passed.
-  `performer`/`destination`/`service` come from `KAMAL_PERFORMER`,
+  `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`. It
+  aborts if that's unset. `ref` defaults to `git rev-parse HEAD` when not
+  passed. `performer`/`destination`/`service` come from `KAMAL_PERFORMER`,
   `KAMAL_DESTINATION`, and `KAMAL_SERVICE`. `commits` is up to 50
-  `{sha, author, message, at}` objects, newest first, from `git log` — empty
-  inside an app container, which has no `.git`, which is why the hook below
-  posts from the deployer instead.
+  `{sha, author, message, at}` objects, newest first, from `git log`. It
+  is empty inside an app container, which has no `.git`. That is why the
+  hook below posts from the deployer instead.
 
 ## Kamal integration
 
-`bin/rails generate railwatch:install` writes `.kamal/hooks/post-deploy` (only
-if `config/deploy.yml` already exists). It no-ops when `RAILWATCH_TOKEN` isn't
-set, and never fails a deploy — every network call ends in `|| true`.
+`bin/rails generate railwatch:install` writes `.kamal/hooks/post-deploy`,
+but only if `config/deploy.yml` already exists. It no-ops when
+`RAILWATCH_TOKEN` isn't set, and never fails a deploy. Every network call
+ends in `|| true`.
 
-The hook runs on the **deployer machine**, not in a container, which is the
-whole point: that's where the git history lives and where Kamal exports its
-[`KAMAL_*` variables](https://kamal-deploy.org/docs/hooks/overview/)
-(`KAMAL_VERSION`, `KAMAL_HOSTS`, `KAMAL_PERFORMER`, `KAMAL_DESTINATION`,
-`KAMAL_SERVICE`, `KAMAL_RECORDED_AT`, `KAMAL_COMMAND`, `KAMAL_SUBCOMMAND`,
-`KAMAL_ROLE`). With `curl`, `ruby`, and `RAILWATCH_INGEST_URL` all present it
-POSTs directly, twice:
+The hook runs on the **deployer machine**, not in a container, which is
+the whole point. That's where the git history lives and where Kamal
+exports its
+[`KAMAL_*` variables](https://kamal-deploy.org/docs/hooks/overview/).
+Those are `KAMAL_VERSION`, `KAMAL_HOSTS`, `KAMAL_PERFORMER`,
+`KAMAL_DESTINATION`, `KAMAL_SERVICE`, `KAMAL_RECORDED_AT`,
+`KAMAL_COMMAND`, `KAMAL_SUBCOMMAND`, `KAMAL_ROLE`. With `curl`, `ruby`,
+and `RAILWATCH_INGEST_URL` all present it POSTs directly, twice:
 
-1. `POST $RAILWATCH_INGEST_URL/ingest/deploys` — `{deploy, ref, name, url,
-   server, timestamp, performer, destination, service, commits}`, where
+1. `POST $RAILWATCH_INGEST_URL/ingest/deploys` with `{deploy, ref, name,
+   url, server, timestamp, performer, destination, service, commits}`.
    `commits` is up to 50 `{sha, author, message, at}` objects built from
-   `git log -n 50 --format='%H%x1f%an%x1f%s%x1f%cI'` piped through a one-line
-   `ruby -rjson -e`. This is what lets the platform show a diff of what
-   actually shipped. `name` is `KAMAL_SERVICE_VERSION`; set the optional
-   `RAILWATCH_DEPLOY_URL` to link the marker at a CI run or release page.
-2. `POST $RAILWATCH_INGEST_URL/ingest/kamal` — `{version, hosts, roles,
-   performer, destination, service, recorded_at, command, subcommand}`, with
-   `hosts` split out of the comma-separated `KAMAL_HOSTS`. The platform uses
-   this to know which servers should be reporting.
+   `git log -n 50 --format='%H%x1f%an%x1f%s%x1f%cI'` piped through a
+   one-line `ruby -rjson -e`. This is what lets the platform show a diff
+   of what actually shipped. `name` is `KAMAL_SERVICE_VERSION`. Set the
+   optional `RAILWATCH_DEPLOY_URL` to link the marker at a CI run or
+   release page.
+2. `POST $RAILWATCH_INGEST_URL/ingest/kamal` with `{version, hosts, roles,
+   performer, destination, service, recorded_at, command, subcommand}`.
+   `hosts` is split out of the comma-separated `KAMAL_HOSTS`. The platform
+   uses this to know which servers should be reporting.
 
-Without `curl`/`ruby`, or without `RAILWATCH_INGEST_URL`, it falls back to the
-original behaviour — `bin/kamal app exec --primary --reuse "bin/rails
-railwatch:deploy[$KAMAL_VERSION]"` — which records the same deploy minus the
+Without `curl`/`ruby`, or without `RAILWATCH_INGEST_URL`, it falls back to
+the original behaviour: `bin/kamal app exec --primary --reuse "bin/rails
+railwatch:deploy[$KAMAL_VERSION]"`. That records the same deploy minus the
 commit list.
 
-`config.deploy` itself auto-detects `KAMAL_VERSION` (and the other release
-sources listed under Core) with no configuration needed even without this
-hook — the hook's job is the deploy marker, the commit diff, and the server
-inventory.
+`config.deploy` itself auto-detects `KAMAL_VERSION`, and the other
+release sources listed under Core, with no configuration needed even
+without this hook. The hook's job is the deploy marker, the commit diff,
+and the server inventory.
 
 ## Overhead gate
 
-`bench/overhead.rb` boots the dummy app on SQLite, drives three request
-shapes (no queries; 20 uncached queries; the N+1 widgets page) with
-Railwatch's subscribers unsubscribed and then subscribed, alternating every
-batch, and fails (exit 1) if instrumentation adds more than the per-shape
-budget in `LIMITS` (CPU time on the request thread, not wall — stable
-under CI load — plus an allocation count). It also fails if the log
-capture has made `Rails.logger.debug?` true. Run it with `bundle exec ruby
-bench/overhead.rb`. Measured on a shared box the gem adds ~0.4ms fixed per
-request plus 40–80µs per real query; the limits leave headroom for slower
-CI hosts without letting a real regression through unnoticed. The numbers
-and how they were taken are in [`docs/faq.md`](faq.md).
+`bench/overhead.rb` boots the dummy app on SQLite and drives three
+request shapes: no queries; 20 uncached queries; the N+1 widgets page. It
+runs them with Railwatch's subscribers unsubscribed and then subscribed,
+alternating every batch. It fails with exit 1 if instrumentation adds
+more than the per-shape budget in `LIMITS`. That budget is CPU time on
+the request thread, not wall, which is stable under CI load, plus an
+allocation count. It also fails if the log capture has made
+`Rails.logger.debug?` true. Run it with `bundle exec ruby
+bench/overhead.rb`. Measured on a shared box the gem adds ~0.4ms fixed
+per request plus 40–80µs per real query. The limits leave headroom for
+slower CI hosts without letting a real regression through unnoticed. The
+numbers and how they were taken are in [`docs/faq.md`](faq.md).
 
 ## Testing your own app against Railwatch
 
@@ -920,12 +946,13 @@ and how they were taken are in [`docs/faq.md`](faq.md).
 require "railwatch/rspec"
 ```
 
-`railwatch_records(type = nil)` flushes and returns buffered records (as
-built hashes, filtered to `type` if given) without a real network call —
-backed by `Railwatch::SpecHelper::MemoryTransport`, swapped in for
-`Railwatch.reporter` on first use. `require "railwatch/rspec"` also includes
-`Railwatch::SpecHelper` everywhere and adds the block matchers
-(`have_railwatch_queries`, `have_railwatch_n_plus_one`, ...) documented in
-[`testing.md`](testing.md); `require "railwatch/minitest"` is the Minitest
-equivalent. `require "railwatch/spec_helper"` on its own, plus your own
-`config.include Railwatch::SpecHelper`, still works.
+`railwatch_records(type = nil)` flushes and returns buffered records
+without a real network call. They come back as built hashes, filtered to
+`type` if given. It is backed by `Railwatch::SpecHelper::MemoryTransport`,
+swapped in for `Railwatch.reporter` on first use.
+`require "railwatch/rspec"` also includes `Railwatch::SpecHelper`
+everywhere and adds the block matchers documented in
+[`testing.md`](testing.md), such as `have_railwatch_queries` and
+`have_railwatch_n_plus_one`. `require "railwatch/minitest"` is the
+Minitest equivalent. `require "railwatch/spec_helper"` on its own, plus
+your own `config.include Railwatch::SpecHelper`, still works.
