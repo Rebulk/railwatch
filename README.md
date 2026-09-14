@@ -41,8 +41,8 @@ gem "railwatch", github: "Rebulk/railwatch"
 - An MCP server so Claude Code, Cursor, VS Code, or Zed can read your
   production data ([AI assistants and MCP](docs/ai-and-mcp.md)).
 
-Configuration lives in `config/initializers/railwatch.rb`; every option
-has a `RAILWATCH_*` environment variable.
+Configuration lives in `config/initializers/railwatch.rb`; most options
+also have a `RAILWATCH_*` environment variable.
 
 ```ruby
 Railwatch.configure do |c|

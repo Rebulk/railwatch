@@ -95,11 +95,12 @@ bin/rails railwatch:doctor
 ✓ ignored record types: none
 ```
 
-It exits non-zero only when the token is missing or the ingest host is
-unreachable; the rest of the checklist is informational. Run it after the
-token is in place: `ingest reachable` sends the token, so without one the
-platform answers 401 and that line is `✗` as well. Every line and what to
-do about a `✗` is in [`troubleshooting.md`](troubleshooting.md).
+It exits non-zero on three lines: `token` (missing), `token storage`
+(a plaintext token in a tracked file), and `ingest reachable`. The rest
+of the checklist is informational. Run it after the token is in place:
+`ingest reachable` sends the token, so a missing or wrong token makes
+the platform answer 401 and that line is `✗` as well. Every line and
+what to do about a `✗` is in [`troubleshooting.md`](troubleshooting.md).
 
 `bin/rails railwatch:status` is the one-line version: it pings
 `{ingest_url}/ingest/ping` and prints the ingest URL, deploy, and server.

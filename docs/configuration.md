@@ -4,9 +4,9 @@ Everything below lives on `Railwatch::Configuration`, in
 `lib/railwatch/configuration.rb`. Set it via
 `Railwatch.configure { |c| ... }` in `config/initializers/railwatch.rb`.
 That file is created by
-`bin/rails generate railwatch:install`. Every setting has a `RAILWATCH_*`
-env var default. Explicit values set in the initializer always win over
-the env var.
+`bin/rails generate railwatch:install`. Most settings have a `RAILWATCH_*`
+env var default; the tables below show which. Explicit values set in the
+initializer always win over the env var.
 
 ## Core
 

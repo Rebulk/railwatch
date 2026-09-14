@@ -1,7 +1,7 @@
 # Record types
 
 Every record Railwatch ships is a flat hash. See `lib/railwatch/record.rb`.
-This lists all 26, field by field, sourced from the subscriber or patch
+This lists all 27, field by field, sourced from the subscriber or patch
 that builds each one. Field names below are the hash keys as sent over
 the wire: symbols in Ruby, strings in the gzip NDJSON payload.
 
@@ -46,8 +46,9 @@ envelope. That is everything except the five parent types, plus
 
 ## Parent records
 
-`request`, `job_attempt`, `scheduled_task`, and `command` are the four
-parent types, listed in `Railwatch::PARENT_TYPES`. Each opens an
+`request`, `job_attempt`, `scheduled_task`, `command`, and
+`channel_action` are the five parent types, listed in
+`Railwatch::PARENT_TYPES`. Each opens an
 `Execution`. In addition to its own fields below, each always carries
 these fields, from `Railwatch.build_parent` in `lib/railwatch.rb`:
 

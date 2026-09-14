@@ -61,9 +61,10 @@ turns everything off with a valid token present.
 **Sample rates are at zero.** `c.sample = { requests: 0.0 }` means no
 request records. So does the per-route `railwatch_never_sample` macro on
 a controller. The `sample rates` doctor line prints the effective
-values. Note that an unhandled exception still ships from a sampled-out
-execution. So "exceptions arrive but nothing else does" is the
-signature of a low sample rate rather than a broken install.
+values. Note that an unhandled exception can still ship from a
+sampled-out execution, subject to the `exceptions` rate. So "exceptions
+arrive but nothing else does" is the signature of a low sample rate
+rather than a broken install.
 
 **The record type is ignored.** `c.ignore` drops a type before it is
 built. The `ignored record types` doctor line prints the list. Ignoring
@@ -195,10 +196,12 @@ can't be made until it ends.
   process-wide cost is that many records times the executions running
   concurrently.
 
-**Fix.** Lower `tail_sample_slow_ms` so fewer executions qualify to be
-buffered. Or drop the highest-volume child types for tail-kept traffic
-with `c.ignore`. Or use `Railwatch.keep!` on the specific paths you care
-about instead of a global threshold.
+**Fix.** The threshold decides what is kept, not what is buffered:
+with tail sampling on, every execution buffers until it ends, so
+lowering `tail_sample_slow_ms` keeps more trees rather than fewer. To
+buffer less, turn tail sampling off and use `Railwatch.keep!` on the
+specific paths you care about, or drop the highest-volume child types
+with `c.ignore` so they are never buffered.
 
 ## Profiles never appear
 
