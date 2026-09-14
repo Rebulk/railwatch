@@ -1,14 +1,17 @@
 # Changelog
 
+## 0.1.0 (2026-09-14)
+
+First public release.
+
 - Renamed the gem from Lantern to Railwatch: constants, file paths,
   `X-Railwatch-*` headers, `RAILWATCH_*` environment variables, rake tasks,
   the generator, the `/railwatch` mount, and the `railwatch` distribution name.
-  There is no compatibility layer; this is the first public release.
-- Prepared the gem for its public RubyGems distribution. Added strict package verification, Trusted Publishing release automation,
-  public security/contribution guidance, TLS verification assertions, an
+  There is no compatibility layer.
+- Prepared the gem for its public RubyGems distribution. Added strict package
+  verification, Trusted Publishing release automation, public
+  security/contribution guidance, TLS verification assertions, an
   HTTPS-by-default ingest policy, and browser beacon payload hardening.
-
-## 0.1.0 (unreleased)
 
 - Deploy detection follows a git worktree's `.git` file to its gitdir and
   resolves the branch through the repository's refs, so a development app
