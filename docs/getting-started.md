@@ -35,7 +35,7 @@ bin/rails generate railwatch:install \
   shell history and process listings.
 - A token is written to `.env` only when Git confirms that `.env` is ignored.
   A tracked or non-ignored dotenv file is refused; use Rails credentials, a
-  deployment secret manager, or add `.env` to `.gitignore first. Token values
+  deployment secret manager, or add `.env` to `.gitignore` first. Token values
   are never printed by the generator.
 - `--url=` sets `RAILWATCH_INGEST_URL`, for a self-hosted platform. Leave
   it off to use the default, `https://railwatch.rebulk.com`.
@@ -96,9 +96,10 @@ bin/rails railwatch:doctor
 ```
 
 It exits non-zero only when the token is missing or the ingest host is
-unreachable; the rest of the checklist is informational. Every line and
-what to do about a `✗` is in
-[`troubleshooting.md`](troubleshooting.md).
+unreachable; the rest of the checklist is informational. Run it after the
+token is in place: `ingest reachable` sends the token, so without one the
+platform answers 401 and that line is `✗` as well. Every line and what to
+do about a `✗` is in [`troubleshooting.md`](troubleshooting.md).
 
 `bin/rails railwatch:status` is the one-line version: it pings
 `{ingest_url}/ingest/ping` and prints the ingest URL, deploy, and server.

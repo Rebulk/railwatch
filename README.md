@@ -15,29 +15,49 @@ bin/rails generate railwatch:install --prompt-token  # 2. hidden token input plu
 bin/rails railwatch:doctor                    # 3. check every piece is wired up after restart
 ```
 
-The gem, its Ruby namespace, and its require path share one name:
-`railwatch`, `Railwatch::*`, `require "railwatch"`. For a self-hosted
-deployment or an unreleased revision, use the Git source instead:
+Getting the token, the generator's flags, and deploying with Kamal,
+Docker, Heroku, or Render are covered in
+[Getting started](docs/getting-started.md). For a self-hosted deployment
+or an unreleased revision, use the Git source instead:
 
 ```ruby
 gem "railwatch", github: "Rebulk/railwatch"
 ```
 
-The generator writes `config/initializers/railwatch.rb`, mounts the beacon
-engine, and — where the app already has them — adds a Kamal `post-deploy`
-hook, the Inertia browser client with its `startRailwatch()` call, and
-`require "railwatch/rspec"` in `spec/rails_helper.rb`. `railwatch:doctor` prints
-a ✓/✗ checklist of all of it and exits non-zero if the token is missing or
-the ingest host is unreachable.
+## What you get
 
-Pass `--prompt-token` (and `--url=` when self-hosting) to read the token
-without echo or process-argument exposure. The generator writes it to `.env`
-only when Git confirms that file is ignored; otherwise it points you to Rails
-credentials or your deployment secret manager without printing the value. Add
-`--kamal-secrets` to wire `RAILWATCH_TOKEN` through `.kamal/secrets` and
-`config/deploy.yml`. It finishes by running `railwatch:doctor` for you.
-`bin/rails railwatch:token` says where to get a token; `bin/rails railwatch:mcp`
-prints ready-to-paste MCP client configuration.
+- Requests, jobs, scheduled tasks, commands, queries, exceptions, and
+  logs, linked into one trace per execution
+  ([Record types](docs/records.md)).
+- Sampling decided once per execution, plus tail sampling that keeps a
+  sampled-out request that turns out slow or raises
+  ([Configuration](docs/configuration.md)).
+- An optional stack profiler through `vernier` or `stackprof`, off by
+  default ([Configuration](docs/configuration.md)).
+- A browser client for Inertia apps: page-visit timing, Core Web Vitals,
+  and browser errors ([Getting started](docs/getting-started.md)).
+- RSpec and Minitest matchers that turn a query budget into a CI gate
+  ([Testing](docs/testing.md)).
+- An MCP server so Claude Code, Cursor, VS Code, or Zed can read your
+  production data ([AI assistants and MCP](docs/ai-and-mcp.md)).
+
+Configuration lives in `config/initializers/railwatch.rb`; every option
+has a `RAILWATCH_*` environment variable.
+
+```ruby
+Railwatch.configure do |c|
+  c.sample = { requests: 0.1, jobs: 1.0 }
+  c.user { |u| { id: u.id, name: u.name, email: u.email } }
+end
+```
+
+The same instrumentation runs in your test suite, so a spec can hold a
+hot path to a query budget:
+
+```ruby
+expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
+expect { get "/widgets" }.not_to have_railwatch_n_plus_one
+```
 
 ## Documentation
 
@@ -67,156 +87,14 @@ prints ready-to-paste MCP client configuration.
 AI coding agents working on an app that uses Railwatch: [`llms.txt`](llms.txt)
 and [`AGENTS.md`](AGENTS.md).
 
-Configuration lives in `config/initializers/railwatch.rb`; every option has
-a `RAILWATCH_*` environment variable. Sampling is decided once per execution:
-a sampled-in request ships its whole tree, a sampled-out one ships nothing
-except unhandled exceptions.
-
-```ruby
-Railwatch.configure do |c|
-  c.sample = { requests: 0.1, jobs: 1.0 }
-  c.user { |u| { id: u.id, name: u.name, email: u.email } }
-end
-
-class ReportsController < ApplicationController
-  railwatch_sample 0.01, only: :index
-end
-
-Railwatch.ignore { ExpensiveSync.run }
-Railwatch.context(tenant: org.slug, plan: org.plan)
-```
-
-Time any block of your own code as a `span` on the surrounding request,
-job, or command — the block's value is returned untouched:
-
-```ruby
-Railwatch.span("pdf.render", template: "invoice", pages: 12) { renderer.call }
-```
-
-When a span isn't enough to say where the time went, Railwatch can attach a
-real stack profile to an execution. Add `gem "vernier"` (Ruby ≥ 3.2) or
-`gem "stackprof"` to the Gemfile and set `c.profile_sample = 0.01` to
-profile 1% of executions, or `c.profile_slow_ms = 500` alongside
-`c.tail_sample_slow_ms` to profile the slow ones. The collapsed stacks
-ship as their own `profile` record, gzipped, and the request or job it
-belongs to is marked `profiled`. Off by default, and one Float comparison
-per execution while it stays off.
-
-Sampling can also be decided at the *end* of an execution instead of the
-start: set `c.tail_sample_slow_ms = 500` (or call `Railwatch.keep!`) and a
-head-sampled-out request that turns out to be slow, or to have raised,
-ships its whole tree anyway. Outgoing HTTP carries a W3C `traceparent`,
-and an inbound one is adopted, so a trace spans services.
-
-Inertia apps get real page-visit timing by calling `startRailwatch()` from the
-generated `app/frontend/lib/railwatch.ts`. Server-side rendering is timed
-automatically wherever `inertia_rails` SSR is already enabled — no extra
-configuration needed.
-
-Outgoing HTTP made through Faraday is instrumented by adding
-`Railwatch::Faraday` to the connection's middleware stack (`Net::HTTP` is
-already covered globally, with no setup); any other client can be wrapped
-with `Railwatch.instrument_outgoing`:
-
-```ruby
-Faraday.new(url) { |f| f.use Railwatch::Faraday }
-Railwatch.instrument_outgoing(:get, url) { http_client.get(url) }
-```
-
-## Testing
-
-Production browser errors can be resolved to original source files using
-[private source-map uploads](docs/source-maps.md).
-
-The same instrumentation runs in your test suite, so a spec can hold a hot
-path to a query budget and CI can fail the pull request that regresses it:
-
-```ruby
-expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
-expect { get "/widgets" }.not_to have_railwatch_n_plus_one
-```
-
-Failures list the offending SQL. Set-up, every matcher (RSpec and Minitest),
-and a CI performance-gate recipe are in [`docs/testing.md`](docs/testing.md).
-
----
-
-Every attribute, the full public facade, sampling, redaction/rejection,
-transport/buffering behavior, the overhead gate, and the Kamal deploy hook
-are documented field-by-field in [`docs/configuration.md`](docs/configuration.md).
-Every record type Railwatch ships — `request`, `job_attempt`, `query`,
-`exception`, and the rest — is documented field-by-field, sourced directly
-from the code that builds it, in [`docs/records.md`](docs/records.md).
-
 ## Replacing Sentry
 
-Railwatch subscribes to `Rails.error` on install
-(`Rails.error.subscribe`), so any existing `Rails.error.report` or
-`Rails.error.handle` call — which is how Sentry's own Rails integration
-is normally wired in — is captured with no code changes. An unhandled
-exception bypasses the execution buffer: it is enqueued immediately and
-wakes the in-memory reporter without doing network I/O on the application
-thread. Delivery is still asynchronous and memory-only, so a hard kill,
-OOM, or process exit after the shutdown deadline can lose it.
-
-What differs from a dedicated error tracker: exceptions aren't reported in
-isolation — each one is linked (`execution_id`/`trace_id`) to the request,
-job, or command it happened inside, alongside every query, cache read,
-outgoing request, and log line from that same execution. There's no
-separate error-tracking SDK/config to maintain — `severity`, `handled`,
-and `context` all come from the same `Railwatch.configure` block and
-`Railwatch.context` calls used for everything else the gem instruments.
-
-### Coming from Sentry
-
-| Sentry | Railwatch |
-|---|---|
-| `dsn:` | `RAILWATCH_TOKEN` (+ `RAILWATCH_INGEST_URL` for a self-hosted platform). |
-| `environment:` | `config.environment` — defaults to `Rails.env`, set it only to report under a different name. |
-| `release:` | `config.deploy` — auto-detected from the deploy platform or Git checkout. Stamped on every record. |
-| `traces_sample_rate:` / `profiles_sample_rate:` | `config.sample`, a rate per execution kind (`requests`, `jobs`, `commands`, `scheduled_tasks`, `exceptions`), decided once per execution rather than per event. Per-route: `railwatch_sample 0.01, only: :index`. |
-| `excluded_exceptions:` | `config.ignored_exceptions` — same default list, plus every named ancestor is matched, not just the exact class. |
-| `before_send:` / `before_send_transaction:` | `Railwatch.before_ingest { \|batch\| ... }` for the whole outgoing batch; `Railwatch.redact_queries`/`redact_logs`/... to scrub one record type in place; `Railwatch.reject_queries`/`reject_logs`/... to drop records by predicate. |
-| `fingerprint` / grouping rules | `Railwatch.fingerprint { \|error, default\| ... }` globally, `def railwatch_fingerprint` on your own error class, or `Railwatch.report(error, fingerprint: [...])` per call. The literal `:default` splices in the parts Railwatch would have hashed, like Sentry's `{{ default }}`. |
-| `include_local_variables:` | `config.capture_exception_locals`. |
-| `config.rails.active_job_report_on_retry_error` | `config.capture_job_retry_errors` (off by default). |
-| `send_default_pii:` | Deliberately split: `config.capture_request_payload` for params, `config.capture_job_arguments` for job arguments, `config.capture_response_body_on_error` for what a failing upstream sent back, `config.redact_headers`/`redact_params` for what's scrubbed, and the `Railwatch.user { ... }` block for who. There is no single "send everything" switch. |
-| Breadcrumbs | Not a separate concept — every query, cache read, outgoing request, log line, and view render is already a first-class record linked to its execution by `execution_id`/`trace_id`. The execution *is* the breadcrumb trail, and it's queryable. |
-| `Sentry.capture_message` | `Railwatch.report(error, ...)` for an exception; plain `Rails.logger` for a message — log lines at or above `config.log_level` become `log` records automatically. |
-| `Sentry.set_user` | `Railwatch.user { ... }` (a resolver block, evaluated per execution). |
-| `Sentry.set_tags` / `set_context` / `set_extras` | `Railwatch.context(key: value)` — serialized onto the parent record and every exception. |
-| `Sentry.with_child_span` | `Railwatch.span("name") { ... }`. |
-| `Sentry.add_attachment` | `Railwatch.attach("payload.json", data)` — a String, `Pathname`, or IO, gzipped on the wire and capped at `config.max_attachment_bytes`. `exception:` files it against that error's issue, and `Railwatch.report(error, attachments: { "payload.json" => data })` captures and attaches in one call. |
-| `Sentry.capture_check_in` (cron monitoring) | Automatic: Solid Queue recurring tasks become `scheduled_task` records with `task_key`, `schedule`, and `drift`. Nothing to instrument. |
-| `config.rails.report_rescued_exceptions` | `config.capture_rescued_exceptions` (on by default). |
-| Rack `X-Request-Start` queue time | Automatic: `queue_time` on every `request` record. |
-| `auto_session_tracking:` (release health) | Automatic: `session` records from the browser client and the request middleware, keyed on `config.deploy` as the release. `config.track_sessions` turns both off. |
-
-These mappings cover the Rails-server migration path. Browser Replay,
-native/mobile SDKs, some direct worker and scheduler entry points, and
-Sentry's broader managed integration catalog are not equivalent today.
-Use the supported-workload matrix in
-[`docs/replacing-sentry.md`](docs/replacing-sentry.md) before removing
-Sentry from an application that depends on those capabilities.
-
-`config.deploy` checks `RAILWATCH_DEPLOY`, `KAMAL_VERSION`, common Git and
-platform environment variables, `REVISION`, then `.git/HEAD`. Full 40-character
-SHAs are consistently shortened to 12 characters. Set
-`RAILWATCH_DETECT_DEPLOY=false` (or `c.detect_deploy = false`) to keep only the
-explicit `RAILWATCH_DEPLOY` and Kamal defaults.
-
-To report an exception manually (the `Rails.error.report`-equivalent):
-
-```ruby
-Railwatch.report(error, handled: true, context: { order_id: order.id })
-```
-
-`severity` defaults to `:warning` when `handled: true`, `:error`
-otherwise. See the `exception` section of
-[`docs/records.md`](docs/records.md) for the full field list, and
-[`docs/configuration.md`](docs/configuration.md) for redaction
-(`Railwatch.redact_exceptions`), `capture_exception_source`, and
-`Railwatch.on_unrecoverable` (Railwatch watching its own internal failures).
+Railwatch subscribes to `Rails.error` on install, so existing
+`Rails.error.report` and `Rails.error.handle` calls are captured with no
+code changes. Each exception is linked to the request, job, or command
+it happened inside. The option-by-option mapping and the
+supported-workload matrix live in
+[Replacing Sentry](docs/replacing-sentry.md).
 
 ## Development
 
