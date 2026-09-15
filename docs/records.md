@@ -502,6 +502,63 @@ never double-recorded.
 | `response_body` | First 4 KiB of the response body, but only when `config.capture_response_body_on_error` is on (off by default) *and* the response was an error. A body that parses as a JSON object is run through the same parameter filter as request params and re-serialized; anything else is stored as it arrived. nil in every other case — including a connection failure, where there is no response (on the Net::HTTP path a body is read only if Net::HTTP already buffered it, so a response being streamed through `read_body` is never consumed; on the Faraday path the body is taken only once a status came back, so an outgoing request payload can never be filed as a response). |
 | `source` | App-code call site (Net::HTTP path only). |
 
+### `llm_call`
+
+Every RubyLLM model call and tool invocation, from
+`lib/railwatch/subscribers/llm.rb`. RubyLLM publishes its own
+`ActiveSupport::Notifications` events, so nothing is patched and RubyLLM is
+not a dependency — an app without it never emits these. Requires RubyLLM
+1.16 or later, which is where its instrumentation landed.
+
+The model call also appears as an `outgoing_request`, since it is an HTTP
+call like any other. The two are different grains on purpose: the
+`outgoing_request` is the HTTP truth, the `llm_call` is what it cost.
+
+**Token counts and cost differ by RubyLLM version.** 1.16 reports token
+counts and no cost at all. 2.0 reports both, from its usage ledger, and
+adds the `workflow_*` fields. `cost_nanos` is null rather than zero
+whenever RubyLLM reported no cost or the model registry could not price
+it — an unpriced call is not a free one.
+
+**Concurrent tool calls are not recorded.** RubyLLM's opt-in
+`tool_concurrency` (`:threads` or `:fibers`) runs each tool in a fresh
+thread or fiber. `Railwatch::Current` is backed by
+`ActiveSupport::IsolatedExecutionState`, which a new thread does not
+inherit, so the `tool_call.ruby_llm` event fires with no execution to
+attach to and the record is dropped rather than misattributed. This
+affects every Railwatch subscriber in an app-spawned thread, not just this
+one. Tool concurrency is off by default; with it off, tool calls are
+recorded normally. The model calls themselves are unaffected either way,
+so cost is always complete.
+
+| Field | Meaning |
+|---|---|
+| `group` | Hash of provider + model + operation, or of `"tool"` + tool name. |
+| `operation` | `"chat"`, `"compaction"`, `"embedding"`, `"image"`, `"speech"`, `"transcription"`, `"moderation"`, `"rerank"`, `"ocr"`, or `"tool"`. |
+| `provider` | Provider slug, e.g. `"anthropic"`. |
+| `model` | Model the call was made with. Empty for a provider that selects its own (moderation). |
+| `response_model` | Model the provider says answered, which can differ from the one asked for. |
+| `tool_name` | Tool name, for `operation: "tool"`. |
+| `duration` | Microseconds. |
+| `status` | `"ok"`, or `"failed"` if the call raised. |
+| `error` | `"Class: message"`, truncated to 255 chars, if the call raised. |
+| `streaming` | Whether the call was streamed. |
+| `message_count` | Conversation length at the time of the call. |
+| `tool_count` | Number of tools the model was offered. |
+| `input_tokens` | Standard (non-cached) input tokens. |
+| `output_tokens` | Billable output tokens. |
+| `cache_read_tokens` | Tokens served from the provider's prompt cache. |
+| `cache_write_tokens` | Tokens written to the provider's prompt cache. |
+| `thinking_tokens` | Reasoning tokens, where the provider reports them separately. |
+| `cost_nanos` | Cost in billionths of a US dollar. Null when unpriced — see above. Nanodollars because a cheap call is well under a microdollar and floats do not sum to an invoice. |
+| `workflow_id` | `RubyLLM.workflow` identifier (2.0+). Null outside a workflow. |
+| `workflow_name` | Workflow name (2.0+). |
+| `workflow_step_id` | Step identifier within the workflow (2.0+). |
+| `workflow_step_name` | Step name (2.0+). |
+| `workflow_step_parent_id` | Enclosing step, for nested steps — what reconstructs the tree (2.0+). |
+| `prompt` | Last user turn, only when `config.capture_llm_content` is on (off by default). Capped at 4 KiB of bytes. |
+| `completion` | The reply, same condition and cap. For `operation: "tool"` these two hold the tool's arguments and result instead. |
+
 ### `storage_op`
 
 Every Active Storage service operation. See

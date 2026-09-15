@@ -75,6 +75,20 @@ module Railwatch
           completion: content(message_text(p[:response])))
       end
 
+      # RubyLLM's opt-in tool_concurrency (:threads or :fibers) runs each
+      # tool in a fresh thread or fiber, and Current is backed by
+      # IsolatedExecutionState, which a new thread does not inherit. So this
+      # fires with no execution and the record is dropped.
+      #
+      # It cannot be fixed from here: by the time the event is delivered we
+      # are already inside the worker, with no reference to the execution
+      # that spawned it, and the thread is RubyLLM's to create
+      # (chat/tool_concurrency.rb propagates its own workflow context across
+      # that boundary, but knows nothing of ours). The same is true of every
+      # subscriber in an app-spawned thread. Dropping beats guessing: a
+      # process-wide fallback would file one request's tool call under
+      # another's execution. Concurrency is off by default, and the model
+      # calls are unaffected either way, so cost stays complete.
       def record_tool(event)
         exe = execution
         exe&.count(:llm_calls)
