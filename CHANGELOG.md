@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.3 (2026-09-15)
 
 - LLM calls are recorded from RubyLLM's own instrumentation. Every model
-  call it emits -- `chat`, `embedding`, `image`, `speech`, `transcription`,
-  `moderation`, `rerank`, `ocr` -- plus each tool invocation becomes one
+  call it emits -- `chat`, `compaction`, `embedding`, `image`, `speech`,
+  `transcription`, `moderation`, `rerank`, `ocr` -- plus each tool
+  invocation becomes one
   `llm_call` child record on the request, job, or command that made it,
   carrying provider, model, duration, token counts per bucket, and cost.
   Nothing is patched: RubyLLM publishes ActiveSupport::Notifications events
@@ -16,7 +17,7 @@
   can be reassembled from its steps. A 1.16 app has no cost rather than a
   cost of zero, and a model the registry cannot price is unpriced, not free.
 - `capture_llm_content` (default off, `RAILWATCH_CAPTURE_LLM_CONTENT`)
-  records the last user turn and the reply, capped at 4 KiB each. Token
+  records the last user turn and the reply, capped at 4 KiB of bytes each. Token
   counts, model, and cost are always captured; prompts are not, because
   they are whatever the app sent a provider.
 
