@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.2 (2026-09-14)
 
 - A failed job's exception is reported once. Solid Queue re-raises it out
   of the worker thread, where its app executor reports the same error object
