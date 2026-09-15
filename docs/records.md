@@ -652,7 +652,9 @@ ship. Forked workers start with an empty cache.
 
 ### `deprecation`
 
-`deprecation.rails`. See `lib/railwatch/subscribers/deprecations.rb`.
+`deprecation.rails`. See `lib/railwatch/subscribers/deprecations.rb`. Rails
+only emits that notification when `config.active_support.deprecation`
+includes `:notify`; see [Troubleshooting](troubleshooting.md#deprecations-are-counted-but-never-listed).
 
 | Field | Meaning |
 |---|---|

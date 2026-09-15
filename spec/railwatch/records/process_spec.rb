@@ -115,6 +115,14 @@ RSpec.describe "process record" do
       with_program_name("bin/rails") { expect(Railwatch::Subscribers::ProcessInfo.role).to eq("worker") }
     end
 
+    it "is worker for a process Solid Queue has renamed through its procline" do
+      stub_const("Puma", Module.new)
+      stub_const("SolidQueue", Module.new)
+      with_program_name("solid-queue-dispatcher(1.7.0): dispatching every 1 seconds") do
+        expect(Railwatch::Subscribers::ProcessInfo.role).to eq("worker")
+      end
+    end
+
     it "is console when Rails::Console is defined" do
       stub_const("Rails::Console", Class.new)
       expect(Railwatch::Subscribers::ProcessInfo.role).to eq("console")

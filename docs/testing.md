@@ -18,15 +18,12 @@ require "railwatch/rspec"
 That requires `railwatch/spec_helper`, includes `Railwatch::SpecHelper` into every
 example group, and defines the matchers below.
 
-Minitest: the same thing in `test/test_helper.rb`.
+Minitest: the same thing in `test/test_helper.rb`. The require includes
+`Railwatch::Minitest` into `ActiveSupport::TestCase` on its own.
 
 ```ruby
 require "rails/test_help"
 require "railwatch/minitest"
-
-class ActiveSupport::TestCase
-  include Railwatch::Minitest
-end
 ```
 
 Railwatch must be *enabled* in the test environment or every block would look

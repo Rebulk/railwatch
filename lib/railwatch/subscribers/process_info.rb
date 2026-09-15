@@ -84,9 +84,12 @@ module Railwatch
 
       # Puma is loaded in every process of an app that bundles it, so a Solid
       # Queue worker is recognised first, by how it was started (bin/jobs or
-      # `rake solid_queue:start`).
+      # `rake solid_queue:start`) or by the procline Solid Queue gives every
+      # process it forks ("solid-queue-worker(1.7.0): ..."), which replaces
+      # $PROGRAM_NAME after boot and would otherwise turn the supervisor,
+      # dispatcher, and scheduler into "web" on every health sample.
       def role
-        if defined?(::SolidQueue) && ($PROGRAM_NAME.include?("jobs") || ARGV.first.to_s.start_with?("solid_queue:")) then "worker"
+        if defined?(::SolidQueue) && ($PROGRAM_NAME.include?("jobs") || $PROGRAM_NAME.start_with?("solid-queue-") || ARGV.first.to_s.start_with?("solid_queue:")) then "worker"
         elsif defined?(::Rails::Console) then "console"
         elsif $PROGRAM_NAME.end_with?("rake") then "command"
         elsif defined?(::Puma) then "web"

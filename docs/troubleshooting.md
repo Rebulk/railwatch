@@ -81,6 +81,42 @@ to stderr prefixed `[railwatch]`. They never go to `Rails.logger`, so they
 can't become `log` records about themselves. `Railwatch.on_unrecoverable
 { |e| ... }` gets the same failures as a callback.
 
+## `bin/jobs` dies in a loop with `wrong number of arguments (given 2, expected 1)`
+
+**Symptom.** Every Solid Queue process crashes at boot from
+`json/common.rb` in `parse`, and Railwatch reports the same
+`ArgumentError` from source `application.solid_queue` hundreds of times.
+The web server still answers until it touches a session or a JSON column.
+
+**Cause.** Not Railwatch. `json` 3.0 (September 2026) made `JSON.parse`'s
+options keyword-only, and Active Support up to 8.1.3.1 still passes them
+positionally ([rails/rails#58685](https://github.com/rails/rails/issues/58685)).
+A fresh `rails new` resolves the newest `json`, so a new app hits this
+before Railwatch is even installed.
+
+**Fix.** Pin `json` below 3 until a Rails release includes the fix:
+
+```sh
+bundle add json --version "< 3"
+```
+
+## Deprecations are counted but never listed
+
+**Symptom.** The `deprecations` counter on an execution is non-zero, but
+the Deprecations page stays empty.
+
+**Cause.** Railwatch listens to the `deprecation.rails` notification, and
+Rails only emits it when the app's deprecation behavior includes
+`:notify`. The default in development is `:log` and in production
+`:silence`, neither of which notifies.
+
+**Fix.** Add `:notify` alongside whatever the environment already does:
+
+```ruby
+# config/environments/production.rb
+config.active_support.deprecation = [:silence, :notify]
+```
+
 ## Doubled scheduled_task records
 
 **Symptom.** Every recurring task shows twice on the Scheduled tasks

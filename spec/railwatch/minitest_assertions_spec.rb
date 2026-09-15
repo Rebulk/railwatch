@@ -29,6 +29,11 @@ end
 RSpec.describe "Railwatch Minitest assertions" do
   subject(:test_case) { FakeMinitestContext.new(railwatch_transport) }
 
+  it "includes itself into ActiveSupport::TestCase, so test_helper only needs the require" do
+    require "active_support/test_case"
+    expect(ActiveSupport::TestCase.include?(Railwatch::Minitest)).to be(true)
+  end
+
   def record_span(name)
     Railwatch.record(:span, name: name, duration: 1, attributes: {}, status: "ok")
   end
