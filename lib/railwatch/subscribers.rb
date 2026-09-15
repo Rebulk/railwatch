@@ -12,6 +12,7 @@ require "railwatch/subscribers/storage"
 require "railwatch/subscribers/views"
 require "railwatch/subscribers/logs"
 require "railwatch/subscribers/jobs"
+require "railwatch/subscribers/llm"
 require "railwatch/subscribers/deprecations"
 require "railwatch/subscribers/users"
 require "railwatch/subscribers/process_info"
@@ -19,7 +20,7 @@ require "railwatch/subscribers/process_info"
 module Railwatch
   module Subscribers
     ALL = [ Requests, Queries, Exceptions, Cache, Mail, Broadcasts, Notifications,
-            Storage, Views, Logs, Jobs, Deprecations, Users, ProcessInfo ].freeze
+            Storage, Views, Logs, Jobs, Deprecations, Users, ProcessInfo, Llm ].freeze
 
     module_function
 

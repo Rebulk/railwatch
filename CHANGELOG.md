@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- LLM calls are recorded from RubyLLM's own instrumentation. Every model
+  call it emits -- `chat`, `embedding`, `image`, `speech`, `transcription`,
+  `moderation`, `rerank`, `ocr` -- plus each tool invocation becomes one
+  `llm_call` child record on the request, job, or command that made it,
+  carrying provider, model, duration, token counts per bucket, and cost.
+  Nothing is patched: RubyLLM publishes ActiveSupport::Notifications events
+  and Railwatch subscribes to them like any Rails event.
+- Both RubyLLM generations are read from the same subscriber. 1.16 puts
+  token counts on the event as scalars and reports no cost; 2.0 sends its
+  `Tokens` and `Cost` objects, and stamps `workflow_id` and step identity on
+  every event inside `RubyLLM.workflow`, which is recorded so an agent run
+  can be reassembled from its steps. A 1.16 app has no cost rather than a
+  cost of zero, and a model the registry cannot price is unpriced, not free.
+- `capture_llm_content` (default off, `RAILWATCH_CAPTURE_LLM_CONTENT`)
+  records the last user turn and the reply, capped at 4 KiB each. Token
+  counts, model, and cost are always captured; prompts are not, because
+  they are whatever the app sent a provider.
+
 ## 0.1.2 (2026-09-14)
 
 - A failed job's exception is reported once. Solid Queue re-raises it out

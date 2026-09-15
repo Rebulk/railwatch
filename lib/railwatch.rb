@@ -496,7 +496,7 @@ module Railwatch
       query: :queries, n_plus_one: :queries, transaction: :transactions, cache_event: :cache_events,
       mail: :mail, broadcast: :broadcasts, notification: :notifications, outgoing_request: :outgoing_requests,
       storage_op: :storage_ops, view_render: :view_renders, log: :logs, deprecation: :deprecations,
-      session: :sessions
+      session: :sessions, llm_call: :llm_calls
     }.freeze
 
     def type_plural(type)

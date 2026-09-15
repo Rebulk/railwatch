@@ -12,7 +12,7 @@ module Railwatch
     MAX_RECORDS = 10_000
     COUNTERS = %i[queries cached_queries exceptions logs cache_events jobs_enqueued mail
                   broadcasts notifications outgoing_requests storage_ops view_renders
-                  transactions hydrated_models lazy_loads deprecations spans].freeze
+                  transactions hydrated_models lazy_loads deprecations spans llm_calls].freeze
     # GC.stat with no key builds the whole stat hash; whether this Ruby
     # reports GC time never changes, so ask once.
     GC_TIME_SUPPORTED = GC.stat.key?(:time)
