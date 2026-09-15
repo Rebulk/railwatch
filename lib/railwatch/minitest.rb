@@ -7,10 +7,9 @@ module Railwatch
   # assert_/refute_. Add to test/test_helper.rb:
   #
   #   require "railwatch/minitest"
-  #   class ActiveSupport::TestCase
-  #     include Railwatch::Minitest
-  #   end
   #
+  # That includes the module into ActiveSupport::TestCase (through its load
+  # hook, so the require order against rails/test_help does not matter).
   # Includes Railwatch::SpecHelper, so `railwatch_records(:query)` is available
   # too. See docs/testing.md.
   module Minitest
@@ -41,3 +40,5 @@ module Railwatch
     end
   end
 end
+
+ActiveSupport.on_load(:active_support_test_case) { include Railwatch::Minitest } if defined?(ActiveSupport.on_load)

@@ -87,6 +87,13 @@ module Railwatch
       def capture(error, handled:, severity:, context: {}, source: nil, fingerprint: nil)
         return unless Railwatch.enabled?
         return if ignored?(error)
+        # Solid Queue re-raises a failed job's error out of the worker thread,
+        # where its executor reports it to Rails.error a second time
+        # (source application.solid_queue) after the job_attempt execution
+        # has already finished and reported it. The execution's own
+        # first_exception_report? bookkeeping is gone by then, so the error
+        # object itself remembers that its unhandled report has shipped.
+        return if !handled && reported_unhandled?(error)
 
         exe = execution
         if exe&.first_exception_observation?(error, handled)
@@ -151,7 +158,20 @@ module Railwatch
           # children (Railwatch.tail_keep?).
           exe.exception_reported = true if exe
           Railwatch.record_now(:exception, group: group, **rec)
+          remember_reported(error)
         end
+      end
+
+      def reported_unhandled?(error)
+        error.instance_variable_defined?(:@__railwatch_reported)
+      rescue StandardError
+        false
+      end
+
+      def remember_reported(error)
+        error.instance_variable_set(:@__railwatch_reported, true)
+      rescue StandardError
+        nil
       end
 
       # The group hash `capture` would assign this error. Public so

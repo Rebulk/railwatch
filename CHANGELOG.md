@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- A failed job's exception is reported once. Solid Queue re-raises it out
+  of the worker thread, where its app executor reports the same error object
+  to `Rails.error` again after the `job_attempt` execution has finished; that
+  second report (source `application.solid_queue`, unlinked) doubled every
+  failed job's occurrence count. An error object now remembers that its
+  unhandled report has shipped, across executions.
+- `require "railwatch/minitest"` includes the assertions into
+  `ActiveSupport::TestCase` through its load hook, so `assert_railwatch_queries`
+  works after the generator's one-line edit to `test/test_helper.rb` without
+  a manual `include`.
+- Solid Queue's supervisor, dispatcher, scheduler, and forked workers report
+  role `worker` after Solid Queue renames the process. They were classified
+  `web` by every health sample taken after boot, with empty Puma thread
+  stats.
+- Troubleshooting entries for `json` 3.0 against Rails 8.1.3.1 (`bin/jobs`
+  crash loop, not a Railwatch fault) and for deprecations that are counted
+  but never listed because the app's deprecation behavior lacks `:notify`.
+
 ## 0.1.1 (2026-09-14)
 
 - Token prefixes are `rw_` for an environment's ingest token and `rwp_`
