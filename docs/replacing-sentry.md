@@ -12,12 +12,12 @@ the other.
 
 ## Decide whether Railwatch covers your workload
 
-Nightwatch parity and Sentry parity are different targets. Laravel
-Nightwatch is an application-monitoring product built around framework
-executions; Railwatch deliberately maps that model onto Rails. Sentry is a
-broader, multi-language managed platform with browser replay, native/mobile
-SDKs, a large integration catalog, and generic tracing. Those broader
-capabilities are not implied by Rails/Nightwatch parity.
+Railwatch and Sentry aim at different targets. Railwatch is an
+application-monitoring product built around Rails executions: a request,
+job, scheduled task, command, or channel action and everything it did.
+Sentry is a broader, multi-language managed platform with browser replay,
+native/mobile SDKs, a large integration catalog, and generic tracing.
+Railwatch does not claim those broader capabilities.
 
 | Workload or capability | Status | Boundary |
 |---|---|---|
