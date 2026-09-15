@@ -81,6 +81,15 @@ RSpec.describe Railwatch::Subscribers::Llm do
         .to contain_exactly("embedding", "image", "rerank", "speech")
     end
 
+    # compaction carries the same tokens and the same cost as any other chat
+    # call, and the provider bills for it. Missing it hides real spend.
+    it "bills a compaction, which is a chat call the conversation made of itself" do
+      in_execution { emit("compaction.ruby_llm", v2_chat_payload) }
+
+      expect(railwatch_records(:llm_call).sole)
+        .to include(operation: "compaction", cost_nanos: 4_275_000, input_tokens: 1200)
+    end
+
     it "stamps the workflow and step so an agent run can be reassembled" do
       in_execution do
         emit("chat.ruby_llm", v2_chat_payload(
@@ -182,15 +191,18 @@ RSpec.describe Railwatch::Subscribers::Llm do
       Railwatch.config.capture_llm_content = false
     end
 
-    it "caps captured content so one long conversation cannot dominate a batch" do
+    it "caps captured content in bytes, so multibyte text cannot blow the budget" do
       Railwatch.config.capture_llm_content = true
       in_execution do
+        # Three bytes per character: a character cap would ship ~12 KiB here.
         emit("chat.ruby_llm", v2_chat_payload(
-          input_messages: [ Message.new(role: :user, content: "x" * 10_000) ]))
+          input_messages: [ Message.new(role: :user, content: "積荷" * 5_000) ]))
       end
 
-      expect(railwatch_records(:llm_call).sole[:prompt].bytesize)
-        .to eq(described_class::CONTENT_MAX)
+      prompt = railwatch_records(:llm_call).sole[:prompt]
+      expect(prompt.bytesize).to be <= described_class::CONTENT_MAX
+      expect(prompt.bytesize).to be > described_class::CONTENT_MAX - 4
+      expect(prompt).to be_valid_encoding
     ensure
       Railwatch.config.capture_llm_content = false
     end

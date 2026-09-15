@@ -22,10 +22,14 @@ module Railwatch
 
       module_function
 
-      # Every usage-bearing operation in RubyLLM 2.0. The four 1.16 knows
+      # Every usage-bearing operation in RubyLLM 2.0. The ones 1.16 knows
       # about (chat, embedding, image, transcription, moderation) emit the
-      # same event names, so this list needs no version branch.
-      OPERATIONS = %w[chat embedding image speech transcription moderation rerank ocr].freeze
+      # same event names, so this list needs no version branch. `compaction`
+      # is a chat call by another name -- same payload, same tokens, same
+      # cost -- and is billed, so it belongs here rather than being invisible
+      # spend.
+      OPERATIONS = %w[chat compaction embedding image speech transcription
+                      moderation rerank ocr].freeze
 
       # Costs are fractions of a cent: a cheap model's call is well under a
       # microdollar, and floats summed across a month of rollups do not add
@@ -161,7 +165,11 @@ module Railwatch
         return nil if value.nil?
 
         text = value.to_s
-        text.empty? ? nil : text[0, CONTENT_MAX]
+        return nil if text.empty?
+        # byteslice, not [0, n]: the cap bounds what is buffered and shipped,
+        # and 4096 characters of CJK is three times that in bytes. scrub
+        # repairs the multibyte character the slice may have cut in half.
+        text.bytesize > CONTENT_MAX ? text.byteslice(0, CONTENT_MAX).scrub("") : text
       end
     end
   end
