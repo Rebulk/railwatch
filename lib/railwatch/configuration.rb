@@ -5,7 +5,8 @@ module Railwatch
   # Laravel Nightwatch's config so the two products document the same knobs.
   class Configuration
     RECORD_TYPES = %i[queries cache_events mail broadcasts notifications outgoing_requests
-                      storage_ops view_renders logs transactions deprecations sessions].freeze
+                      storage_ops view_renders logs transactions deprecations sessions
+                      llm_calls].freeze
 
     # Framework/vendor noise excluded by default so a fresh install isn't
     # dominated by Rails' own housekeeping. Both lists are opt-in to disable
@@ -78,7 +79,8 @@ module Railwatch
                   :profile_sample, :profile_slow_ms, :profile_interval_us, :profiler,
                   :capture_job_arguments, :capture_job_retry_errors, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
-                  :capture_console, :interactive_runner_paths, :ignored_request_paths
+                  :capture_console, :interactive_runner_paths, :ignored_request_paths,
+                  :capture_llm_content
 
     attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
                 :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
@@ -175,6 +177,10 @@ module Railwatch
       @capture_job_arguments = env_bool("RAILWATCH_CAPTURE_JOB_ARGUMENTS", false)
       @capture_job_retry_errors = env_bool("RAILWATCH_CAPTURE_JOB_RETRY_ERRORS", false)
       @capture_response_body_on_error = env_bool("RAILWATCH_CAPTURE_RESPONSE_BODY_ON_ERROR", false)
+      # Prompts and completions are whatever the app sent a provider, so
+      # they are off until an operator opts in. Token counts, model, and
+      # cost -- the reason the record exists -- are always captured.
+      @capture_llm_content = env_bool("RAILWATCH_CAPTURE_LLM_CONTENT", false)
       @max_attachment_bytes = env_int("RAILWATCH_MAX_ATTACHMENT_BYTES", 1_048_576)
       # Release health: one `session` record per browser tab (the beacon
       # client) and per authenticated/cookied server session (Railwatch::Sessions).

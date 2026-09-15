@@ -10,7 +10,7 @@ module Railwatch
       query: 1, n_plus_one: 1, transaction: 1, exception: 1, cache_event: 1, mail: 1,
       broadcast: 1, notification: 1, outgoing_request: 1, storage_op: 1, view_render: 1,
       log: 1, enqueued_job: 1, user: 1, deprecation: 1, visit: 1, process: 1, span: 1, health: 1,
-      profile: 1, attachment: 1, session: 1
+      profile: 1, attachment: 1, session: 1, llm_call: 1
     }.freeze
 
     # Used in place of an execution's envelope when there is no execution, so
