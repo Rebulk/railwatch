@@ -98,12 +98,25 @@ module Railwatch
       end
     end
 
-    def flush
+    # `deadline` (monotonic) bounds the time this flush may spend on the
+    # wire; see Transport::Http#deliver. Unbounded from the background
+    # thread, bounded when a process is on its way out.
+    def flush(deadline: nil)
       ensure_process!
       @flush_mutex.synchronize do
         update_backpressure
-        deliver_buffer
+        deliver_buffer(deadline)
       end
+    end
+
+    # The synchronous flush a rake task or runner does when it ends. Bounded
+    # by shutdown_timeout so a Railwatch server that accepts and never
+    # answers cannot hold a short-lived process for a full timeout ladder:
+    # eleven such boots in one container entrypoint blew a 90s deploy window
+    # on 2026-09-16. Anything left unsent is retained for the at_exit
+    # shutdown, which is bounded the same way.
+    def flush_before_exit
+      flush(deadline: Clock.monotonic + [ @config.shutdown_timeout.to_f, 0.0 ].max)
     end
 
     def ensure_thread
@@ -246,7 +259,7 @@ module Railwatch
       end
     end
 
-    def deliver_buffer
+    def deliver_buffer(deadline = nil)
       # A 401 was reported once, when the transport first saw it; after
       # that the token is wrong until the process restarts, and repeating
       # the callback every flush would be a self-sustaining error source in
@@ -281,7 +294,7 @@ module Railwatch
         end
       end
 
-      result = deliver(batch)
+      result = deliver(batch, deadline)
       Railwatch.debug do
         "flushed #{batch.records.size} records/#{batch.bytes} bytes " \
           "(dropped #{batch.dropped}/#{batch.dropped_bytes} bytes): #{result.to_h}"
@@ -439,15 +452,17 @@ module Railwatch
     # Third-party/test transports written before batch idempotency only accept
     # `dropped:`. Keep those working while the HTTP transport receives the
     # stable identity required to replay a request safely.
-    def deliver(batch)
+    def deliver(batch, deadline = nil)
       parameters = @transport.method(:deliver).parameters
       accepts_batch_id = parameters.any? { |kind, name| kind == :keyrest || name == :batch_id }
       accepts_dropped_bytes = parameters.any? { |kind, name| kind == :keyrest || name == :dropped_bytes }
       accepts_backpressure = parameters.any? { |kind, name| kind == :keyrest || name == :backpressure_factor }
+      accepts_deadline = parameters.any? { |kind, name| kind == :keyrest || name == :deadline }
       keywords = { dropped: batch.dropped }
       keywords[:batch_id] = batch.id if accepts_batch_id
       keywords[:dropped_bytes] = batch.dropped_bytes if accepts_dropped_bytes
       keywords[:backpressure_factor] = @backpressure_factor if accepts_backpressure
+      keywords[:deadline] = deadline if accepts_deadline && deadline
       @transport.deliver(batch.records, **keywords)
     end
 
@@ -484,7 +499,7 @@ module Railwatch
     def flush_for_shutdown
       deadline = @mutex.synchronize { @shutdown_deadline }
       loop do
-        flush if pending_records?
+        flush(deadline: deadline) if pending_records?
         break unless pending_records?
 
         now = Clock.monotonic

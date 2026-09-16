@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "timeout"
+require "socket"
 
 RSpec.describe Railwatch::Transport::Http do
   let(:transport) { described_class.new(Railwatch.config) }
@@ -152,6 +153,78 @@ RSpec.describe Railwatch::Transport::Http do
 
       expect(result.ok).to be(true)
       expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.times(2)
+    end
+
+    # A server that accepts the TCP connection and never answers. WebMock
+    # cannot express that, and the deadline exists for exactly this shape.
+    def with_hanging_server
+      server = TCPServer.new("127.0.0.1", 0)
+      port = server.addr[1]
+      accepted = []
+      acceptor = Thread.new { loop { accepted << server.accept } }
+      yield "http://127.0.0.1:#{port}"
+    ensure
+      acceptor&.kill
+      accepted&.each { |sock| sock.close rescue nil }
+      server&.close
+    end
+
+    it "stops at the deadline against a server that accepts and never answers, instead of paying the full timeout twice" do
+      WebMock.allow_net_connect!
+      with_hanging_server do |url|
+        config = Railwatch.config.dup
+        config.ingest_url = url
+        config.allow_http = true
+        config.connect_timeout = 5.0
+        config.timeout = 5.0
+        bounded = described_class.new(config)
+
+        started = Railwatch::Clock.monotonic
+        result = bounded.deliver([ { t: "log" } ], deadline: started + 0.3)
+        elapsed = Railwatch::Clock.monotonic - started
+
+        expect(result.ok).to be(false)
+        expect(result).to be_retryable
+        expect(result.error).to include("Timeout")
+        expect(elapsed).to be < 1.5
+      end
+    ensure
+      WebMock.disable_net_connect!
+    end
+
+    it "makes no request at all once the deadline has passed" do
+      stub_request(:post, "http://railwatch.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+
+      result = transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic - 1)
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(a_request(:post, "http://railwatch.test/ingest")).not_to have_been_made
+    end
+
+    it "does not retry a network error when the deadline has passed" do
+      stub_request(:post, "http://railwatch.test/ingest").to_raise(Net::OpenTimeout)
+
+      result = transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic + 0.05)
+      sleep 0.06
+
+      expect(result.ok).to be(false)
+      # The first attempt was made; the retry may or may not have fit, but
+      # a second attempt after the deadline is what must never happen.
+      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.at_least_once
+    end
+
+    it "leaves the configured timeouts alone when no deadline is given" do
+      stub_request(:post, "http://railwatch.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+      seen = nil
+      allow(Net::HTTP).to receive(:start).and_wrap_original do |m, host, port, **opts, &blk|
+        seen = opts
+        m.call(host, port, **opts, &blk)
+      end
+
+      transport.deliver([ { t: "log" } ])
+
+      expect(seen).to include(open_timeout: Railwatch.config.connect_timeout, read_timeout: Railwatch.config.timeout)
     end
 
     it "classifies quota, timeout, rate-limit, and server responses as retryable" do

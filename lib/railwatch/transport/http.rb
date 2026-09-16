@@ -42,7 +42,15 @@ module Railwatch
         self
       end
 
-      def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
+      # `deadline` is a monotonic instant (Clock.monotonic) after which this
+      # call must not still be on the wire: the connect, read, and write
+      # timeouts are clamped to what remains of it, the one retry is skipped
+      # once it has passed, and a call that starts past it makes no request.
+      # Without it a server that accepts connections and never answers costs
+      # two full read timeouts per call, which is what turned a wedged
+      # Railwatch into ~8s on the exit of every rake task and runner.
+      def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid,
+                  deadline: nil)
         unless @config.ingest_url_allowed?
           return Result.new(ok: false, error: "plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
         end
@@ -58,17 +66,20 @@ module Railwatch
           dropped += over_cap
           dropped_bytes += over_cap_bytes
         end
+        if deadline && remaining(deadline) <= 0
+          return Result.new(ok: false, error: "delivery deadline passed before the request was sent", retryable_error: true)
+        end
         attempt = 0
         begin
           attempt += 1
-          result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
-          if attempt < 2 && (500..599).cover?(result.status)
-            result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
+          result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id, deadline), expected_count: sent)
+          if attempt < 2 && (500..599).cover?(result.status) && time_left?(deadline)
+            result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id, deadline), expected_count: sent)
           end
           apply_status_policy(result)
           result
         rescue StandardError => e
-          retry if attempt < 2
+          retry if attempt < 2 && time_left?(deadline)
           Result.new(ok: false, error: "#{e.class}: #{e.message}")
         end
       end
@@ -113,7 +124,15 @@ module Railwatch
         [ io.string, sent, over_cap, over_cap_bytes ]
       end
 
-      def post(body, dropped, dropped_bytes, backpressure_factor, batch_id)
+      def remaining(deadline)
+        deadline - Clock.monotonic
+      end
+
+      def time_left?(deadline)
+        deadline.nil? || remaining(deadline).positive?
+      end
+
+      def post(body, dropped, dropped_bytes, backpressure_factor, batch_id, deadline = nil)
         req = Net::HTTP::Post.new(@uri)
         req["Content-Type"] = "application/x-ndjson"
         req["Content-Encoding"] = "gzip"
@@ -125,17 +144,17 @@ module Railwatch
         req["X-Railwatch-Version"] = Railwatch::VERSION
         req["X-Railwatch-Batch-Id"] = batch_id
         req.body = body
-        request(req)
+        request(req, deadline)
       end
 
-      def request(req)
+      def request(req, deadline = nil)
         req["Authorization"] = "Bearer #{@config.token}"
         req["User-Agent"] = "railwatch-ruby/#{Railwatch::VERSION}"
         options = {
           use_ssl: @uri.scheme == "https",
-          open_timeout: @config.connect_timeout,
-          read_timeout: @config.timeout,
-          write_timeout: @config.timeout
+          open_timeout: bounded(@config.connect_timeout, deadline),
+          read_timeout: bounded(@config.timeout, deadline),
+          write_timeout: bounded(@config.timeout, deadline)
         }
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
@@ -143,6 +162,14 @@ module Railwatch
         Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
           http.request(req)
         end
+      end
+
+      # Net::HTTP treats a zero timeout as "no timeout", so the floor is a
+      # small positive number, not zero.
+      def bounded(timeout, deadline)
+        return timeout unless deadline
+
+        [ [ remaining(deadline), 0.05 ].max, timeout ].min
       end
 
       def parse(response, expected_count:)

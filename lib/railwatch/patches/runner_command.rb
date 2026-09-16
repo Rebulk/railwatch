@@ -91,7 +91,7 @@ module Railwatch
           }
           fields[:interactive] = true if interactive
           Railwatch.finish_execution(:command, **fields)
-          Railwatch.flush
+          Railwatch.flush_before_exit
         end
       end
 

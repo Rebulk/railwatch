@@ -72,7 +72,7 @@ module Railwatch
             name: name,
             command: "rake #{name}#{command_suffix}",
             exit_code: exit_code.to_i.clamp(0, 255))
-          Railwatch.flush
+          Railwatch.flush_before_exit
         end
       end
 
