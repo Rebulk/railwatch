@@ -25,12 +25,12 @@ RSpec.describe "embedded dashboard", type: :request do
 
   it "writes a request record into the telemetry database and shows it on the requests page" do
     get "/widgets"
-    records = railwatch_transport.batches.flat_map { |b| b[:records] }
-    expect(records.map { |r| r[:type] }).to include("request")
+    records = railwatch_records
+    expect(records.map { |r| r[:t] }).to include("request")
 
     local_write!(records)
 
-    stored = Environment.current.with_telemetry { Telemetry::Execution.where(kind: "request").last }
+    stored = Railwatch::Environment.current.with_telemetry { Railwatch::Telemetry::Execution.where(kind: "request").last }
     expect(stored).to be_present
     expect(stored.name).to eq("GET /widgets(.:format)")
 
@@ -45,11 +45,11 @@ RSpec.describe "embedded dashboard", type: :request do
 
   it "groups a raised exception into an issue with the app's prefix and lists it" do
     get "/boom"
-    result = local_write!(railwatch_transport.batches.flat_map { |b| b[:records] })
+    result = local_write!(railwatch_records)
     expect(result.rejected).to eq(0)
-    perform_enqueued_jobs(only: GroupExceptionsJob)
+    perform_enqueued_jobs(only: Railwatch::GroupExceptionsJob)
 
-    issue = Issue.sole
+    issue = Railwatch::Issue.sole
     expect(issue.key).to eq("DUMM-1")
     expect(issue.title).to eq("ArgumentError: kaboom")
     expect(issue.environment_id).to eq(1)

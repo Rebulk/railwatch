@@ -14,7 +14,7 @@ module Railwatch
       scope = scope.where(application_id: params[:application_id]) if params[:application_id].present?
       scope = scope.where(environment_id: params[:environment_id]) if params[:environment_id].present?
       scope = scope.where(kind: params[:kind]) if Issue::KINDS.include?(params[:kind].to_s)
-      scope = scope.where(assignee_id: ::Current.user.id) if params[:mine] == "1"
+      scope = scope.where(assignee_id: Viewer.user.id) if params[:mine] == "1"
       # Same "key:value free text" grammar as the other list pages: today the
       # only key is source, which is how you pull out the browser's own errors.
       parsed = FilterQuery.parse(params[:q])
@@ -24,7 +24,7 @@ module Railwatch
                         filters: params.permit(:status, :application_id, :environment_id, :kind, :mine, :q).to_h,
                         counts: Issue.all.group(:status).count,
                         kindCounts: Issue.all.open.group(:kind).count,
-                        members: ::User.default.then { |u| [ { id: u.id, name: u.name } ] } }
+                        members: User.default.then { |u| [ { id: u.id, name: u.name } ] } }
     end
 
     def show
@@ -59,7 +59,7 @@ module Railwatch
         occurrences: occurrences, daily: daily, by_deploy: by_deploy, by_tenant: by_tenant, attachments: attachments,
         comments: @issue.comments.order(:created_at).map { |c| { id: c.id, body: c.body, user: c.user&.name || c.author_name || "Linear", source: c.source, created_at: c.created_at } },
         activities: @issue.activities.order(:created_at).map { |a| activity_row(a) },
-        members: ::User.default.then { |u| [ { id: u.id, name: u.name } ] },
+        members: User.default.then { |u| [ { id: u.id, name: u.name } ] },
         deploys: env.deploys.recent.limit(20).map { |d| { deploy: d.deploy, ref: d.short_ref, at: d.deployed_at } },
         related_issues: related_issues,
         merged_into: @issue.merged_into && { id: @issue.merged_into.id, key: @issue.merged_into.key, title: @issue.merged_into.title },
@@ -92,7 +92,7 @@ module Railwatch
       when "ignore" then @issue.ignore!
       when "reopen" then @issue.reopen!
       when "assign" then @issue.update!(assignee: assignee_from(params[:assignee_id]))
-      when "assign_me" then @issue.update!(assignee_id: ::Current.user.id)
+      when "assign_me" then @issue.update!(assignee_id: Viewer.user.id)
       when "priority" then @issue.update!(priority: params[:priority])
       when "merge" then @issue.merge_into!(@issue.environment.issues.open.find(params[:target_id]))
       when "unmerge" then @issue.unmerge!
@@ -152,7 +152,7 @@ module Railwatch
         distinct_messages: 0, top_messages: [], occurrences: [], daily: [], by_deploy: {}, by_tenant: {}, attachments: [],
         comments: @issue.comments.order(:created_at).map { |c| { id: c.id, body: c.body, user: c.user.name, created_at: c.created_at } },
         activities: @issue.activities.order(:created_at).map { |a| activity_row(a) },
-        members: ::User.default.then { |u| [ { id: u.id, name: u.name } ] },
+        members: User.default.then { |u| [ { id: u.id, name: u.name } ] },
         deploys: env.deploys.recent.limit(20).map { |d| { deploy: d.deploy, ref: d.short_ref, at: d.deployed_at } },
         related_issues: related_issues,
         merged_into: @issue.merged_into && { id: @issue.merged_into.id, key: @issue.merged_into.key, title: @issue.merged_into.title },
@@ -225,7 +225,7 @@ module Railwatch
 
     # Only a member of the current account can be assigned; nil clears.
     def assignee_from(id)
-      id.present? ? ::User.find(id) : nil
+      id.present? ? User.find(id) : nil
     end
 
     # Same exception class seen in other environments of the same application:

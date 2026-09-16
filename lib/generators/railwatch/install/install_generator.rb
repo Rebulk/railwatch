@@ -300,25 +300,25 @@ module Railwatch
 
       RAILWATCH_RECURRING = <<~YAML
         railwatch_rollup_catchup:
-          class: RollupCatchupJob
+          class: Railwatch::RollupCatchupJob
           schedule: every minute
         railwatch_performance_scan:
-          class: PerformanceScanJob
+          class: Railwatch::PerformanceScanJob
           schedule: every 5 minutes
         railwatch_anomaly_scan:
-          class: AnomalyScanJob
+          class: Railwatch::AnomalyScanJob
           schedule: every 5 minutes
         railwatch_scheduled_task_scan:
-          class: ScheduledTaskScanJob
+          class: Railwatch::ScheduledTaskScanJob
           schedule: every 10 minutes
         railwatch_auto_resolve_issues:
-          class: AutoResolveIssuesJob
+          class: Railwatch::AutoResolveIssuesJob
           schedule: every day at 4am
         railwatch_prune_telemetry:
-          class: PruneTelemetryJob
+          class: Railwatch::PruneTelemetryJob
           schedule: every day at 3am
         railwatch_optimize_telemetry:
-          class: OptimizeTelemetryJob
+          class: Railwatch::OptimizeTelemetryJob
           schedule: every day at 3:30am
       YAML
 

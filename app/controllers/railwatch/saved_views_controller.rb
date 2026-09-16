@@ -3,7 +3,7 @@
 module Railwatch
     class SavedViewsController < DashboardController
     def create
-      view = environment.saved_views.new(create_params.merge(user: ::Current.user))
+      view = environment.saved_views.new(create_params.merge(user: Viewer.user))
       if view.save
         redirect_back fallback_location: fallback, notice: "View saved"
       else
@@ -33,7 +33,7 @@ module Railwatch
     # Its owner can change a view; an account admin can too, so a shared view
     # does not outlive the person who made it.
     def editable?(view)
-      view.user_id == ::Current.user.id || true
+      view.user_id == Viewer.user.id || true
     end
 
     def fallback = application_environment_overview_path(application, environment)

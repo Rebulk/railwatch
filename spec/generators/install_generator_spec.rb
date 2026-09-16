@@ -567,9 +567,9 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       yml = YAML.safe_load(read("config/recurring.yml"))
       expect(yml["production"]["clear_solid_queue_finished_jobs"]["schedule"]).to eq("every hour at minute 12")
-      expect(yml["production"]["railwatch_rollup_catchup"]).to eq("class" => "RollupCatchupJob", "schedule" => "every minute")
-      expect(yml["production"]["railwatch_prune_telemetry"]["class"]).to eq("PruneTelemetryJob")
-      expect(yml["development"]["railwatch_rollup_catchup"]["class"]).to eq("RollupCatchupJob")
+      expect(yml["production"]["railwatch_rollup_catchup"]).to eq("class" => "Railwatch::RollupCatchupJob", "schedule" => "every minute")
+      expect(yml["production"]["railwatch_prune_telemetry"]["class"]).to eq("Railwatch::PruneTelemetryJob")
+      expect(yml["development"]["railwatch_rollup_catchup"]["class"]).to eq("Railwatch::RollupCatchupJob")
     end
 
     it "changes nothing on a second run" do

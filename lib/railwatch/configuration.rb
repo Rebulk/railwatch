@@ -260,9 +260,9 @@ module Railwatch
     def resolve_dashboard_user(request)
       resolved = dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
       case resolved
-      when ::User then resolved
-      when Hash then ::User.new(id: resolved[:id] || ::User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
-      else ::User.default
+      when User then resolved
+      when Hash then User.new(id: resolved[:id] || User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
+      else User.default
       end
     end
 

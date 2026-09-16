@@ -8,8 +8,8 @@ module Railwatch
   # anyone who can reach the mount.
   class EnvironmentChannel < ActionCable::Channel::Base
     def subscribed
-      if params[:id].to_i == ::Environment::ID
-        stream_from "environment_#{::Environment::ID}"
+      if params[:id].to_i == Environment::ID
+        stream_from "environment_#{Environment::ID}"
       else
         reject
       end

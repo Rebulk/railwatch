@@ -102,14 +102,14 @@ namespace :railwatch do
                    fatal: true)
       end
       telemetry_ready = begin
-        Environment.current.with_telemetry { Telemetry::Execution.table_exists? }
+        Railwatch::Environment.current.with_telemetry { Railwatch::Telemetry::Execution.table_exists? }
       rescue StandardError => e
         e.message
       end
       check.call(telemetry_ready == true, "telemetry schema",
                  telemetry_ready == true ? "loaded" : "not loaded (bin/rails db:schema:load:railwatch_telemetry)", fatal: true)
       meta_ready = begin
-        Issue.table_exists?
+        Railwatch::Issue.table_exists?
       rescue StandardError => e
         e.message
       end
@@ -311,7 +311,7 @@ namespace :railwatch do
     deploy = Railwatch.config.deploy or abort "RAILWATCH_DEPLOY (or KAMAL_VERSION) is not set"
     if Railwatch.config.local?
       # Embedded: the deploy marker is a row in this app's railwatch database.
-      row = Environment.current.deploys.find_or_initialize_by(deploy: deploy.to_s.first(128))
+      row = Railwatch::Environment.current.deploys.find_or_initialize_by(deploy: deploy.to_s.first(128))
       row.assign_attributes(ref: (args[:ref] || `git rev-parse HEAD 2>/dev/null`.strip).presence&.first(128),
                             name: args[:name].presence&.first(255), url: args[:url].presence&.first(1024),
                             server: Railwatch.config.server, deployed_at: Time.current,

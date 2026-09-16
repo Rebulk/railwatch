@@ -34,12 +34,12 @@ module Railwatch
       def plan = "embedded"
       def retention_days = Railwatch.config.retention_days
       def auto_resolve_after_days = 14
-      def users = [ ::User.default ]
+      def users = [ User.default ]
       def members = users
       def memberships = NONE
       def integrations = NONE
-      def applications = [ ::Application.current ]
-      def environments = [ ::Environment.current ]
+      def applications = [ Application.current ]
+      def environments = [ Environment.current ]
       def quota_exhausted? = false
       def as_json(*) = { id: id, name: name, slug: slug, plan: plan }
     end

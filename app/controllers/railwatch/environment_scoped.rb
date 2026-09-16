@@ -14,7 +14,7 @@ module Railwatch
       inertia_share environment: -> { environment_props }
       inertia_share window: -> { window_key }
       inertia_share range: -> { from, to = window_range; { from: from.iso8601(6), to: to.iso8601(6) } }
-      inertia_share saved_views: -> { SavedView.props_for(environment, ::Current.user) }
+      inertia_share saved_views: -> { SavedView.props_for(environment, Viewer.user) }
     end
 
     private
@@ -22,7 +22,7 @@ module Railwatch
     attr_reader :environment
 
     def set_environment
-      @environment = ::Environment.find(params[:environment_id] || ::Environment::ID)
+      @environment = Environment.find(params[:environment_id] || Environment::ID)
     end
 
     def window_key
@@ -66,7 +66,7 @@ module Railwatch
       FilterQuery.cursor_context(environment_id: environment.id, resource: resource, query: params[:q], window: [ from.iso8601(6), to.iso8601(6) ])
     end
 
-    def application = ::Application.current
+    def application = Application.current
 
     def environment_props
       { id: environment.id, name: environment.name, slug: environment.slug, application_id: application.id,

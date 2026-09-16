@@ -14,9 +14,15 @@ require "railwatch/spec_helper"
 
 ActiveRecord::Schema.verbose = false
 load File.expand_path("dummy/db/schema.rb", __dir__)
-# The engine's own two databases, for the embedded dashboard specs.
-RailwatchRecord.connection_pool.with_connection { load File.expand_path("../db/railwatch_schema.rb", __dir__) }
-TelemetryRecord.connection_pool.with_connection { load File.expand_path("../db/railwatch_telemetry_schema.rb", __dir__) }
+# The engine's own two databases, for the embedded dashboard specs. Schema
+# files run against ActiveRecord::Base's connection, so each is loaded the
+# way db:schema:load does it: on a temporary pool for that database.
+%w[railwatch railwatch_telemetry].each do |name|
+  db_config = ActiveRecord::Base.configurations.configs_for(env_name: "test", name: name)
+  ActiveRecord::Tasks::DatabaseTasks.with_temporary_connection(db_config) do
+    ActiveRecord::Tasks::DatabaseTasks.load_schema(db_config, :ruby, File.expand_path("../db/#{name}_schema.rb", __dir__))
+  end
+end
 
 WebMock.disable_net_connect!
 # WebMock replaces ::Net::HTTP with a subclass whose #request short-circuits
