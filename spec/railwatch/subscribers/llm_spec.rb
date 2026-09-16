@@ -222,6 +222,40 @@ RSpec.describe Railwatch::Subscribers::Llm do
       expect(railwatch_records(:llm_call).sole).to include(tools: "lookup_rate,find_railcar", tool_count: 2)
     end
 
+    it "leaves cost provenance unknown when there is no cost to have a provenance" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(cost: Cost.new(total: nil))) }
+
+      call = railwatch_records(:llm_call).sole
+      expect(call[:cost_nanos]).to be_nil
+      # false would claim the registry priced it. Nothing priced it.
+      expect(call[:cost_reported]).to be_nil
+    end
+
+    it "keeps a setting that was explicitly turned off" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(caching: false, temperature: 0)) }
+
+      params = railwatch_records(:llm_call).sole[:params]
+      expect(params[:caching]).to be(false)
+      expect(params[:temperature]).to eq(0)
+    end
+
+    it "redacts a credential nested inside provider options, not just a top-level one" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(provider_options: {
+          "seed" => 7,
+          "extra_headers" => {"authorization" => "Bearer sk-leak", "x-trace" => "keep-me"},
+          "fallbacks" => [ {"api_key" => "sk-also-leak", "model" => "gpt-5.5"} ]
+        }))
+      end
+
+      options = railwatch_records(:llm_call).sole[:params][:provider_options]
+      expect(options["seed"]).to eq(7)
+      expect(options["extra_headers"]["authorization"]).to eq("[FILTERED]")
+      expect(options["extra_headers"]["x-trace"]).to eq("keep-me")
+      expect(options["fallbacks"].first["api_key"]).to eq("[FILTERED]")
+      expect(options["fallbacks"].first["model"]).to eq("gpt-5.5")
+    end
+
     it "says whether the provider priced the call or the registry did" do
       reported = Tokens.new(input: 10, output: 5, reported_cost: 0.001)
       in_execution do

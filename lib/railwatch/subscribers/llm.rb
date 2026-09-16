@@ -160,6 +160,10 @@ module Railwatch
       def cost_reported(payload)
         tokens = payload[:tokens]
         return nil unless tokens.respond_to?(:reported_cost)
+        # No cost means no provenance to report. false would claim the
+        # registry priced it, which is the same false certainty cost_nanos
+        # avoids by being nil rather than zero.
+        return nil if cost_nanos(payload).nil?
 
         !tokens.reported_cost.nil?
       end
@@ -193,8 +197,13 @@ module Railwatch
         out = {}
         COMMON_PARAMS.each do |key|
           value = payload[key]
-          next if value.nil? || value == false
-          out[key] = value.is_a?(Numeric) || value == true ? value : value.to_s[0, 128]
+          next if value.nil?
+          # false is kept, not dropped: `caching` defaults to nil, so
+          # caching: false is a deliberate choice, and reproducing a call
+          # needs the settings it ran with. RubyLLM does not distinguish a
+          # boolean that was set from one that defaulted, so record both
+          # rather than guess which mattered.
+          out[key] = value.is_a?(Numeric) || [ true, false ].include?(value) ? value : value.to_s[0, 128]
         end
         out[:schema] = true if payload[:schema]
         out[:server_tools] = Array(payload[:server_tools]).map(&:to_s).first(20) if payload[:server_tools].present?
@@ -215,12 +224,29 @@ module Railwatch
       # a password filter. The redactor's credential-name matcher (the same
       # one that catches X-Api-Key on a header) closes that.
       def provider_options(options)
-        filtered = Railwatch.redactor.params(options.transform_keys(&:to_s))
-        filtered.each do |key, _value|
-          # The matcher is written for header names, which are hyphenated;
-          # provider options are Ruby-ish and use underscores, so api_key
-          # would sail past a pattern expecting api-key.
-          filtered[key] = Redactor::FILTERED if Railwatch.redactor.redact_header?(key.tr("_", "-"))
+        redact_credentials(Railwatch.redactor.params(options.transform_keys(&:to_s)))
+      end
+
+      # Recursive, because provider options nest: extra_headers carrying an
+      # authorization value is a hash inside the hash, and a top-level scan
+      # walks straight past it.
+      def redact_credentials(value, depth = 0)
+        return value if depth > 4
+
+        case value
+        when Hash
+          value.each_with_object({}) do |(key, item), out|
+            # The matcher is written for header names, which are hyphenated;
+            # provider options are Ruby-ish and use underscores, so api_key
+            # would sail past a pattern expecting api-key.
+            out[key] = if Railwatch.redactor.redact_header?(key.to_s.tr("_", "-"))
+              Redactor::FILTERED
+            else
+              redact_credentials(item, depth + 1)
+            end
+          end
+        when Array then value.map { |item| redact_credentials(item, depth + 1) }
+        else value
         end
       end
 

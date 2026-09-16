@@ -515,8 +515,10 @@ call like any other. The two are different grains on purpose: the
 `outgoing_request` is the HTTP truth, the `llm_call` is what it cost. That
 difference is useful: RubyLLM retries through Faraday, so one `llm_call`
 with several `outgoing_request` rows against it in the same execution is a
-call that was retried, and the gap between the two counts over a window is
-the retry rate.
+call that was retried. Over a window, `outgoing_requests - llm_calls` to the
+same provider host is the number of *extra attempts*, not a rate -- the
+share of calls that were retried needs counting the calls with more than one
+request against them, which the execution id supports.
 
 **Token counts and cost differ by RubyLLM version.** 1.16 reports token
 counts and no cost at all. 2.0 reports both, from its usage ledger, and
