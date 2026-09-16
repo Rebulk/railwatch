@@ -8,6 +8,7 @@ module Railwatch
   # database.
   class Reporter
     INITIAL_RETRY_DELAY = 1.0
+    LOCK_POLL_INTERVAL = 0.005
     MAX_RETRY_DELAY = 60.0
     # A retained batch is retried this many times, then dropped (and
     # counted) so the buffer's newest records win again. Without the cap a
@@ -100,23 +101,19 @@ module Railwatch
 
     # `deadline` (monotonic) bounds the time this flush may spend on the
     # wire; see Transport::Http#deliver. Unbounded from the background
-    # thread, bounded when a process is on its way out.
+    # thread, bounded when a process is on its way out. A bounded flush also
+    # bounds its wait for @flush_mutex: the background thread may be inside
+    # an unbounded delivery, and queueing behind it past the deadline would
+    # defeat the point. Mutex has no timed lock, so the wait is a short
+    # poll; giving up leaves the records in @buffer for the at_exit
+    # shutdown to report.
     def flush(deadline: nil)
       ensure_process!
-      return flush_locked(nil) unless deadline
+      return unless acquire_flush_lock(deadline)
 
-      # The background thread may hold the mutex inside an unbounded
-      # delivery. A bounded flush must not queue behind it past its own
-      # deadline: poll for the lock, and give up with the records still
-      # pending in @buffer (the at_exit shutdown reports them) if it never
-      # frees up in time.
-      until @flush_mutex.try_lock
-        return if Clock.monotonic >= deadline
-
-        sleep(0.005)
-      end
       begin
-        flush_locked(deadline)
+        update_backpressure
+        deliver_buffer(deadline)
       ensure
         @flush_mutex.unlock
       end
@@ -137,21 +134,17 @@ module Railwatch
       arm_thread unless @thread&.alive?
     end
 
-    def flush_locked(deadline)
-      if deadline
-        update_backpressure
-        deliver_buffer(deadline)
-      else
-        @flush_mutex.synchronize do
-          update_backpressure
-          deliver_buffer(nil)
-        end
+    def acquire_flush_lock(deadline)
+      return @flush_mutex.lock unless deadline
+
+      until @flush_mutex.try_lock
+        return false unless Clock.monotonic < deadline
+
+        sleep(LOCK_POLL_INTERVAL)
       end
+      true
     end
 
-    # Only valid in a forked child. It deliberately never acquires an
-    # inherited lock: another parent thread may have owned that mutex at the
-    # instant of fork, and its owner does not exist in the child.
     def restart_after_fork!
       return if @pid == Process.pid
 

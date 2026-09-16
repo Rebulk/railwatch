@@ -231,7 +231,6 @@ RSpec.describe Railwatch::Transport::Http do
         # Pretend the connect phase spent almost all of the deadline: the
         # clamped read_timeout computed up front was 0.3s, but only ~0.1s of
         # the deadline is actually left by the time the read starts.
-        original = Net::HTTP.method(:start)
         allow(Net::HTTP).to receive(:start).and_wrap_original do |m, host, port, **opts, &blk|
           sleep 0.2
           m.call(host, port, **opts, &blk)
@@ -242,7 +241,9 @@ RSpec.describe Railwatch::Transport::Http do
         elapsed = Railwatch::Clock.monotonic - started
 
         expect(result.ok).to be(false)
-        expect(elapsed).to be < 0.6
+        # Without the post-connect re-clamp this is 0.2s connect + the stale
+        # 0.3s read allowance = 0.5s. With it, the read gets what is left.
+        expect(elapsed).to be < 0.42
       end
     ensure
       WebMock.disable_net_connect!

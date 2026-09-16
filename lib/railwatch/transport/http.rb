@@ -2,7 +2,6 @@
 
 require "net/http"
 require "openssl"
-require "timeout"
 require "zlib"
 require "json"
 
@@ -151,6 +150,8 @@ module Railwatch
       def request(req, deadline = nil)
         req["Authorization"] = "Bearer #{@config.token}"
         req["User-Agent"] = "railwatch-ruby/#{Railwatch::VERSION}"
+        raise Net::OpenTimeout, "delivery deadline passed" if deadline && !time_left?(deadline)
+
         options = {
           use_ssl: @uri.scheme == "https",
           open_timeout: bounded(@config.connect_timeout, deadline),
@@ -160,29 +161,24 @@ module Railwatch
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
         options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
-        exchange = lambda do
-          Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
-            http.request(req)
+        Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
+          # Connect, write and read are separate socket budgets. The clamp
+          # above was taken before the connect; a slow connect would leave
+          # write and read their stale allowance, so re-clamp them to what
+          # is left of the deadline now that the socket is open.
+          if deadline
+            raise Net::ReadTimeout, "delivery deadline passed" unless time_left?(deadline)
+
+            http.read_timeout = bounded(@config.timeout, deadline)
+            http.write_timeout = bounded(@config.timeout, deadline)
           end
+          http.request(req)
         end
-        return exchange.call unless deadline
-
-        # The per-operation timeouts above are clamped at the moment this
-        # call starts, but connect, write and read are separate budgets: a
-        # slow connect leaves the later phases their stale allowance. The
-        # deadline is one instant, so it is enforced once around the whole
-        # exchange. Timeout.timeout is a last line here, not the design: the
-        # socket timeouts fire first in the normal case, and this only
-        # catches the stale-budget overrun.
-        left = remaining(deadline)
-        raise Net::OpenTimeout, "delivery deadline passed" unless left.positive?
-
-        ::Timeout.timeout(left, Net::ReadTimeout, "delivery deadline passed") { exchange.call }
       end
 
       # Net::HTTP treats a zero timeout as "no timeout", so the floor is a
-      # small positive number, not zero; the whole-exchange deadline in
-      # `request` is what stops the floor from becoming an overrun.
+      # small positive number, not zero. It is the only overrun left: at most
+      # 50ms past the deadline on each of the write and the read.
       def bounded(timeout, deadline)
         return timeout unless deadline
 
