@@ -26,7 +26,7 @@ module Telemetry
       row.error_count += errors
       row.client_error_count += client_errors
       row.duration_sum += durations.sum
-      row.duration_max = [row.duration_max, durations.max].max
+      row.duration_max = [ row.duration_max, durations.max ].max
       row.p50 = digest.percentile(0.5).to_i
       row.p95 = digest.percentile(0.95).to_i
       row.p99 = digest.percentile(0.99).to_i
@@ -43,17 +43,17 @@ module Telemetry
       digest = TDigest::TDigest.new(0.01)
       durations.each { |d| digest.push(d) }
       digest.compress!
-      {record_type: record_type, group_hash: group_hash, name: name, bucket: bucket,
+      { record_type: record_type, group_hash: group_hash, name: name, bucket: bucket,
        count: durations.size, error_count: errors, client_error_count: client_errors,
        duration_sum: durations.sum, duration_max: durations.max,
        p50: digest.percentile(0.5).to_i, p95: digest.percentile(0.95).to_i, p99: digest.percentile(0.99).to_i,
-       digest: digest.as_small_bytes, extra: extra}
+       digest: digest.as_small_bytes, extra: extra }
     end
 
     # Aggregate a relation of rollups into one summary with merged percentiles.
     def self.summarize(relation)
       rows = relation.to_a
-      return {count: 0, errors: 0, client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0, max: 0} if rows.empty?
+      return { count: 0, errors: 0, client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0, max: 0 } if rows.empty?
       # merge! pushes the row's centroids into one accumulating digest.
       # `+` built a brand-new digest from both operands' centroids on every
       # row, so merging N rows re-pushed every earlier centroid N times:

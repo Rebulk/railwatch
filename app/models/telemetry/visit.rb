@@ -7,7 +7,7 @@ module Telemetry
     # Core Web Vitals reported by the browser client, with Google's
     # [good, poor] thresholds: at or below good is "good", above poor is
     # "poor". lcp/inp/ttfb are milliseconds, cls is unitless.
-    VITALS = {lcp: [2500, 4000], cls: [0.1, 0.25], inp: [200, 500], ttfb: [800, 1800]}.freeze
+    VITALS = { lcp: [ 2500, 4000 ], cls: [ 0.1, 0.25 ], inp: [ 200, 500 ], ttfb: [ 800, 1800 ] }.freeze
 
     def self.rating(metric, value)
       good, poor = VITALS.fetch(metric)

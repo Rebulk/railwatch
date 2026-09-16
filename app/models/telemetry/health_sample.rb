@@ -30,8 +30,8 @@ module Telemetry
                Arel.sql("AVG(CASE WHEN threads_max > 0 THEN threads_busy * 100.0 / threads_max END)"),
                Arel.sql("SUM(backlog)"), Arel.sql("MAX(queue_depth)"), Arel.sql("MAX(queue_latency)"))
         .map do |t, utilisation, backlog, depth, latency|
-          {t: t, utilisation: utilisation.to_f.round(1), backlog: backlog.to_i,
-           queue_depth: depth.to_i, queue_latency: (latency.to_i / 1000.0).round(1)}
+          { t: t, utilisation: utilisation.to_f.round(1), backlog: backlog.to_i,
+           queue_depth: depth.to_i, queue_latency: (latency.to_i / 1000.0).round(1) }
         end
     end
 
@@ -40,9 +40,9 @@ module Telemetry
     # merged with max, not summed.
     def self.queue_depths(samples)
       depths = samples.each_with_object({}) do |sample, out|
-        sample.detail.fetch("queues", {}).each { |queue, depth| out[queue] = [out[queue].to_i, depth.to_i].max }
+        sample.detail.fetch("queues", {}).each { |queue, depth| out[queue] = [ out[queue].to_i, depth.to_i ].max }
       end
-      depths.sort_by { |_queue, depth| -depth }.map { |queue, depth| {queue: queue, depth: depth} }
+      depths.sort_by { |_queue, depth| -depth }.map { |queue, depth| { queue: queue, depth: depth } }
     end
 
     # The recurring task keys Solid Queue is running, from the newest live

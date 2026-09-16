@@ -10,8 +10,8 @@ module Telemetry
     DEFAULT_LIMIT = 50
     MAX_LIMIT = 200
     ORDERS = {
-      recent: {column: :occurred_at, direction: :desc, type: :time},
-      slowest: {column: :duration, direction: :desc, type: :integer}
+      recent: { column: :occurred_at, direction: :desc, type: :time },
+      slowest: { column: :duration, direction: :desc, type: :integer }
     }.freeze
 
     def self.call(scope, cursor: nil, limit: nil, order: :recent, context: nil)
@@ -23,7 +23,7 @@ module Telemetry
       @cursor = cursor
       parsed_limit = limit.to_i
       parsed_limit = DEFAULT_LIMIT unless parsed_limit.positive?
-      @limit = [parsed_limit, MAX_LIMIT].min
+      @limit = [ parsed_limit, MAX_LIMIT ].min
       @order_name = order.to_sym
       @order = ORDERS.fetch(@order_name)
       @context = context.to_s
@@ -36,7 +36,7 @@ module Telemetry
       has_more = rows.length > limit
       rows = rows.first(limit)
       next_cursor = encode(rows.last) if has_more
-      [rows, {limit: limit, next_cursor: next_cursor, has_more: has_more}]
+      [ rows, { limit: limit, next_cursor: next_cursor, has_more: has_more } ]
     end
 
     private
@@ -69,8 +69,8 @@ module Telemetry
       # The page size is deliberately not bound: changing it mid-scroll must
       # not hard-fail. The cursor is a stable position, not a security
       # boundary -- the scope it is applied to is already tenant-scoped here.
-      verifier.generate({v: 1, model: scope.klass.name, order: order_name,
-                         context: context, value: value, id: row.id})
+      verifier.generate({ v: 1, model: scope.klass.name, order: order_name,
+                         context: context, value: value, id: row.id })
     end
 
     def decode
@@ -80,7 +80,7 @@ module Telemetry
         payload[:order].to_s == order_name.to_s && payload[:context] == context
       raise InvalidCursor, "invalid telemetry cursor" unless valid_shape
       value = order[:type] == :time ? Time.iso8601(payload[:value].to_s) : Integer(payload[:value].to_s, 10)
-      {value: value, id: Integer(payload[:id].to_s, 10)}
+      { value: value, id: Integer(payload[:id].to_s, 10) }
     rescue ActiveSupport::MessageVerifier::InvalidSignature, ArgumentError, TypeError
       raise InvalidCursor, "invalid telemetry cursor"
     end

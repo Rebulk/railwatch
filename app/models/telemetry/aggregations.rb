@@ -16,7 +16,7 @@ module Telemetry
         scope = scope.where(name: name) if name
         scope.group(:bucket).order(:bucket)
              .pluck(:bucket, Arel.sql("SUM(count)"), Arel.sql("SUM(error_count)"), Arel.sql("SUM(client_error_count)"), Arel.sql("SUM(duration_sum)"), Arel.sql("MAX(p50)"), Arel.sql("MAX(p95)"), Arel.sql("MAX(p99)"))
-             .map { |b, c, e, ce, ds, p50, p95, p99| {t: b, count: c, errors: e, client_errors: ce, avg: c.zero? ? 0 : ds / c / 1000.0, p50: p50 / 1000.0, p95: p95 / 1000.0, p99: p99 / 1000.0} }
+             .map { |b, c, e, ce, ds, p50, p95, p99| { t: b, count: c, errors: e, client_errors: ce, avg: c.zero? ? 0 : ds / c / 1000.0, p50: p50 / 1000.0, p95: p95 / 1000.0, p99: p99 / 1000.0 } }
       end
     end
 
@@ -29,7 +29,7 @@ module Telemetry
       # 200 busiest query groups on the rebulk environment span 1,500 rollup
       # rows and 55,000 centroids, and merging those digests is 480ms that
       # only changes when RollupJob writes.
-      key = ["aggregations", "grouped", environment.id, record_type, limit, order, sign, from.to_i / 60, to.to_i / 60]
+      key = [ "aggregations", "grouped", environment.id, record_type, limit, order, sign, from.to_i / 60, to.to_i / 60 ]
       Rails.cache.fetch(key, expires_in: 1.minute) { grouped_uncached(environment, record_type, from: from, to: to, limit: limit, order: order, sign: sign) }
     end
 
@@ -44,7 +44,7 @@ module Telemetry
         # groups that make the cut. A percentile sort falls back to the full
         # merge, since the ranking itself needs the digest.
         cheap = %i[count errors avg max].include?(order)
-        ranked = groups.map { |group_hash, group_rows| [group_hash, group_rows, cheap ? cheap_summary(group_rows) : Telemetry::Rollup.summarize(group_rows)] }
+        ranked = groups.map { |group_hash, group_rows| [ group_hash, group_rows, cheap ? cheap_summary(group_rows) : Telemetry::Rollup.summarize(group_rows) ] }
         ranked.sort_by! { |_, _, summary| summary[order] * sign }
         ranked.first(limit).map do |group_hash, group_rows, summary|
           summary = Telemetry::Rollup.summarize(group_rows) if cheap
@@ -63,8 +63,8 @@ module Telemetry
     # that are not percentiles need.
     def self.cheap_summary(rows)
       count = rows.sum(&:count)
-      {count: count, errors: rows.sum(&:error_count),
-       avg: count.zero? ? 0 : (rows.sum(&:duration_sum) / count), max: rows.map(&:duration_max).max}
+      { count: count, errors: rows.sum(&:error_count),
+       avg: count.zero? ? 0 : (rows.sum(&:duration_sum) / count), max: rows.map(&:duration_max).max }
     end
 
     # { current: Summary, previous: Summary } so pages/endpoints can show deltas.
@@ -74,8 +74,8 @@ module Telemetry
     # writes, which is at most once a minute per bucket; without this the
     # merge ran again on every page load.
     def self.summary_with_delta(environment, record_type, from:, to:, previous_from:, previous_to:, group_hash: nil)
-      key = ["aggregations", "summary_with_delta", environment.id, record_type, group_hash,
-             from.to_i / 60, to.to_i / 60, previous_from.to_i / 60, previous_to.to_i / 60]
+      key = [ "aggregations", "summary_with_delta", environment.id, record_type, group_hash,
+             from.to_i / 60, to.to_i / 60, previous_from.to_i / 60, previous_to.to_i / 60 ]
       Rails.cache.fetch(key, expires_in: 1.minute) do
         environment.with_telemetry do
           current = Telemetry::Rollup.for_type(record_type).between(from, to)
@@ -84,7 +84,7 @@ module Telemetry
             current = current.where(group_hash: group_hash)
             previous = previous.where(group_hash: group_hash)
           end
-          {current: Telemetry::Rollup.summarize(current), previous: Telemetry::Rollup.summarize(previous)}
+          { current: Telemetry::Rollup.summarize(current), previous: Telemetry::Rollup.summarize(previous) }
         end
       end
     end
@@ -92,7 +92,7 @@ module Telemetry
     # Hourly counts for a set of same-window rollup rows, zero-filled, coarsened
     # to at most 30 points for wide windows (7d/30d).
     def self.sparkline(rows, from, to)
-      hours = [((to - from) / 1.hour).ceil, 1].max
+      hours = [ ((to - from) / 1.hour).ceil, 1 ].max
       coarsen = (hours / 30.0).ceil
       base = from.beginning_of_hour
       buckets = Hash.new(0)

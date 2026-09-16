@@ -31,8 +31,16 @@ class Environment
   def token_prefix = "embedded"
   def retention_days = 7
   def last_seen_at = Railwatch::Embedded.last_seen_at
-  def issues = Railwatch::Embedded::NONE
-  def deploys = Railwatch::Embedded::NONE
+  def application = ::Application.current
+  def issues = ::Issue.where(environment_id: ID)
+  def deploys = ::Deploy.where(environment_id: ID)
+  def saved_views = ::SavedView.where(environment_id: ID)
+  def thresholds = ::Threshold.where(environment_id: ID)
+  def anomaly_rules = ::AnomalyRule.where(environment_id: ID)
+  def events_this_month = 0
+  # The platform lets an account list the servers it expects to report so the
+  # dashboard can flag silent ones. One embedded install is its own server.
+  def expected_servers = []
 
   # Ingest::Batch touches this in embedded mode; there is no row to update.
   def update_columns(last_seen_at:) = Railwatch::Embedded.last_seen_at = last_seen_at

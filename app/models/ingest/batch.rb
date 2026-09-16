@@ -7,7 +7,7 @@ module Ingest
   # malformed records are counted as rejected, never raised.
   class Batch
     Result = Struct.new(:accepted, :rejected, :rejections, keyword_init: true) do
-      def to_h = {accepted: accepted, rejected: rejected, rejections: rejections.first(10)}
+      def to_h = { accepted: accepted, rejected: rejected, rejections: rejections.first(10) }
     end
 
     # embedded: this batch is being written in the monitored application's own
@@ -48,7 +48,7 @@ module Ingest
             @exception_ids = Ingest::Writer.new(@rows_by_class).write!
             link_profiles!
             accepted += @rows_by_class.values.sum(&:size)
-            Telemetry::Person.touch_all(@people.map { |rec| [rec, Time.at(rec["timestamp"].to_f).utc] })
+            Telemetry::Person.touch_all(@people.map { |rec| [ rec, Time.at(rec["timestamp"].to_f).utc ] })
             accepted += @people.size
             Telemetry::IngestBatch.create!(received_at: @received_at, accepted: accepted, rejected: @rejections.size,
                                            dropped_by_client: @dropped_by_client, backpressure_factor: @backpressure_factor,
@@ -78,7 +78,7 @@ module Ingest
       factor = Float(value, exception: false)
       return 1.0 unless factor&.finite?
 
-      [factor, 1.0].max
+      [ factor, 1.0 ].max
     end
 
     # Puma runs one process with a pool of threads in this app (see bin/dev),
@@ -134,7 +134,7 @@ module Ingest
       rescue ArgumentError, TypeError, KeyError, NoMethodError, RangeError, JSON::GeneratorError => e
         reject(rec, "#{e.class}: #{e.message}")
       rescue StandardError => e
-        Rails.error.report(e, handled: true, context: {ingest_record_type: record_type(rec)})
+        Rails.error.report(e, handled: true, context: { ingest_record_type: record_type(rec) })
         reject(rec, "invalid record")
       end
     end
@@ -170,7 +170,7 @@ module Ingest
     end
 
     def reject(rec, reason)
-      @rejections << {type: record_type(rec), reason: reason.to_s.first(200)}
+      @rejections << { type: record_type(rec), reason: reason.to_s.first(200) }
     end
 
     def record_type(rec)
@@ -206,7 +206,7 @@ module Ingest
     end
 
     def rollup_due?(bucket)
-      key = [@environment.id, bucket.to_i]
+      key = [ @environment.id, bucket.to_i ]
       now = Time.current
       last = LAST_ROLLUP_ENQUEUE_AT[key]
       return false if last && now - last < ROLLUP_ENQUEUE_WINDOW
@@ -221,10 +221,10 @@ module Ingest
       return if last && now - last < THROTTLE_WINDOW
 
       LAST_BROADCAST_AT[@environment.id] = now
-      ActionCable.server.broadcast("environment_#{@environment.id}", {event: "ingested", at: now.iso8601, counts: @counts})
+      ActionCable.server.broadcast("environment_#{@environment.id}", { event: "ingested", at: now.iso8601, counts: @counts })
     rescue StandardError => e
       # A live refresh ping is not worth failing a written batch over.
-      Rails.error.report(e, handled: true, context: {ingest_broadcast: @environment.slug})
+      Rails.error.report(e, handled: true, context: { ingest_broadcast: @environment.slug })
     end
   end
 end

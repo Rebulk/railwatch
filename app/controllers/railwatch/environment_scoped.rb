@@ -6,15 +6,15 @@ module Railwatch
   module EnvironmentScoped
     extend ActiveSupport::Concern
 
-    WINDOWS = {"1h" => 1.hour, "6h" => 6.hours, "24h" => 24.hours, "7d" => 7.days, "30d" => 30.days}.freeze
+    WINDOWS = { "1h" => 1.hour, "6h" => 6.hours, "24h" => 24.hours, "7d" => 7.days, "30d" => 30.days }.freeze
     MAX_CUSTOM_RANGE = 90.days
 
     included do
       before_action :set_environment
       inertia_share environment: -> { environment_props }
       inertia_share window: -> { window_key }
-      inertia_share range: -> { from, to = window_range; {from: from.iso8601(6), to: to.iso8601(6)} }
-      inertia_share saved_views: -> { [] }
+      inertia_share range: -> { from, to = window_range; { from: from.iso8601(6), to: to.iso8601(6) } }
+      inertia_share saved_views: -> { SavedView.props_for(environment, ::Current.user) }
     end
 
     private
@@ -34,7 +34,7 @@ module Railwatch
       @window_range = custom_range || begin
         key = WINDOWS.key?(params[:window].to_s) ? params[:window].to_s : "24h"
         to = Time.current
-        [to - WINDOWS[key], to]
+        [ to - WINDOWS[key], to ]
       end
     end
 
@@ -43,7 +43,7 @@ module Railwatch
       from = parse_time(params[:from])
       to = from && (parse_time(params[:to]) || Time.current)
       valid = from && to && to > from && (to - from) <= MAX_CUSTOM_RANGE
-      @custom_range = valid ? [from, to] : nil
+      @custom_range = valid ? [ from, to ] : nil
     end
 
     def parse_time(value)
@@ -56,23 +56,28 @@ module Railwatch
     def previous_window_range
       from, to = window_range
       span = to - from
-      [from - span, from]
+      [ from - span, from ]
     end
 
     def telemetry(&block) = environment.with_telemetry(&block)
 
     def telemetry_cursor_context(resource)
       from, to = window_range
-      FilterQuery.cursor_context(environment_id: environment.id, resource: resource, query: params[:q], window: [from.iso8601(6), to.iso8601(6)])
+      FilterQuery.cursor_context(environment_id: environment.id, resource: resource, query: params[:q], window: [ from.iso8601(6), to.iso8601(6) ])
     end
+
+    def application = ::Application.current
 
     def environment_props
-      {id: environment.id, name: environment.name, slug: environment.slug, application_id: 1,
-        application_name: environment.application_name, issue_prefix: "APP", last_seen_at: environment.last_seen_at,
-        paused: false, token_prefix: environment.token_prefix, repository_url: nil, default_branch: "main"}
+      { id: environment.id, name: environment.name, slug: environment.slug, application_id: application.id,
+        application_name: application.name, issue_prefix: application.issue_prefix, last_seen_at: environment.last_seen_at,
+        paused: false, token_prefix: environment.token_prefix,
+        repository_url: application.repository_url, default_branch: application.default_branch }
     end
 
-    def deploys_in_window = []
+    def deploys_in_window
+      environment.deploys.between(*window_range).recent.limit(50).map { |d| { deploy: d.deploy, ref: d.short_ref, at: d.deployed_at } }
+    end
 
     def series(record_type, group_hash: nil, name: nil)
       from, to = window_range

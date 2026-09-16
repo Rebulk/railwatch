@@ -11,7 +11,7 @@ class RollupCatchupJob < ApplicationJob
   def perform
     env = Environment.current
     now = Time.current
-    [now.beginning_of_hour, (now - 1.hour).beginning_of_hour].each do |bucket|
+    [ now.beginning_of_hour, (now - 1.hour).beginning_of_hour ].each do |bucket|
       RollupJob.perform_now(env, bucket)
       ReleaseHealthRollupJob.perform_now(env, bucket)
     end

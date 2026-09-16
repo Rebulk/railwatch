@@ -12,22 +12,22 @@ class RollupJob < ApplicationJob
   limits_concurrency to: 1, key: ->(environment, bucket) { "#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
 
   SOURCES = {
-    "request" => [Telemetry::Execution, ->(r) { r.requests }, ->(row) { row.name }],
-    "job_attempt" => [Telemetry::Execution, ->(r) { r.jobs }, ->(row) { row.name }],
-    "scheduled_task" => [Telemetry::Execution, ->(r) { r.scheduled }, ->(row) { row.name }],
-    "command" => [Telemetry::Execution, ->(r) { r.commands }, ->(row) { row.name }],
-    "channel_action" => [Telemetry::Execution, ->(r) { r.channels }, ->(row) { row.name }],
-    "query" => [Telemetry::Query, ->(r) { r }, ->(row) { row.sql.first(255) }],
-    "outgoing_request" => [Telemetry::OutgoingRequest, ->(r) { r }, ->(row) { "#{row.method} #{row.host}" }],
-    "cache_event" => [Telemetry::CacheEvent, ->(r) { r }, ->(row) { "#{row.store} #{row.key}" }],
-    "mail" => [Telemetry::Mail, ->(r) { r }, ->(row) { row.mailer }],
-    "visit" => [Telemetry::Visit, ->(r) { r }, ->(row) { row.component }],
-    "span" => [Telemetry::Span, ->(r) { r }, ->(row) { row.name }],
-    "notification" => [Telemetry::Notification, ->(r) { r }, ->(row) { row.notifier || row.delivery_method }],
-    "view_render" => [Telemetry::ViewRender, ->(r) { r }, ->(row) { row.identifier }],
-    "transaction" => [Telemetry::Transaction, ->(r) { r }, ->(row) { "#{row.connection} · #{row.outcome}" }],
-    "llm_call" => [Telemetry::LlmCall, ->(r) { r.models }, ->(row) { "#{row.model} · #{row.operation}" }],
-    "llm_tool" => [Telemetry::LlmCall, ->(r) { r.tools }, ->(row) { row.tool_name.to_s }]
+    "request" => [ Telemetry::Execution, ->(r) { r.requests }, ->(row) { row.name } ],
+    "job_attempt" => [ Telemetry::Execution, ->(r) { r.jobs }, ->(row) { row.name } ],
+    "scheduled_task" => [ Telemetry::Execution, ->(r) { r.scheduled }, ->(row) { row.name } ],
+    "command" => [ Telemetry::Execution, ->(r) { r.commands }, ->(row) { row.name } ],
+    "channel_action" => [ Telemetry::Execution, ->(r) { r.channels }, ->(row) { row.name } ],
+    "query" => [ Telemetry::Query, ->(r) { r }, ->(row) { row.sql.first(255) } ],
+    "outgoing_request" => [ Telemetry::OutgoingRequest, ->(r) { r }, ->(row) { "#{row.method} #{row.host}" } ],
+    "cache_event" => [ Telemetry::CacheEvent, ->(r) { r }, ->(row) { "#{row.store} #{row.key}" } ],
+    "mail" => [ Telemetry::Mail, ->(r) { r }, ->(row) { row.mailer } ],
+    "visit" => [ Telemetry::Visit, ->(r) { r }, ->(row) { row.component } ],
+    "span" => [ Telemetry::Span, ->(r) { r }, ->(row) { row.name } ],
+    "notification" => [ Telemetry::Notification, ->(r) { r }, ->(row) { row.notifier || row.delivery_method } ],
+    "view_render" => [ Telemetry::ViewRender, ->(r) { r }, ->(row) { row.identifier } ],
+    "transaction" => [ Telemetry::Transaction, ->(r) { r }, ->(row) { "#{row.connection} · #{row.outcome}" } ],
+    "llm_call" => [ Telemetry::LlmCall, ->(r) { r.models }, ->(row) { "#{row.model} · #{row.operation}" } ],
+    "llm_tool" => [ Telemetry::LlmCall, ->(r) { r.tools }, ->(row) { row.tool_name.to_s } ]
   }.freeze
 
   # SQLite binds at most 32,766 variables per statement; a rollup row is 14.
@@ -56,7 +56,7 @@ class RollupJob < ApplicationJob
   def recompute(environment, bucket, range)
     SOURCES.each do |type, (klass, scope, namer)|
       Railwatch.span("rollup.#{type}", bucket: bucket.iso8601) do
-        rows = scope.call(klass).where(occurred_at: range).select(:id, :group_hash, :duration, *(klass == Telemetry::Execution ? %i[name status outcome kind] : %i[]), *(klass == Telemetry::Query ? [Telemetry::Query::SQL] : []), *(klass == Telemetry::OutgoingRequest ? %i[method host status_code] : []), *(klass == Telemetry::CacheEvent ? %i[store key type] : []), *(klass == Telemetry::Mail ? %i[mailer failed] : []), *(klass == Telemetry::Visit ? %i[component status] : []), *(klass == Telemetry::Notification ? %i[notifier delivery_method failed] : []), *(klass == Telemetry::ViewRender ? %i[identifier kind] : []), *(klass == Telemetry::Transaction ? %i[outcome connection] : []), *(klass == Telemetry::Span ? %i[name status] : []), *(klass == Telemetry::LlmCall ? %i[operation model tool_name status input_tokens output_tokens cache_read_tokens cache_write_tokens cost_nanos finish_reason attachments] : []))
+        rows = scope.call(klass).where(occurred_at: range).select(:id, :group_hash, :duration, *(klass == Telemetry::Execution ? %i[name status outcome kind] : %i[]), *(klass == Telemetry::Query ? [ Telemetry::Query::SQL ] : []), *(klass == Telemetry::OutgoingRequest ? %i[method host status_code] : []), *(klass == Telemetry::CacheEvent ? %i[store key type] : []), *(klass == Telemetry::Mail ? %i[mailer failed] : []), *(klass == Telemetry::Visit ? %i[component status] : []), *(klass == Telemetry::Notification ? %i[notifier delivery_method failed] : []), *(klass == Telemetry::ViewRender ? %i[identifier kind] : []), *(klass == Telemetry::Transaction ? %i[outcome connection] : []), *(klass == Telemetry::Span ? %i[name status] : []), *(klass == Telemetry::LlmCall ? %i[operation model tool_name status input_tokens output_tokens cache_read_tokens cache_write_tokens cost_nanos finish_reason attachments] : []))
         groups = rows.group_by(&:group_hash).except(nil)
         next if groups.empty?
         rows = groups.map do |group_hash, group|
@@ -96,11 +96,11 @@ class RollupJob < ApplicationJob
   def extra_for(type, group)
     case type
     when "cache_event"
-      {hits: group.count { |r| r.type == "hit" }, misses: group.count { |r| r.type == "miss" || r.type == "generate" }}
+      { hits: group.count { |r| r.type == "hit" }, misses: group.count { |r| r.type == "miss" || r.type == "generate" } }
     when "view_render"
-      {kind: group.group_by(&:kind).max_by { |_kind, rows| rows.size }&.first}
+      { kind: group.group_by(&:kind).max_by { |_kind, rows| rows.size }&.first }
     when "llm_call"
-      {input_tokens: group.sum { |r| r.input_tokens.to_i }, output_tokens: group.sum { |r| r.output_tokens.to_i },
+      { input_tokens: group.sum { |r| r.input_tokens.to_i }, output_tokens: group.sum { |r| r.output_tokens.to_i },
        cache_read_tokens: group.sum { |r| r.cache_read_tokens.to_i }, cache_write_tokens: group.sum { |r| r.cache_write_tokens.to_i },
        cost_nanos: group.sum { |r| r.cost_nanos.to_i },
        priced: group.count { |r| r.cost_nanos },
@@ -108,7 +108,7 @@ class RollupJob < ApplicationJob
        # A cut-off answer is not an error and will never show in the error
        # rate, so it needs counting on its own or it stays invisible.
        truncated: group.count { |r| r.finish_reason == "max_tokens" },
-       with_attachments: group.count { |r| r.attachments.to_i.positive? }}
+       with_attachments: group.count { |r| r.attachments.to_i.positive? } }
     else {}
     end
   end

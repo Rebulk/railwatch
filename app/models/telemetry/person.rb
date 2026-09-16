@@ -7,7 +7,7 @@ module Telemetry
     scope :recent, -> { order(last_seen_at: :desc) }
 
     def self.touch_from_record(rec, at:)
-      touch_all([[rec, at]])
+      touch_all([ [ rec, at ] ])
       find_by(ref: rec["id"].to_s)
     end
 
@@ -19,8 +19,8 @@ module Telemetry
       rows = pairs.filter_map do |rec, at|
         ref = rec["id"].to_s
         next if ref.empty?
-        {ref: ref, name: rec["name"].presence, email: rec["email"].presence, app_tenant: rec["tenant"].presence,
-          first_seen_at: at, last_seen_at: at, requests_count: 0, exceptions_count: 0}
+        { ref: ref, name: rec["name"].presence, email: rec["email"].presence, app_tenant: rec["tenant"].presence,
+          first_seen_at: at, last_seen_at: at, requests_count: 0, exceptions_count: 0 }
       end
       return 0 if rows.empty?
 

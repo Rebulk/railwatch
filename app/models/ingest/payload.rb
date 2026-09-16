@@ -41,7 +41,7 @@ module Ingest
     def read_bounded(io)
       body = String.new(encoding: Encoding::BINARY)
       loop do
-        chunk = io.read([READ_SIZE, (MAX_BYTES + 1) - body.bytesize].min)
+        chunk = io.read([ READ_SIZE, (MAX_BYTES + 1) - body.bytesize ].min)
         break if chunk.nil? || chunk.empty?
 
         body << chunk
@@ -56,7 +56,7 @@ module Ingest
       reader = Zlib::GzipReader.new(StringIO.new(raw))
       remaining = MAX_BYTES + 1
       loop do
-        chunk = reader.readpartial([READ_SIZE, remaining].min)
+        chunk = reader.readpartial([ READ_SIZE, remaining ].min)
         remaining -= chunk.bytesize
         yield chunk
       end

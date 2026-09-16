@@ -30,9 +30,9 @@ module Telemetry
     def decompress_capped(compressed, limit:)
       output = String.new(encoding: Encoding::BINARY)
       each_chunk(compressed, max_bytes: limit) { |chunk| output << chunk }
-      [output, false]
+      [ output, false ]
     rescue TooLarge
-      [output, true]
+      [ output, true ]
     end
 
     def verify!(compressed, max_bytes:, expected_bytes:, utf8: false)
@@ -71,7 +71,7 @@ module Telemetry
       loop do
         # The extra byte proves that a stream at the boundary has ended. Only
         # the portion up to the ceiling is ever yielded or retained.
-        chunk = reader.readpartial([READ_SIZE, max_bytes - total + 1].min)
+        chunk = reader.readpartial([ READ_SIZE, max_bytes - total + 1 ].min)
         if total + chunk.bytesize > max_bytes
           remaining = max_bytes - total
           yield chunk.byteslice(0, remaining) if remaining.positive?

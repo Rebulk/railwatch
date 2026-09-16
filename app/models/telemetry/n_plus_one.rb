@@ -41,46 +41,46 @@ module Telemetry
     def polymorphic_load(s)
       m = POLYMORPHIC.match(s) or return nil
       table, as = m[1], m[2]
-      {kind: "polymorphic", parent: nil, association: table,
+      { kind: "polymorphic", parent: nil, association: table,
         code: ".includes(:#{table})",
         explanation: "Each owner loads its #{table} in a separate query. #{table} is polymorphic (belongs_to :#{as}), " \
-                     "so add .includes(:#{table}) on the collection you iterate#{at_source}."}
+                     "so add .includes(:#{table}) on the collection you iterate#{at_source}." }
     end
 
     def count_load(s)
       m = COUNT_LOAD.match(s) or return nil
       table, parent = m[1], m[2].classify
-      {kind: "counter_cache", parent: parent, association: table,
+      { kind: "counter_cache", parent: parent, association: table,
         code: "# app/models/#{m[1].singularize}.rb\nbelongs_to :#{m[2]}, counter_cache: true\n\n# then read\n#{m[2]}.#{table}_count",
         explanation: "Each #{parent} counts its #{table} with its own COUNT query#{at_source}. " \
-                     "A counter cache keeps the total on #{parent.tableize}.#{table}_count, so #{m[2]}.#{table}_count needs no query."}
+                     "A counter cache keeps the total on #{parent.tableize}.#{table}_count, so #{m[2]}.#{table}_count needs no query." }
     end
 
     def exists_load(s)
       m = EXISTS_LOAD.match(s) or return nil
       table, parent = m[1], m[2].classify
-      {kind: "exists", parent: parent, association: table,
+      { kind: "exists", parent: parent, association: table,
         code: "#{parent}.includes(:#{table})\n\n# then\n#{m[2]}.#{table}.any?",
         explanation: "Each #{parent} checks whether it has #{table} with its own query#{at_source}. " \
-                     "Preload with #{parent}.includes(:#{table}) and call .any? on the loaded collection, or add a counter cache."}
+                     "Preload with #{parent}.includes(:#{table}) and call .any? on the loaded collection, or add a counter cache." }
     end
 
     def child_load(s)
       m = CHILD_LOAD.match(s) or return nil
       table, parent = m[1], m[2].classify
-      {kind: "has_many", parent: parent, association: table,
+      { kind: "has_many", parent: parent, association: table,
         code: "#{parent}.includes(:#{table})",
         explanation: "Each #{parent} loads its #{table} in a separate query#{at_source}. " \
-                     "Preload them with #{parent}.includes(:#{table}) where the #{parent.tableize} are loaded."}
+                     "Preload them with #{parent}.includes(:#{table}) where the #{parent.tableize} are loaded." }
     end
 
     def parent_load(s)
       m = PARENT_LOAD.match(s) or return nil
       association = m[1].singularize
-      {kind: "belongs_to", parent: nil, association: association,
+      { kind: "belongs_to", parent: nil, association: association,
         code: ".includes(:#{association})",
         explanation: "Each row loads its #{association} one at a time. " \
-                     "Add .includes(:#{association}) on the collection you iterate#{at_source}."}
+                     "Add .includes(:#{association}) on the collection you iterate#{at_source}." }
     end
 
     def at_source

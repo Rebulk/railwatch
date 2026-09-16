@@ -26,7 +26,7 @@ module FilterQuery
         text << word
       end
     end
-    {text: text.join(" "), fields: fields}
+    { text: text.join(" "), fields: fields }
   end
 
   # "5xx" -> 500..599, "404" -> 404..404, anything else -> nil
@@ -42,7 +42,7 @@ module FilterQuery
   end
 
   def self.cursor_context(environment_id:, resource:, query:, window:)
-    Digest::SHA256.hexdigest([environment_id, resource, query.to_s, window].to_json)
+    Digest::SHA256.hexdigest([ environment_id, resource, query.to_s, window ].to_json)
   end
 
   # Applies the same telemetry grammar for the web UI, REST API, and MCP.
@@ -68,8 +68,8 @@ module FilterQuery
   def self.bounded_time_range(fields, from, to)
     after = parse_time(fields["after"])
     before = parse_time(fields["before"])
-    lower = [from, after].compact.max
-    upper = [to, before].compact.min
+    lower = [ from, after ].compact.max
+    upper = [ to, before ].compact.min
     lower <= upper ? lower..upper : (lower...lower)
   end
   private_class_method :bounded_time_range
@@ -113,7 +113,7 @@ module FilterQuery
 
   def self.apply_exceptions(scope, fields, text)
     handled = fields["handled"]
-    handled ||= {"handled" => "true", "unhandled" => "false"}[fields["status"]]
+    handled ||= { "handled" => "true", "unhandled" => "false" }[fields["status"]]
     scope = scope.where(class_name: fields["class"]) if fields["class"].present?
     scope = scope.where(handled: handled == "true") if HANDLED_VALUES.include?(handled.to_s)
     scope = scope.where(severity: fields["severity"]) if fields["severity"].present?

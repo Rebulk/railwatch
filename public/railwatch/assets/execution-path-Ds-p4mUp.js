@@ -1,0 +1,1 @@
+import{ax as e,w as n,ay as h,K as u,t as m}from"./inertia-0pJjIM3I.js";function c({applicationId:t,environmentId:r,source:s,executionId:a}){if(!a||s==="browser")return null;switch(s){case"request":return m(t,r,a);case"job":case"job_attempt":return u(t,r,a);case"scheduled_task":return h(t,r,a);case"command":return n(t,r,a);default:return e(t,r,a)}}export{c as e};

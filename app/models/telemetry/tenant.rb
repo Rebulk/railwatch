@@ -18,7 +18,7 @@ module Telemetry
     P95_TENANTS = 50
     SPARKLINE_BUCKETS = 12
     SERIES_BUCKETS = 48
-    SORTS = {"requests" => :requests, "errors" => :errors, "p95" => :p95, "users" => :users}.freeze
+    SORTS = { "requests" => :requests, "errors" => :errors, "p95" => :p95, "users" => :users }.freeze
 
     ERRORS_SQL = Arel.sql("SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END)")
     CLIENT_ERRORS_SQL = Arel.sql("SUM(CASE WHEN status BETWEEN 400 AND 499 THEN 1 ELSE 0 END)")
@@ -82,8 +82,8 @@ module Telemetry
         .pluck(bucket, COUNT_SQL, ERRORS_SQL, CLIENT_ERRORS_SQL, Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"))
         .map { |index, count, errors, client_errors, sum, max|
           avg = ms(sum / count)
-          {t: bucket_at(from, width, index, SERIES_BUCKETS).iso8601, count: count, errors: errors, client_errors: client_errors,
-            avg: avg, p50: avg, p95: ms(max), p99: ms(max)}
+          { t: bucket_at(from, width, index, SERIES_BUCKETS).iso8601, count: count, errors: errors, client_errors: client_errors,
+            avg: avg, p50: avg, p95: ms(max), p99: ms(max) }
         }.sort_by { |point| point[:t] }
     end
 
@@ -97,14 +97,14 @@ module Telemetry
 
     def self.exceptions(tenant, from, to, limit: 20)
       Telemetry::Exception.between(from, to).where(app_tenant: tenant).recent.limit(limit).map do |e|
-        {id: e.id, class_name: e.class_name, message: e.message.first(500), occurred_at: e.occurred_at,
-          execution_id: e.execution_id, group_hash: e.group_hash}
+        { id: e.id, class_name: e.class_name, message: e.message.first(500), occurred_at: e.occurred_at,
+          execution_id: e.execution_id, group_hash: e.group_hash }
       end
     end
 
     def self.people(tenant, limit: 20)
       Telemetry::Person.where(app_tenant: tenant).recent.limit(limit).map do |person|
-        {ref: person.ref, name: person.display_name, email: person.email, last_seen_at: person.last_seen_at}
+        { ref: person.ref, name: person.display_name, email: person.email, last_seen_at: person.last_seen_at }
       end
     end
 
@@ -112,9 +112,9 @@ module Telemetry
     # page's "Recent requests" table.
     def self.recent_requests(tenant, from, to, limit: 50)
       Telemetry::Execution.requests.between(from, to).where(app_tenant: tenant).recent.limit(limit).map do |r|
-        {execution_id: r.execution_id, name: r.name, status: r.status, duration: r.duration_ms.round(2), occurred_at: r.occurred_at,
+        { execution_id: r.execution_id, name: r.name, status: r.status, duration: r.duration_ms.round(2), occurred_at: r.occurred_at,
           user_ref: r.user_ref, tenant: r.app_tenant, exception_preview: r.exception_preview, inertia_component: r.inertia_component,
-          queries: r.counters["queries"], deploy: r.deploy}
+          queries: r.counters["queries"], deploy: r.deploy }
       end
     end
 
@@ -147,7 +147,7 @@ module Telemetry
       width = bucket_width(from, to, SPARKLINE_BUCKETS)
       counts = filtered(Telemetry::Execution.requests.between(from, to), q).group(:app_tenant, bucket_sql(from, width)).count
       counts.each do |(tenant, index), count|
-        rows[tenant][:sparkline][[index.to_i, SPARKLINE_BUCKETS - 1].min] += count
+        rows[tenant][:sparkline][[ index.to_i, SPARKLINE_BUCKETS - 1 ].min] += count
       end
     end
 
@@ -161,8 +161,8 @@ module Telemetry
     # -- Helpers ---------------------------------------------------------------
 
     def self.blank_row(tenant)
-      {tenant: tenant, requests: 0, errors: 0, avg: 0.0, max: 0.0, p95: 0.0, jobs: 0, failed_jobs: 0,
-        exceptions: 0, logs: 0, users: 0, last_seen_at: nil, sparkline: Array.new(SPARKLINE_BUCKETS, 0)}
+      { tenant: tenant, requests: 0, errors: 0, avg: 0.0, max: 0.0, p95: 0.0, jobs: 0, failed_jobs: 0,
+        exceptions: 0, logs: 0, users: 0, last_seen_at: nil, sparkline: Array.new(SPARKLINE_BUCKETS, 0) }
     end
 
     # Tenant-tagged rows only: a NULL app_tenant never matches LIKE either.
@@ -188,7 +188,7 @@ module Telemetry
       scope.between(from, to).where(app_tenant: tenant).group(:group_hash, :name)
         .pluck(:group_hash, :name, COUNT_SQL, error_sql, Arel.sql("AVG(duration)"), Arel.sql("MAX(duration)"))
         .map { |group_hash, name, count, errors, avg, max|
-          {group_hash: group_hash, name: name, count: count, error_key => errors, avg: ms(avg), max: ms(max)}
+          { group_hash: group_hash, name: name, count: count, error_key => errors, avg: ms(avg), max: ms(max) }
         }.sort_by { |row| -row[:count] }.first(limit)
     end
 
@@ -198,7 +198,7 @@ module Telemetry
     end
 
     def self.bucket_width(from, to, buckets)
-      [(to - from) / buckets, 1.0].max
+      [ (to - from) / buckets, 1.0 ].max
     end
 
     # Bucket index per row: epoch seconds since `from` over the bucket width.
@@ -213,7 +213,7 @@ module Telemetry
     # A row landing exactly on `to` indexes one bucket past the end; clamp it
     # into the last one.
     def self.bucket_at(from, width, index, buckets)
-      from + ([index.to_i, buckets - 1].min * width)
+      from + ([ index.to_i, buckets - 1 ].min * width)
     end
   end
 end

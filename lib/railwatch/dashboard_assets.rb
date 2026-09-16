@@ -12,7 +12,7 @@ module Railwatch
 
     def initialize(app, root:)
       @app = app
-      @files = Rack::Files.new(root, {"cache-control" => "public, max-age=31536000, immutable"})
+      @files = Rack::Files.new(root, { "cache-control" => "public, max-age=31536000, immutable" })
     end
 
     def call(env)

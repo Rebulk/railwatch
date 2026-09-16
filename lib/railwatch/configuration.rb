@@ -61,6 +61,7 @@ module Railwatch
     ].freeze
 
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
+                  :issue_prefix, :repository_url, :retention_days, :dashboard_user,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -89,6 +90,11 @@ module Railwatch
       @enabled = env_bool("RAILWATCH_ENABLED", true)
       @token = ENV["RAILWATCH_TOKEN"]
       @transport = ENV.fetch("RAILWATCH_TRANSPORT", "http").to_sym
+      # Embedded dashboard settings; ignored when transport is :http.
+      @issue_prefix = ENV["RAILWATCH_ISSUE_PREFIX"]
+      @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
+      @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
+      @dashboard_user = nil
       @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://railwatch.rebulk.com")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
@@ -245,6 +251,20 @@ module Railwatch
     # :local writes telemetry into the engine's own database in-process;
     # anything else ships it to ingest_url over HTTPS.
     def local? = transport.to_s == "local"
+
+    # Who the embedded dashboard shows as the signed-in operator. A host
+    # passes a lambda taking the request (cookies, warden, whatever it uses)
+    # and returning a User, {id:, name:, email:} or nil. Authentication and
+    # authorisation stay the host's job: put the mount behind its own
+    # constraint. This only names the person for comments and saved views.
+    def resolve_dashboard_user(request)
+      resolved = dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
+      case resolved
+      when ::User then resolved
+      when Hash then ::User.new(id: resolved[:id] || ::User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
+      else ::User.default
+      end
+    end
 
     def ingest_url_allowed?
       uri = URI.parse(ingest_url.to_s)

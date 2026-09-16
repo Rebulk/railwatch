@@ -40,7 +40,7 @@ module Telemetry
       between(from, to).for_release(deploy).group(:bucket).order(:bucket)
         .pluck(:bucket, Arel.sql("SUM(sessions)"), Arel.sql("SUM(sessions_errored)"), Arel.sql("SUM(sessions_crashed)"))
         .map { |bucket, sessions, errored, crashed|
-          {t: bucket, sessions: sessions, ok: sessions - errored - crashed, errored: errored, crashed: crashed}
+          { t: bucket, sessions: sessions, ok: sessions - errored - crashed, errored: errored, crashed: crashed }
         }
     end
 

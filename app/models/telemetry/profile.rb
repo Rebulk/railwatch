@@ -22,10 +22,10 @@ module Telemetry
     # [text, truncated?] - cut on a line boundary so the parser never sees
     # half a stack line.
     def collapsed_capped(limit = MAX_COLLAPSED_BYTES)
-      text, truncated = BoundedGzip.decompress_capped(stacks, limit: [limit, MAX_INGEST_BYTES].min)
+      text, truncated = BoundedGzip.decompress_capped(stacks, limit: [ limit, MAX_INGEST_BYTES ].min)
       text = text.sub(/[^\n]*\z/, "") if truncated
 
-      [BoundedGzip.utf8!(text), truncated]
+      [ BoundedGzip.utf8!(text), truncated ]
     end
 
     def timeline_label

@@ -24,7 +24,7 @@ module Telemetry
       moved = Query.where.not(sql: "")
                    .where("queries.sql = (SELECT s.sql FROM query_shapes s WHERE s.group_hash = queries.group_hash)")
                    .in_batches(of: batch, use_ranges: true).update_all(sql: "")
-      {shapes: count - before, rows: moved}
+      { shapes: count - before, rows: moved }
     end
 
     def self.file_shapes!
@@ -34,7 +34,7 @@ module Telemetry
                         .pluck(:group_hash, :sql, :adapter, :connection)
       shapes = candidates.filter_map do |group_hash, sql, adapter, connection|
         digest, normalized = Railwatch::SqlNormalizer.group_and_normalized(sql, adapter: adapter, connection_name: connection)
-        {group_hash: group_hash, sql: normalized} if digest == group_hash
+        { group_hash: group_hash, sql: normalized } if digest == group_hash
       end
       shapes.uniq { |shape| shape[:group_hash] }.each_slice(500) { |slice| insert_all(slice) }
     end

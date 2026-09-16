@@ -46,7 +46,7 @@ module Ingest
     }.freeze
 
     JSON_TRUNCATED = JSON.generate(truncated: true).freeze
-    JSON_ARRAY_TRUNCATED = JSON.generate([{truncated: true}]).freeze
+    JSON_ARRAY_TRUNCATED = JSON.generate([ { truncated: true } ]).freeze
     INTEGER_MAX = (2**63) - 1
     INTEGER_MIN = -(2**63)
     # The gem sends UUIDs, but the wire contract only promises an opaque
@@ -77,9 +77,9 @@ module Ingest
           columns = {}
           serialization_columns = []
           klass.columns_hash.each_value do |column|
-            metadata = [column.type, column.limit, column.null, column.default].freeze
+            metadata = [ column.type, column.limit, column.null, column.default ].freeze
             columns[column.name] = metadata
-            serialization_columns << [column.name.to_sym, *metadata].freeze
+            serialization_columns << [ column.name.to_sym, *metadata ].freeze
           end
           SERIALIZATION_COLUMN_CACHE[klass] = serialization_columns.freeze
           columns.freeze
@@ -99,7 +99,7 @@ module Ingest
       pair = PARENTS.include?(type) ? execution(rec) : mapped(type, rec)
       return nil if pair.nil?
       klass, attrs = pair
-      [klass, serialize(klass, attrs, truncations: truncations)]
+      [ klass, serialize(klass, attrs, truncations: truncations) ]
     end
 
     def validate_record!(rec, identifiers: true)
@@ -214,7 +214,7 @@ module Ingest
       when "deprecation" then child(Telemetry::Deprecation, rec, %w[message gem_name horizon source])
       when "visit" then child(Telemetry::Visit, rec, %w[component url method duration status partial only props_bytes user_agent lcp cls inp ttfb])
       when "session" then session(rec)
-      when "user" then [Telemetry::Person, {ref: rec["id"].to_s}] # replaced by touch_from_record; never saved as-is
+      when "user" then [ Telemetry::Person, { ref: rec["id"].to_s } ] # replaced by touch_from_record; never saved as-is
       when "process" then process(rec)
       end
     end
@@ -238,7 +238,7 @@ module Ingest
     def child(klass, rec, keys)
       attrs = envelope(rec)
       keys.each { |k| attrs[k.to_sym] = rec[k] }
-      [klass, attrs]
+      [ klass, attrs ]
     end
 
     def execution(rec)
@@ -281,7 +281,7 @@ module Ingest
       attrs[:stages] = rec["stages"] || {}
       attrs[:counters] = rec["counters"] || {}
       attrs[:detail] = rec.slice(*detail_keys)
-      [Telemetry::Execution, attrs]
+      [ Telemetry::Execution, attrs ]
     end
 
     def exception(rec)
@@ -301,7 +301,7 @@ module Ingest
       attrs[:fingerprint_source] = rec["fingerprint_source"]
       attrs[:ruby_version] = rec["ruby_version"]
       attrs[:rails_version] = rec["rails_version"]
-      [Telemetry::Exception, attrs]
+      [ Telemetry::Exception, attrs ]
     end
 
     def enqueued_job(rec)
@@ -314,7 +314,7 @@ module Ingest
       attrs[:scheduled_at] = rec["scheduled_at"] && timestamp_string(rec["scheduled_at"])
       attrs[:duration] = rec["duration"]
       attrs[:failed] = rec["failed"] ? true : false
-      [Telemetry::EnqueuedJob, attrs]
+      [ Telemetry::EnqueuedJob, attrs ]
     end
 
     # The gem ships collapsed stacks base64(gzip); stored as the gzip bytes.
@@ -330,7 +330,7 @@ module Ingest
       attrs[:stacks] = compressed_blob(rec["stacks"], "stacks")
       Telemetry::BoundedGzip.verify!(attrs[:stacks], max_bytes: Telemetry::Profile::MAX_INGEST_BYTES,
         expected_bytes: attrs[:stacks_bytes], utf8: true)
-      [Telemetry::Profile, attrs]
+      [ Telemetry::Profile, attrs ]
     end
 
     def attachment(rec)
@@ -343,7 +343,7 @@ module Ingest
         expected_bytes: attrs[:bytes])
       attrs[:exception_group_hash] = rec["exception_group_hash"]
       attrs[:truncated] = rec["truncated"] ? true : false
-      [Telemetry::Attachment, attrs]
+      [ Telemetry::Attachment, attrs ]
     end
 
     def compressed_blob(value, field)
@@ -380,7 +380,7 @@ module Ingest
       attrs[:visits] = rec["visits"]
       attrs[:error_count] = rec["errors"]
       attrs[:ended] = rec["ended"] ? true : false
-      [Telemetry::Session, attrs]
+      [ Telemetry::Session, attrs ]
     end
 
     def span(rec)
@@ -389,11 +389,11 @@ module Ingest
       attrs[:duration] = rec["duration"]
       attrs[:payload] = rec["attributes"]
       attrs[:status] = rec["status"]
-      [Telemetry::Span, attrs]
+      [ Telemetry::Span, attrs ]
     end
 
     def health(rec)
-      [Telemetry::HealthSample, {
+      [ Telemetry::HealthSample, {
         sampled_at: timestamp_string(rec["timestamp"]), pid: rec["pid"], role: rec["role"], server: rec["server"], deploy: rec["deploy"],
         threads_max: rec["threads_max"], threads_busy: rec["threads_busy"], backlog: rec["backlog"],
         pool_size: rec["pool_size"], pool_busy: rec["pool_busy"], pool_waiting: rec["pool_waiting"],
@@ -404,18 +404,18 @@ module Ingest
         # the top of the record found nothing, so every health sample landed
         # with an empty detail and the queue-depth panel stayed blank.
         detail: rec["detail"] || {}
-      }]
+      } ]
     end
 
     def process(rec)
-      [Telemetry::Process, {
+      [ Telemetry::Process, {
         booted_at: timestamp_string(rec["timestamp"]), pid: rec["pid"], role: rec["role"], server: rec["server"],
         deploy: rec["deploy"], ruby_version: rec["ruby_version"], rails_version: rec["rails_version"],
         # Gems older than 0.1.3 send lantern_version; processes recorded
         # by one are still readable.
         railwatch_version: rec["railwatch_version"] || rec["lantern_version"], boot_seconds: rec["boot_seconds"],
         detail: rec.slice("app", "environment", "database_adapter", "queue_adapter", "cache_store")
-      }]
+      } ]
     end
 
     # Applies the casts AR would apply on save, but that raw SQL bypasses:

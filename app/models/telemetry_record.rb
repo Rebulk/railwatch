@@ -9,7 +9,7 @@
 # Environment#with_telemetry so the code path matches the platform's.
 class TelemetryRecord < ActiveRecord::Base
   self.abstract_class = true
-  connects_to database: {writing: :railwatch_telemetry, reading: :railwatch_telemetry}
+  connects_to database: { writing: :railwatch_telemetry, reading: :railwatch_telemetry }
 
   # Records arrive as the gem's wire hashes; this is the shared envelope.
   def self.envelope_columns(t)

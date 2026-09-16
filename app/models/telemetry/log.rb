@@ -36,7 +36,7 @@ module Telemetry
           negative = []
         end
         return nil if positive.empty?
-        [positive.join(" "), *negative.map { |term| "NOT #{term}" }].join(" ")
+        [ positive.join(" "), *negative.map { |term| "NOT #{term}" } ].join(" ")
       end
 
       # id => message with SNIPPET_MARK around each hit, for the rows the
@@ -45,8 +45,8 @@ module Telemetry
         return {} if ids.empty? || !fts_available?
         match = match_expression(text)
         return {} if match.nil?
-        sql = sanitize_sql_array(["SELECT rowid, snippet(logs_fts, 0, ?, ?, ?, 24) FROM logs_fts WHERE logs_fts MATCH ? AND rowid IN (?)",
-          SNIPPET_MARK, SNIPPET_MARK, "…", match, ids])
+        sql = sanitize_sql_array([ "SELECT rowid, snippet(logs_fts, 0, ?, ?, ?, 24) FROM logs_fts WHERE logs_fts MATCH ? AND rowid IN (?)",
+          SNIPPET_MARK, SNIPPET_MARK, "…", match, ids ])
         connection.select_rows(sql).to_h
       end
 
@@ -70,7 +70,7 @@ module Telemetry
         phrase = body.start_with?('"') && body.end_with?('"') && body.length > 1
         body = body[1..-2].to_s if phrase
         return nil unless body.match?(/[[:alnum:]]/)
-        [negated, phrase ? quote(body) : "#{quote(body)}*"]
+        [ negated, phrase ? quote(body) : "#{quote(body)}*" ]
       end
 
       def quote(term) = %("#{term.gsub('"', '""')}")

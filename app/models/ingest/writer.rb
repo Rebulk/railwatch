@@ -11,7 +11,7 @@ module Ingest
   class Writer
     # Classes whose new rowids we need after the insert: exception ids go
     # back to the caller for grouping, log ids into the full-text index.
-    ID_CLASSES = [Telemetry::Exception, Telemetry::Log].freeze
+    ID_CLASSES = [ Telemetry::Exception, Telemetry::Log ].freeze
 
     def initialize(rows_by_class)
       @rows_by_class = rows_by_class
@@ -43,7 +43,7 @@ module Ingest
         group_hash = row[:group_hash]
         next unless group_hash && row[:sql].present? && Railwatch::Record.group_hash(row[:connection], row[:sql]) == group_hash
 
-        shapes[group_hash] ||= {group_hash: group_hash, sql: row[:sql]}
+        shapes[group_hash] ||= { group_hash: group_hash, sql: row[:sql] }
         row[:sql] = ""
       end
       shapes.empty? ? rows_by_class : rows_by_class.merge(Telemetry::QueryShape => shapes.values)
@@ -65,7 +65,7 @@ module Ingest
 
     def insert_group(raw, connection, table, columns, rows, klass)
       column_sql = columns.map { |c| connection.quote_column_name(c.to_s) }.join(",")
-      placeholders = (["?"] * columns.size).join(",")
+      placeholders = ([ "?" ] * columns.size).join(",")
       # The gem re-sends a batch after a transport timeout, so the same
       # execution can arrive twice; the unique index on execution_id turns
       # the duplicate into a no-op instead of aborting the whole batch.
@@ -95,7 +95,7 @@ module Ingest
       return if ids.empty? || !Telemetry::Log.fts_available?
 
       ids.each_slice(500) do |slice|
-        placeholders = (["?"] * slice.size).join(",")
+        placeholders = ([ "?" ] * slice.size).join(",")
         raw.execute("INSERT INTO logs_fts(rowid, message) SELECT id, message FROM logs WHERE id IN (#{placeholders})", slice)
       end
     end
@@ -106,7 +106,7 @@ module Ingest
         next if rows.empty?
         result = klass.insert_all(restore_json(klass, rows), record_timestamps: false,
                                   unique_by: (:execution_id if klass == Telemetry::Execution),
-                                  returning: klass == Telemetry::Exception ? [:id] : false)
+                                  returning: klass == Telemetry::Exception ? [ :id ] : false)
         exception_ids.concat(result.rows.flatten) if klass == Telemetry::Exception
       end
       exception_ids

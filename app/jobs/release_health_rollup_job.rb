@@ -14,7 +14,7 @@ class ReleaseHealthRollupJob < ApplicationJob
   queue_as :rollups
   limits_concurrency to: 1, key: ->(environment, bucket) { "release_health:#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
 
-  RANKS = {"started" => 0, "ok" => 1, "errored" => 2, "crashed" => 3}.freeze
+  RANKS = { "started" => 0, "ok" => 1, "errored" => 2, "crashed" => 3 }.freeze
   CRASHED = RANKS["crashed"]
   ERRORED = RANKS["errored"]
 
@@ -42,9 +42,9 @@ class ReleaseHealthRollupJob < ApplicationJob
   # it in this bucket.
   def collapse(rows)
     rows.each_with_object({}) do |(_deploy, session_id, status, duration, user_ref), sessions|
-      session = sessions[session_id] ||= {rank: 0, duration: nil, user: nil}
-      session[:rank] = [session[:rank], RANKS.fetch(status.to_s, 0)].max
-      session[:duration] = [session[:duration] || 0, duration].max if duration
+      session = sessions[session_id] ||= { rank: 0, duration: nil, user: nil }
+      session[:rank] = [ session[:rank], RANKS.fetch(status.to_s, 0) ].max
+      session[:duration] = [ session[:duration] || 0, duration ].max if duration
       session[:user] ||= user_ref
     end
   end
@@ -53,10 +53,10 @@ class ReleaseHealthRollupJob < ApplicationJob
     durations = sessions.values.filter_map { |s| s[:duration] }
     users = sessions.values.filter_map { |s| s[:user] }.uniq
     crashed_users = sessions.values.select { |s| s[:rank] == CRASHED }.filter_map { |s| s[:user] }.uniq
-    {deploy: deploy, bucket: bucket, sessions: sessions.size,
+    { deploy: deploy, bucket: bucket, sessions: sessions.size,
      sessions_errored: sessions.values.count { |s| s[:rank] == ERRORED },
      sessions_crashed: sessions.values.count { |s| s[:rank] == CRASHED },
      users: users.size, users_crashed: crashed_users.size,
-     duration_sum: durations.sum, duration_count: durations.size}
+     duration_sum: durations.sum, duration_count: durations.size }
   end
 end
