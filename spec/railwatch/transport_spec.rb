@@ -192,31 +192,39 @@ RSpec.describe Railwatch::Transport::Http do
       WebMock.disable_net_connect!
     end
 
-    it "makes no request at all once the deadline has passed" do
-      stub_request(:post, "http://railwatch.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+    # Request-count assertions below use a host of their own: another
+    # example's reporter thread can post to railwatch.test while this one
+    # runs, and that would count.
+    def deadline_transport
+      config = Railwatch.config.dup
+      config.ingest_url = "http://deadline.test"
+      config.allow_http = true
+      described_class.new(config)
+    end
 
-      result = transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic - 1)
+    it "makes no request at all once the deadline has passed" do
+      stub_request(:post, "http://deadline.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+
+      result = deadline_transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic - 1)
 
       expect(result.ok).to be(false)
       expect(result).to be_retryable
-      expect(a_request(:post, "http://railwatch.test/ingest")).not_to have_been_made
+      expect(a_request(:post, "http://deadline.test/ingest")).not_to have_been_made
     end
 
     it "does not retry a network error once the deadline has passed" do
       # The first attempt itself outlives the deadline, so the retry that
       # would otherwise follow must not happen.
-      stub_request(:post, "http://railwatch.test/ingest").to_return do
+      stub_request(:post, "http://deadline.test/ingest").to_return do
         sleep 0.08
         raise Net::OpenTimeout
       end
 
-      result = transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic + 0.05)
+      result = deadline_transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic + 0.05)
 
       expect(result.ok).to be(false)
-      # Whichever fires first, the stub's error or the whole-exchange cutoff,
-      # the transport made exactly one attempt.
-      expect(result.error).to match(/Net::(Open|Read)Timeout/)
-      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.once
+      expect(result.error).to include("Net::OpenTimeout")
+      expect(a_request(:post, "http://deadline.test/ingest")).to have_been_made.once
     end
 
     it "cuts off an exchange whose connect ate the budget, instead of letting write and read spend theirs" do
