@@ -9,9 +9,10 @@ require "spec_helper"
 # specs keep working when an app has no LLM gem installed at all.
 RSpec.describe Railwatch::Subscribers::Llm do
   # 2.0 sends objects built from its usage ledger.
-  Tokens = Struct.new(:input, :output, :cache_read, :cache_write, :thinking, keyword_init: true)
+  Tokens = Struct.new(:input, :output, :cache_read, :cache_write, :thinking, :reported_cost, keyword_init: true)
   Cost = Struct.new(:total, keyword_init: true)
   Message = Struct.new(:role, :content, keyword_init: true)
+  LlmMessageWithAttachments = Struct.new(:role, :content, :attachments, keyword_init: true)
 
   def in_execution
     Railwatch.config.sample[:commands] = 1.0
@@ -133,6 +134,136 @@ RSpec.describe Railwatch::Subscribers::Llm do
       in_execution { emit("chat.ruby_llm", v116_chat_payload) }
 
       expect(railwatch_records(:llm_call).sole).not_to have_key(:workflow_id)
+    end
+  end
+
+  describe "what the call carried and how it was configured" do
+    Attachment = Struct.new(:type, :filename, keyword_init: true)
+    Headers = Struct.new(:map) { def [](k) = map[k] }
+    Raw = Struct.new(:headers, keyword_init: true)
+    Reply = Struct.new(:role, :content, :finish_reason, :raw, keyword_init: true)
+
+    it "records attachments by count and type, so an image call is not just an expensive prompt" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(input_messages: [
+          Message.new(role: :user, content: "read this"),
+          LlmMessageWithAttachments.new(role: :user, content: "and this",
+            attachments: [ Attachment.new(type: :image, filename: "placard.jpg"),
+                           Attachment.new(type: :image, filename: "seal.jpg"),
+                           Attachment.new(type: :pdf, filename: "bol.pdf") ])
+        ]))
+      end
+
+      expect(railwatch_records(:llm_call).sole).to include(attachments: 3, attachment_types: "imagex2,pdf")
+    end
+
+    it "records no attachment fields at all when the call carried none" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload) }
+
+      expect(railwatch_records(:llm_call).sole).not_to have_key(:attachments)
+    end
+
+    it "keeps attachment filenames behind capture_llm_content, since a filename is business data" do
+      messages = [ LlmMessageWithAttachments.new(role: :user, content: "x",
+        attachments: [ Attachment.new(type: :pdf, filename: "ACME_invoice_88231.pdf") ]) ]
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(input_messages: messages)) }
+      expect(railwatch_records(:llm_call).sole[:attachment_names]).to be_nil
+
+      Railwatch.config.capture_llm_content = true
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(input_messages: messages)) }
+      expect(railwatch_records(:llm_call).last[:attachment_names]).to eq("ACME_invoice_88231.pdf")
+    ensure
+      Railwatch.config.capture_llm_content = false
+    end
+
+    it "records why the model stopped, so a truncated answer is visible as one" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(
+          response: Reply.new(role: :assistant, content: "cut off here", finish_reason: :max_tokens)))
+      end
+
+      expect(railwatch_records(:llm_call).sole[:finish_reason]).to eq("max_tokens")
+    end
+
+    it "records the provider's own request id from the response headers" do
+      raw = Raw.new(headers: Headers.new({ "request-id" => "req_011CQ" }))
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(
+          response: Reply.new(role: :assistant, content: "hi", finish_reason: :stop, raw: raw)))
+      end
+
+      expect(railwatch_records(:llm_call).sole[:provider_request_id]).to eq("req_011CQ")
+    end
+
+    it "records the settings that produced the answer, so it can be reproduced" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(temperature: 0.2, max_output_tokens: 4096,
+                                               tool_choice: :auto, schema: { type: "object" }, caching: true))
+      end
+
+      params = JSON.parse(railwatch_records(:llm_call).sole[:params].to_json)
+      expect(params).to include("temperature" => 0.2, "max_output_tokens" => 4096,
+                                 "tool_choice" => "auto", "schema" => true, "caching" => true)
+    end
+
+    it "filters provider options through the app's own parameter filter" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(provider_options: { "api_key" => "sk-leak", "seed" => 7 }))
+      end
+
+      options = railwatch_records(:llm_call).sole[:params][:provider_options]
+      expect(options["seed"]).to eq(7)
+      expect(options["api_key"]).to eq("[FILTERED]")
+    end
+
+    it "names the tools the model could reach, not just how many" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(tools: [ :lookup_rate, :find_railcar ])) }
+
+      expect(railwatch_records(:llm_call).sole).to include(tools: "lookup_rate,find_railcar", tool_count: 2)
+    end
+
+    it "leaves cost provenance unknown when there is no cost to have a provenance" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(cost: Cost.new(total: nil))) }
+
+      call = railwatch_records(:llm_call).sole
+      expect(call[:cost_nanos]).to be_nil
+      # false would claim the registry priced it. Nothing priced it.
+      expect(call[:cost_reported]).to be_nil
+    end
+
+    it "keeps a setting that was explicitly turned off" do
+      in_execution { emit("chat.ruby_llm", v2_chat_payload(caching: false, temperature: 0)) }
+
+      params = railwatch_records(:llm_call).sole[:params]
+      expect(params[:caching]).to be(false)
+      expect(params[:temperature]).to eq(0)
+    end
+
+    it "redacts a credential nested inside provider options, not just a top-level one" do
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload(provider_options: {
+          "seed" => 7,
+          "extra_headers" => { "authorization" => "Bearer sk-leak", "x-trace" => "keep-me" },
+          "fallbacks" => [ { "api_key" => "sk-also-leak", "model" => "gpt-5.5" } ]
+        }))
+      end
+
+      options = railwatch_records(:llm_call).sole[:params][:provider_options]
+      expect(options["seed"]).to eq(7)
+      expect(options["extra_headers"]["authorization"]).to eq("[FILTERED]")
+      expect(options["extra_headers"]["x-trace"]).to eq("keep-me")
+      expect(options["fallbacks"].first["api_key"]).to eq("[FILTERED]")
+      expect(options["fallbacks"].first["model"]).to eq("gpt-5.5")
+    end
+
+    it "says whether the provider priced the call or the registry did" do
+      reported = Tokens.new(input: 10, output: 5, reported_cost: 0.001)
+      in_execution do
+        emit("chat.ruby_llm", v2_chat_payload)
+        emit("chat.ruby_llm", v2_chat_payload(tokens: reported))
+      end
+
+      expect(railwatch_records(:llm_call).map { |c| c[:cost_reported] }).to eq([ false, true ])
     end
   end
 
