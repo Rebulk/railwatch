@@ -5,6 +5,6 @@
 # Telemetry::Attachment still size their limits from this constant.
 module Railwatch
   module IngestRequestBodyLimit
-    MAX_BYTES = 32.megabytes
+    MAX_BYTES = 32 * 1024 * 1024
   end
 end

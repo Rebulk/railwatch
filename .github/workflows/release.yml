@@ -17,10 +17,18 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
       - name: Run specs
         run: bundle exec rspec
 
-      - name: Verify package
+      - name: Verify package (builds the dashboard bundle first)
         run: bundle exec rake package:verify
 
   publish:
@@ -37,6 +45,17 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Build dashboard bundle
+        run: bundle exec rake dashboard:build
 
       - name: Build gem
         run: gem build railwatch.gemspec --strict

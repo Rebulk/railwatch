@@ -36,6 +36,26 @@ jobs:
       - name: RuboCop
         run: bundle exec rubocop
 
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, lint, format, test
+        run: pnpm check && pnpm lint && pnpm format && pnpm test
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -48,7 +68,15 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
-      - name: Verify public package and legacy Git consumers
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Verify public package (builds the dashboard bundle first)
         run: bundle exec rake package:verify
 
   # The per-request overhead budget (bench/overhead.rb) and the no-DB-writes
