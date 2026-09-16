@@ -17,7 +17,10 @@ module Railwatch
     # Cable constantizes that, so the engine's channel needs the bare name.
     # Only defined when the host has not got one of its own.
     initializer "railwatch.live_channel" do
-      ActiveSupport.on_load(:action_cable_channel) do
+      # Action Cable constantizes the subscription's channel name at
+      # subscribe time; the alias only has to exist by then, and it must
+      # not clobber a host channel of the same name.
+      config.to_prepare do
         Object.const_set(:EnvironmentChannel, Railwatch::EnvironmentChannel) unless Object.const_defined?(:EnvironmentChannel)
       end
     end

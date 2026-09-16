@@ -18,5 +18,6 @@ Railwatch::Engine.routes.draw do
     end
   end
   get "issues", to: "dashboard#stub"
+  get "docs", to: redirect("https://railwatch.rebulk.com/docs")
   get "alerts", to: "dashboard#stub"
 end

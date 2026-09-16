@@ -1,16 +1,19 @@
 # frozen_string_literal: true
 
-# Recomputes the current and previous hour for every active environment so
-# late-arriving records land in charts even if the per-batch RollupJob was
-# debounced away.
+# Recomputes the current and previous hour so rollups are never more than a
+# schedule tick stale, whatever happened to the per-batch RollupJob enqueues
+# (debounced in the web process, and their concurrency semaphore can outlive
+# a worker restart). The platform iterates every active environment; an
+# embedded install has one.
 class RollupCatchupJob < ApplicationJob
   queue_as :rollups
 
   def perform
-    now = Time.current.utc.beginning_of_hour
-    Environment.active.where("last_seen_at > ?", 2.hours.ago).find_each do |env|
-      RollupJob.perform_later(env, now)
-      RollupJob.perform_later(env, now - 1.hour)
+    env = Environment.current
+    now = Time.current
+    [now.beginning_of_hour, (now - 1.hour).beginning_of_hour].each do |bucket|
+      RollupJob.perform_now(env, bucket)
+      ReleaseHealthRollupJob.perform_now(env, bucket)
     end
   end
 end
