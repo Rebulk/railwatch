@@ -2,6 +2,7 @@
 
 require "net/http"
 require "openssl"
+require "timeout"
 require "zlib"
 require "json"
 
@@ -159,13 +160,29 @@ module Railwatch
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
         options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
-        Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
-          http.request(req)
+        exchange = lambda do
+          Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
+            http.request(req)
+          end
         end
+        return exchange.call unless deadline
+
+        # The per-operation timeouts above are clamped at the moment this
+        # call starts, but connect, write and read are separate budgets: a
+        # slow connect leaves the later phases their stale allowance. The
+        # deadline is one instant, so it is enforced once around the whole
+        # exchange. Timeout.timeout is a last line here, not the design: the
+        # socket timeouts fire first in the normal case, and this only
+        # catches the stale-budget overrun.
+        left = remaining(deadline)
+        raise Net::OpenTimeout, "delivery deadline passed" unless left.positive?
+
+        ::Timeout.timeout(left, Net::ReadTimeout, "delivery deadline passed") { exchange.call }
       end
 
       # Net::HTTP treats a zero timeout as "no timeout", so the floor is a
-      # small positive number, not zero.
+      # small positive number, not zero; the whole-exchange deadline in
+      # `request` is what stops the floor from becoming an overrun.
       def bounded(timeout, deadline)
         return timeout unless deadline
 

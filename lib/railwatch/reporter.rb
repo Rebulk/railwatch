@@ -103,9 +103,22 @@ module Railwatch
     # thread, bounded when a process is on its way out.
     def flush(deadline: nil)
       ensure_process!
-      @flush_mutex.synchronize do
-        update_backpressure
-        deliver_buffer(deadline)
+      return flush_locked(nil) unless deadline
+
+      # The background thread may hold the mutex inside an unbounded
+      # delivery. A bounded flush must not queue behind it past its own
+      # deadline: poll for the lock, and give up with the records still
+      # pending in @buffer (the at_exit shutdown reports them) if it never
+      # frees up in time.
+      until @flush_mutex.try_lock
+        return if Clock.monotonic >= deadline
+
+        sleep(0.005)
+      end
+      begin
+        flush_locked(deadline)
+      ensure
+        @flush_mutex.unlock
       end
     end
 
@@ -122,6 +135,18 @@ module Railwatch
     def ensure_thread
       ensure_process!
       arm_thread unless @thread&.alive?
+    end
+
+    def flush_locked(deadline)
+      if deadline
+        update_backpressure
+        deliver_buffer(deadline)
+      else
+        @flush_mutex.synchronize do
+          update_backpressure
+          deliver_buffer(nil)
+        end
+      end
     end
 
     # Only valid in a forked child. It deliberately never acquires an

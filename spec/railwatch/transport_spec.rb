@@ -202,16 +202,50 @@ RSpec.describe Railwatch::Transport::Http do
       expect(a_request(:post, "http://railwatch.test/ingest")).not_to have_been_made
     end
 
-    it "does not retry a network error when the deadline has passed" do
-      stub_request(:post, "http://railwatch.test/ingest").to_raise(Net::OpenTimeout)
+    it "does not retry a network error once the deadline has passed" do
+      # The first attempt itself outlives the deadline, so the retry that
+      # would otherwise follow must not happen.
+      stub_request(:post, "http://railwatch.test/ingest").to_return do
+        sleep 0.08
+        raise Net::OpenTimeout
+      end
 
       result = transport.deliver([ { t: "log" } ], deadline: Railwatch::Clock.monotonic + 0.05)
-      sleep 0.06
 
       expect(result.ok).to be(false)
-      # The first attempt was made; the retry may or may not have fit, but
-      # a second attempt after the deadline is what must never happen.
-      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.at_least_once
+      # Whichever fires first, the stub's error or the whole-exchange cutoff,
+      # the transport made exactly one attempt.
+      expect(result.error).to match(/Net::(Open|Read)Timeout/)
+      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.once
+    end
+
+    it "cuts off an exchange whose connect ate the budget, instead of letting write and read spend theirs" do
+      WebMock.allow_net_connect!
+      with_hanging_server do |url|
+        config = Railwatch.config.dup
+        config.ingest_url = url
+        config.allow_http = true
+        config.connect_timeout = 5.0
+        config.timeout = 5.0
+        bounded = described_class.new(config)
+        # Pretend the connect phase spent almost all of the deadline: the
+        # clamped read_timeout computed up front was 0.3s, but only ~0.1s of
+        # the deadline is actually left by the time the read starts.
+        original = Net::HTTP.method(:start)
+        allow(Net::HTTP).to receive(:start).and_wrap_original do |m, host, port, **opts, &blk|
+          sleep 0.2
+          m.call(host, port, **opts, &blk)
+        end
+
+        started = Railwatch::Clock.monotonic
+        result = bounded.deliver([ { t: "log" } ], deadline: started + 0.3)
+        elapsed = Railwatch::Clock.monotonic - started
+
+        expect(result.ok).to be(false)
+        expect(elapsed).to be < 0.6
+      end
+    ensure
+      WebMock.disable_net_connect!
     end
 
     it "leaves the configured timeouts alone when no deadline is given" do
@@ -427,6 +461,26 @@ RSpec.describe Railwatch::Reporter do
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
       end
     end.new(writer)
+  end
+
+  describe "#flush_before_exit" do
+    it "gives up at the deadline when the background flush holds the lock, leaving the records pending" do
+      config = reporter_config
+      config.shutdown_timeout = 0.1
+      reporter = described_class.new(config, transport: Object.new)
+      reporter.buffer.push({ t: "log" })
+      mutex = reporter.instance_variable_get(:@flush_mutex)
+      mutex.lock
+
+      started = Railwatch::Clock.monotonic
+      reporter.flush_before_exit
+      elapsed = Railwatch::Clock.monotonic - started
+
+      expect(elapsed).to be_between(0.1, 0.5)
+      expect(reporter.send(:pending_records?)).to be(true)
+    ensure
+      mutex&.unlock if mutex&.owned?
+    end
   end
 
   describe "adaptive backpressure" do
