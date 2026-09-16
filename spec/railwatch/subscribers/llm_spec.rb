@@ -243,8 +243,8 @@ RSpec.describe Railwatch::Subscribers::Llm do
       in_execution do
         emit("chat.ruby_llm", v2_chat_payload(provider_options: {
           "seed" => 7,
-          "extra_headers" => {"authorization" => "Bearer sk-leak", "x-trace" => "keep-me"},
-          "fallbacks" => [ {"api_key" => "sk-also-leak", "model" => "gpt-5.5"} ]
+          "extra_headers" => { "authorization" => "Bearer sk-leak", "x-trace" => "keep-me" },
+          "fallbacks" => [ { "api_key" => "sk-also-leak", "model" => "gpt-5.5" } ]
         }))
       end
 
