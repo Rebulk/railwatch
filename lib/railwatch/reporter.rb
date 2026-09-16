@@ -137,12 +137,13 @@ module Railwatch
     def acquire_flush_lock(deadline)
       return @flush_mutex.lock unless deadline
 
-      until @flush_mutex.try_lock
-        return false unless Clock.monotonic < deadline
+      loop do
+        left = deadline - Clock.monotonic
+        return false unless left.positive?
+        return true if @flush_mutex.try_lock
 
-        sleep(LOCK_POLL_INTERVAL)
+        sleep([ LOCK_POLL_INTERVAL, left ].min)
       end
-      true
     end
 
     def restart_after_fork!

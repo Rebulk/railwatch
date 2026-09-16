@@ -465,6 +465,24 @@ RSpec.describe Railwatch::Reporter do
   end
 
   describe "#flush_before_exit" do
+    it "delivers nothing when shutdown_timeout is zero, even to a transport that ignores deadlines" do
+      delivered = 0
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        delivered += records.size
+        Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
+      end
+      config = reporter_config
+      config.shutdown_timeout = 0
+      reporter = described_class.new(config, transport: transport)
+      reporter.buffer.push({ t: "log" })
+
+      reporter.flush_before_exit
+
+      expect(delivered).to eq(0)
+      expect(reporter.send(:pending_records?)).to be(true)
+    end
+
     it "gives up at the deadline when the background flush holds the lock, leaving the records pending" do
       config = reporter_config
       config.shutdown_timeout = 0.1
