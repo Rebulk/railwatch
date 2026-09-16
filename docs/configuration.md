@@ -858,6 +858,22 @@ in `lib/railwatch.rb`, unless noted:
 `instrument_outgoing`, `flush`, `debug { }`. `pause`/`resume` are the
 ignore block's building blocks, and are nestable.
 
+## Embedded mode
+
+```ruby
+c.transport = :local        # RAILWATCH_TRANSPORT; default "http"
+c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
+c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
+c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
+c.dashboard_user = ->(request) { { id:, name:, email: } or nil }
+```
+
+With `transport = :local` the reporter writes each batch into the app's
+own `railwatch_telemetry` database instead of POSTing it, and the engine
+serves the dashboard at its mount. `enabled?` no longer needs a token.
+The other four only matter in that mode. Full walkthrough:
+[Embedded mode](embedded.md).
+
 ## Rake tasks
 
 Ship with the gem via Rails::Engine's default `lib/tasks` convention, in

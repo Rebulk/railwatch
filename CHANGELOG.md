@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+- Embedded mode: `bin/rails generate railwatch:install --local` keeps
+  every record in two SQLite databases the app owns (`railwatch` for
+  issues, comments, saved views, thresholds and deploys;
+  `railwatch_telemetry` for what the app reports) and serves the whole
+  Railwatch dashboard at `/railwatch`, from a bundle shipped inside the
+  gem. No token, no Node, no asset pipeline. `c.transport = :local`
+  (`RAILWATCH_TRANSPORT=local`) switches the reporter to write batches
+  in-process; everything else about sampling, redaction and buffering is
+  unchanged. The installer adds the databases and schemas, the recurring
+  Solid Queue jobs (rollups, issue detection, pruning), and an
+  initializer with `issue_prefix`, `repository_url`, `retention_days`
+  and a `dashboard_user` resolver. `railwatch:doctor`, `railwatch:status`
+  and `railwatch:deploy` understand the mode. See docs/embedded.md.
+- The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
+
 ## 0.1.4 (2026-09-15)
 
 - `llm_call` records what the call carried and how it was configured, not

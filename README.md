@@ -15,6 +15,15 @@ bin/rails generate railwatch:install --prompt-token  # 2. hidden token input plu
 bin/rails railwatch:doctor                    # 3. check every piece is wired up after restart
 ```
 
+Or keep everything inside your app, with the full dashboard at
+`/railwatch` and no token ([Embedded mode](docs/embedded.md)):
+
+```sh
+bundle add railwatch
+bin/rails generate railwatch:install --local
+bin/rails db:prepare
+```
+
 Getting the token, the generator's flags, and deploying with Kamal,
 Docker, Heroku, or Render are covered in
 [Getting started](docs/getting-started.md). For a self-hosted deployment
@@ -76,6 +85,8 @@ expect { get "/widgets" }.not_to have_railwatch_n_plus_one
   option by option and call site by call site.
 - [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md) — the
   record-type mapping and the sampling model, for Laravel people.
+- [Embedded mode](docs/embedded.md) — the whole dashboard inside your
+  app, telemetry in your own SQLite files, no cloud.
 - [Self-hosting](docs/self-hosting.md) — pointing the gem at your own
   Railwatch Cloud.
 - [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired
