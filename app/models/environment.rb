@@ -29,6 +29,7 @@ class Environment
   def telemetry_exists? = true
   def paused? = false
   def token_prefix = "embedded"
+  def retention_days = 7
   def last_seen_at = Railwatch::Embedded.last_seen_at
   def issues = Railwatch::Embedded::NONE
   def deploys = Railwatch::Embedded::NONE
