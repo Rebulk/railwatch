@@ -1,0 +1,1 @@
+import{c as a,j as i}from"./inertia-D2qURTn0.js";import{S as n}from"./series-chart-CNgR7l5o.js";function m(o){const e=a.c(3),{data:r,hoverKey:s}=o;let t;return e[0]!==r||e[1]!==s?(t=i.jsx(n,{data:r,className:"h-[10px] w-8",hoverKey:s}),e[0]=r,e[1]=s,e[2]=t):t=e[2],t}export{m as S};

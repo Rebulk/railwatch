@@ -6,6 +6,13 @@ module Railwatch
 
     config.railwatch = ActiveSupport::OrderedOptions.new
 
+    # The dashboard bundle is built into the gem at release time; serve it
+    # from here so a host app needs no asset pipeline integration at all.
+    initializer "railwatch.dashboard_assets" do |app|
+      app.middleware.insert_before ActionDispatch::Static, Railwatch::DashboardAssets,
+        root: root.join("public/railwatch").to_s
+    end
+
     # The request middleware goes first so wall time includes every other
     # middleware, exactly like Nightwatch's GlobalMiddleware.
     initializer "railwatch.middleware", before: :load_config_initializers do |app|

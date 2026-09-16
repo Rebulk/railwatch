@@ -32,7 +32,7 @@ module Railwatch
           # Installed gems carry the runtime and public reference material,
           # while repository-only tests, scripts, and release machinery stay
           # out of customer applications.
-          Dir["{app,config,lib,docs}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
+          Dir["{app,config,lib,docs,public}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
             .select { |path| File.file?(path) }
         end
 
@@ -40,6 +40,7 @@ module Railwatch
         # Used for profile stacks and attachments. A bundled gem since Ruby
         # 3.4, so it must be declared rather than assumed from stdlib.
         spec.add_dependency "base64", "~> 0.2"
+        spec.add_dependency "inertia_rails", "~> 3.21"
       end
     end
   end

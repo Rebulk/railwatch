@@ -547,4 +547,5 @@ module Railwatch
 end
 
 require "railwatch/subscribers"
+require "railwatch/dashboard_assets"
 require "railwatch/engine" if defined?(Rails::Engine)
