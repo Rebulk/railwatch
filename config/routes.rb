@@ -12,7 +12,7 @@ Railwatch::Engine.routes.draw do
       get "/", to: "dashboard#show", as: :overview
       get "requests", to: "dashboard#requests"
       get "jobs", to: "dashboard#stub"
-      get "queries", to: "dashboard#stub"
+      get "queries", to: "dashboard#queries"
       get "exceptions", to: "dashboard#stub"
       get "logs", to: "dashboard#stub"
     end

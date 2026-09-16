@@ -60,7 +60,7 @@ module Railwatch
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
-    attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment,
+    attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -88,6 +88,7 @@ module Railwatch
     def initialize
       @enabled = env_bool("RAILWATCH_ENABLED", true)
       @token = ENV["RAILWATCH_TOKEN"]
+      @transport = ENV.fetch("RAILWATCH_TRANSPORT", "http").to_sym
       @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://railwatch.rebulk.com")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
@@ -238,8 +239,12 @@ module Railwatch
     end
 
     def enabled?
-      @enabled && token.present?
+      @enabled && (local? || token.present?)
     end
+
+    # :local writes telemetry into the engine's own database in-process;
+    # anything else ships it to ingest_url over HTTPS.
+    def local? = transport.to_s == "local"
 
     def ingest_url_allowed?
       uri = URI.parse(ingest_url.to_s)

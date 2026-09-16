@@ -21,6 +21,9 @@ require "railwatch/current"
 require "railwatch/record"
 require "railwatch/buffer"
 require "railwatch/transport/http"
+require "railwatch/transport/local"
+require "railwatch/embedded"
+require "ingest_request_body_limit"
 require "railwatch/reporter"
 require "railwatch/sampler"
 require "railwatch/redactor"
@@ -56,7 +59,7 @@ module Railwatch
     end
 
     def reporter
-      @reporter ||= Reporter.new(config)
+      @reporter ||= Reporter.new(config, transport: (Transport::Local.new(config) if config.local?))
     end
 
     def redactor

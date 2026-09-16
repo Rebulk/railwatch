@@ -1,61 +1,83 @@
 # frozen_string_literal: true
 
 module Railwatch
-  # Experiment: renders one real dashboard page from the prebuilt bundle,
-  # with the shared props the layouts read, inside a host app that has no
-  # Node, no Vite, and no Inertia of its own. Props are stubbed; the point
-  # is the delivery path, not the data.
+  # Base for every dashboard page: the prebuilt Inertia bundle, the shared
+  # props its layouts read, and per-controller Inertia config so a host that
+  # also uses Inertia keeps its own.
   class DashboardController < ActionController::Base
     include Railwatch::AssetsHelper
     helper Railwatch::AssetsHelper
+    include Railwatch::EnvironmentScoped
 
     layout "railwatch/dashboard"
-    # Scoped to this controller subtree: a host that also uses Inertia keeps
-    # its own global version, layout and parent controller.
-    # use_script_element_for_initial_page must match the bundle: the client is
-    # built with that flag on and reads the page from a <script> element, not
-    # a data-page attribute.
     inertia_config version: -> { Railwatch::AssetsHelper.digest }, layout: "railwatch/dashboard",
                    use_script_element_for_initial_page: true, always_include_errors_hash: true
+    rescue_from Telemetry::CursorPage::InvalidCursor do |exception|
+      render plain: exception.message, status: :unprocessable_content
+    end
 
     inertia_share auth: {user: {id: 1, name: "Host User", email: "host@example.com", provider: nil, verified: true,
                                 editor: "vscode", editor_root: nil, created_at: Time.current, updated_at: Time.current},
                          session: {id: "embedded", recently_authenticated: true}},
                   account: {id: 1, name: "This app", slug: "app", plan: "embedded"},
                   accounts: [{id: 1, name: "This app"}],
-                  applications: [{id: 1, name: "This app", slug: "app", issue_prefix: "APP",
-                                  environments: [{id: 1, name: Rails.env, slug: "app-#{Rails.env}", last_seen_at: Time.current, paused: false}]}],
-                  environment: {id: 1, name: Rails.env, slug: "app-#{Rails.env}", application_id: 1, application_name: "This app",
-                                issue_prefix: "APP", last_seen_at: Time.current, paused: false, token_prefix: "rw_embedded",
-                                repository_url: nil, default_branch: "main"},
-                  window: "24h",
-                  range: {from: 24.hours.ago.iso8601(6), to: Time.current.iso8601(6)},
-                  saved_views: [],
+                  applications: -> { [{id: 1, name: environment.application_name, slug: "app", issue_prefix: "APP",
+                                       environments: [{id: 1, name: environment.name, slug: environment.slug,
+                                                       last_seen_at: environment.last_seen_at, paused: false}]}] },
                   flash: {alert: nil, warning: nil, notice: nil},
                   google_oauth: false
 
     def show
+      requests = grouped("request", limit: 8, order: :p95)
+      jobs = grouped("job_attempt", limit: 8)
       render inertia: "overview/show", props: {
-        totals: {requests: {current: zero, previous: zero}, jobs: {current: zero, previous: zero}},
-        request_series: [], job_series: [], slow_routes: [], top_jobs: [], issues: [], deploys: [],
-        release_health: nil, processes: {}
+        totals: {requests: summary_with_delta("request"), jobs: summary_with_delta("job_attempt")},
+        request_series: series("request"), job_series: series("job_attempt"),
+        slow_routes: requests, top_jobs: jobs, issues: [], deploys: [], release_health: nil,
+        processes: telemetry { Telemetry::Process.recent.limit(20).group_by(&:server).transform_values { |ps| ps.first.slice(:role, :deploy, :ruby_version, :rails_version, :railwatch_version, :booted_at) } }
       }
     end
 
     def requests
-      render inertia: "requests/index", props: {routes: [], series: [], deploys: [], sort: "count", dir: "desc", q: ""}
+      routes = grouped("request", limit: 200, order: params[:sort], dir: params[:dir])
+      routes = apply_request_filters(routes, FilterQuery.parse(params[:q]).fetch(:fields))
+      render inertia: "requests/index", props: {routes: routes, series: series("request"), deploys: [],
+                                                sort: params[:sort] || "count", dir: params[:dir] || "desc", q: params[:q].to_s}
     end
 
-    def stub
-      render inertia: "overview/show", props: {
-        totals: {requests: {current: zero, previous: zero}, jobs: {current: zero, previous: zero}},
-        request_series: [], job_series: [], slow_routes: [], top_jobs: [], issues: [], deploys: [],
-        release_health: nil, processes: {}
+    def queries
+      from, to = window_range
+      page_data = nil
+      page = lambda do
+        page_data ||= telemetry do
+          scope = FilterQuery.apply(Telemetry::Query.with_sql, resource: :queries, query: params[:q], from: from, to: to)
+          rows, meta = Telemetry::CursorPage.call(scope, cursor: params[:cursor], limit: params[:limit], order: :slowest,
+                                                  context: telemetry_cursor_context(:queries))
+          [rows.map { |q| query_row(q) }, meta]
+        end
+      end
+      render inertia: "queries/index", props: {
+        queries: grouped("query", limit: 200, order: params[:sort], dir: params[:dir]),
+        n_plus_ones: [], slowest: InertiaRails.merge { page.call.first }, pagination: -> { page.call.last },
+        q: params[:q].to_s, summary: summary_with_delta("query"), sort: params[:sort] || "count", dir: params[:dir] || "desc"
       }
     end
 
+    def stub = show
+
     private
 
-    def zero = {count: 0, errors: 0, client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0, max: 0}
+    def apply_request_filters(routes, fields)
+      routes = routes.select { |r| r[:name].start_with?("#{fields['method'].upcase} ") } if fields["method"].present?
+      routes = routes.select { |r| r[:name].include?(fields["route"]) } if fields["route"].present?
+      routes
+    end
+
+    def query_row(q)
+      {id: q.id, group_hash: q.group_hash, sql: q.sql.first(2_000), name: q.name, duration: q.duration_ms.round(3),
+       occurred_at: q.occurred_at, execution_id: q.execution_id, execution: q.execution_preview, source: q.source,
+       connection: q.connection, role: q.role, adapter: q.adapter, deploy: q.deploy, tenant: q.app_tenant, user_ref: q.user_ref,
+       explain: q.explain.present?}
+    end
   end
 end

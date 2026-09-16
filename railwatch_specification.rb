@@ -41,6 +41,7 @@ module Railwatch
         # 3.4, so it must be declared rather than assumed from stdlib.
         spec.add_dependency "base64", "~> 0.2"
         spec.add_dependency "inertia_rails", "~> 3.21"
+        spec.add_dependency "tdigest", "~> 0.2"
       end
     end
   end

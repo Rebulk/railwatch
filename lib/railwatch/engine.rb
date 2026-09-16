@@ -13,6 +13,15 @@ module Railwatch
         root: root.join("public/railwatch").to_s
     end
 
+    # The dashboard bundle subscribes to "EnvironmentChannel" by name; Action
+    # Cable constantizes that, so the engine's channel needs the bare name.
+    # Only defined when the host has not got one of its own.
+    initializer "railwatch.live_channel" do
+      ActiveSupport.on_load(:action_cable_channel) do
+        Object.const_set(:EnvironmentChannel, Railwatch::EnvironmentChannel) unless Object.const_defined?(:EnvironmentChannel)
+      end
+    end
+
     # The request middleware goes first so wall time includes every other
     # middleware, exactly like Nightwatch's GlobalMiddleware.
     initializer "railwatch.middleware", before: :load_config_initializers do |app|
@@ -26,7 +35,7 @@ module Railwatch
     end
 
     initializer "railwatch.transport_security", after: :load_config_initializers do
-      next if Railwatch.config.ingest_url_allowed?
+      next if Railwatch.config.local? || Railwatch.config.ingest_url_allowed?
 
       Rails.logger.warn(
         "Railwatch will not send telemetry to #{Railwatch.config.ingest_url}: plain HTTP is allowed only for loopback " \
