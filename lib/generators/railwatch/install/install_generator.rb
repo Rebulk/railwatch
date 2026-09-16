@@ -8,8 +8,11 @@ module Railwatch
     class InstallGenerator < Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
 
-      desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers."
+      desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers. " \
+           "With --local, also the two SQLite databases and recurring jobs the in-app dashboard needs."
 
+      class_option :local, type: :boolean, default: false,
+                           desc: "Keep telemetry in this app and serve the dashboard at /railwatch: no token, no cloud."
       class_option :token, type: :string,
                            desc: "Deprecated: token in process arguments. Prefer --prompt-token, --token-stdin, or RAILWATCH_TOKEN."
       class_option :prompt_token, type: :boolean, default: false,
@@ -41,6 +44,39 @@ module Railwatch
 
       def create_initializer
         template "initializer.rb", "config/initializers/railwatch.rb"
+      end
+
+      # Two databases of its own, never the app's primary: `railwatch` for
+      # what people author (issues, comments, saved views, thresholds) and
+      # `railwatch_telemetry` for what the app reports, which is written
+      # continuously and pruned. Rails loads db/<name>_schema.rb for a named
+      # database on db:prepare, the same way Solid Queue ships its schema.
+      def configure_local_databases
+        return unless options[:local]
+
+        copy_file "../../../../../db/railwatch_schema.rb", "db/railwatch_schema.rb"
+        copy_file "../../../../../db/railwatch_telemetry_schema.rb", "db/railwatch_telemetry_schema.rb"
+
+        return say("--local: no config/database.yml found; add railwatch and railwatch_telemetry databases yourself (docs/embedded.md).", :yellow) unless File.exist?("config/database.yml")
+
+        contents = File.read("config/database.yml")
+        updated = self.class.database_yml_with_railwatch(contents)
+        return say_status(:identical, "config/database.yml", :blue) if updated == contents
+
+        create_file "config/database.yml", updated, force: true
+      end
+
+      # Rollups, issue detection and pruning run as recurring Solid Queue jobs
+      # in the app's own worker (or Puma with SOLID_QUEUE_IN_PUMA=1).
+      def configure_local_recurring_jobs
+        return unless options[:local]
+        return say("--local: no config/recurring.yml found; schedule the jobs in docs/embedded.md yourself.", :yellow) unless File.exist?("config/recurring.yml")
+
+        contents = File.read("config/recurring.yml")
+        updated = self.class.recurring_yml_with_railwatch(contents)
+        return say_status(:identical, "config/recurring.yml", :blue) if updated == contents
+
+        create_file "config/recurring.yml", updated, force: true
       end
 
       def create_kamal_hook
@@ -92,6 +128,8 @@ module Railwatch
       # A token lands in .env only when Git confirms the file is ignored.
       # URLs are not secret and can still be written to a tracked dotenv file.
       def write_env
+        return if options[:local]
+
         token = resolved_token
         if options[:token]
           say("--token exposes #{Railwatch::SecretSafety.token_preview(options[:token])} in process arguments; " \
@@ -143,6 +181,20 @@ module Railwatch
       end
 
       def show_next_steps
+        if options[:local]
+          say <<~STEPS, :green
+
+            Next steps
+              1. Create the two databases:  bin/rails db:prepare
+              2. Restart the app and open /railwatch. Put the mount behind your
+                 own authentication (a routes constraint or a controller check).
+              3. Verify the install:  bin/rails railwatch:doctor
+              4. Rollups and issue detection are Solid Queue recurring jobs
+                 (config/recurring.yml); run a worker, or SOLID_QUEUE_IN_PUMA=1.
+          STEPS
+          return
+        end
+
         say <<~STEPS, :green
 
           Next steps
@@ -166,6 +218,10 @@ module Railwatch
       # note below says so rather than letting a ✗ look like a broken install.
       def run_doctor
         return unless options[:doctor]
+        # The local install's databases do not exist until db:prepare, and this
+        # process read its configuration before the initializer was written;
+        # the doctor would only report both. The next steps say when to run it.
+        return if options[:local]
         return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
         say "\nbin/rails railwatch:doctor", :green
@@ -197,6 +253,93 @@ module Railwatch
         return insert_lines(lines, env_start + 1, "  secret:\n    - #{name}\n") unless secret_start
 
         insert_lines(lines, block_end(lines, secret_start), "    - #{name}\n")
+      end
+
+      RAILWATCH_DATABASES = <<~YAML
+        railwatch:
+          <<: *default
+          database: storage/%<env>s_railwatch.sqlite3
+        railwatch_telemetry:
+          <<: *default
+          database: storage/%<env>s_railwatch_telemetry.sqlite3
+          pragmas:
+            journal_mode: wal
+            synchronous: normal
+            mmap_size: 134217728
+            cache_size: -65536
+            temp_store: memory
+      YAML
+
+      # Adds the railwatch and railwatch_telemetry databases to every
+      # environment in config/database.yml. A flat environment
+      # (`development:` straight to `<<: *default`) becomes a `primary:`
+      # entry first, since named databases need the nested form. Text
+      # insertion rather than a YAML round trip, for the same reason as
+      # deploy_yml_with_secret: the comments are most of the file.
+      def self.database_yml_with_railwatch(contents)
+        lines = contents.lines
+        %w[development test production].each do |env|
+          start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
+          next unless start
+
+          stop = block_end(lines, start)
+          block = lines[(start + 1)...stop]
+          next if block.any? { |line| line.match?(/\A\s+railwatch_telemetry:\s*$/) }
+
+          nested = block.any? { |line| line.match?(/\A  [a-z_]+:\s*$/) }
+          unless nested
+            lines[(start + 1)...stop] = block.map { |line| line.strip.empty? ? line : "  #{line}" }
+            lines.insert(start + 1, "  primary:\n")
+            stop += 1
+          end
+          entries = format(RAILWATCH_DATABASES, env: env).lines.map { |line| "  #{line}" }
+          lines = insert_lines(lines, stop, entries.join).lines
+        end
+        lines.join
+      end
+
+      RAILWATCH_RECURRING = <<~YAML
+        railwatch_rollup_catchup:
+          class: RollupCatchupJob
+          schedule: every minute
+        railwatch_performance_scan:
+          class: PerformanceScanJob
+          schedule: every 5 minutes
+        railwatch_anomaly_scan:
+          class: AnomalyScanJob
+          schedule: every 5 minutes
+        railwatch_scheduled_task_scan:
+          class: ScheduledTaskScanJob
+          schedule: every 10 minutes
+        railwatch_auto_resolve_issues:
+          class: AutoResolveIssuesJob
+          schedule: every day at 4am
+        railwatch_prune_telemetry:
+          class: PruneTelemetryJob
+          schedule: every day at 3am
+        railwatch_optimize_telemetry:
+          class: OptimizeTelemetryJob
+          schedule: every day at 3:30am
+      YAML
+
+      # Adds the engine's recurring jobs under development and production in
+      # config/recurring.yml, creating either block when it is missing.
+      def self.recurring_yml_with_railwatch(contents)
+        text = contents
+        %w[development production].each do |env|
+          lines = text.lines
+          start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
+          entries = RAILWATCH_RECURRING.lines.map { |line| "  #{line}" }.join
+          if start.nil?
+            text = "#{text.sub(/\n*\z/, "\n")}\n#{env}:\n#{entries}"
+            next
+          end
+          stop = block_end(lines, start)
+          next if lines[start...stop].any? { |line| line.match?(/\A\s+railwatch_rollup_catchup:/) }
+
+          text = insert_lines(lines, stop, entries)
+        end
+        text
       end
 
       # Index of the first line after the block opened at `start`: the next

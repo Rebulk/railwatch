@@ -65,6 +65,10 @@ namespace :railwatch do
 
   desc "Check that the app can reach Railwatch with the configured token"
   task status: :environment do
+    if Railwatch.config.local?
+      puts "Railwatch OK: embedded (telemetry in this app's railwatch_telemetry database; dashboard at /railwatch)"
+      next
+    end
     unless Railwatch.config.token.present?
       abort "RAILWATCH_TOKEN is not set"
     end
@@ -86,6 +90,36 @@ namespace :railwatch do
       ok
     end
 
+    if config.local?
+      # Embedded: no token and no ingest host. What can go wrong instead is
+      # the two databases the engine writes to and the jobs that derive
+      # rollups and issues from them.
+      check.call(true, "transport", "local (telemetry stays in this app; dashboard at the engine mount)")
+      %w[railwatch railwatch_telemetry].each do |name|
+        configured = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
+        check.call(!configured.nil?, "#{name} database",
+                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install --local)",
+                   fatal: true)
+      end
+      telemetry_ready = begin
+        Environment.current.with_telemetry { Telemetry::Execution.table_exists? }
+      rescue StandardError => e
+        e.message
+      end
+      check.call(telemetry_ready == true, "telemetry schema",
+                 telemetry_ready == true ? "loaded" : "not loaded (bin/rails db:schema:load:railwatch_telemetry)", fatal: true)
+      meta_ready = begin
+        Issue.table_exists?
+      rescue StandardError => e
+        e.message
+      end
+      check.call(meta_ready == true, "railwatch schema",
+                 meta_ready == true ? "loaded" : "not loaded (bin/rails db:schema:load:railwatch)", fatal: true)
+      recurring = Rails.root.join("config/recurring.yml")
+      scheduled = recurring.exist? && recurring.read.include?("RollupCatchupJob")
+      check.call(scheduled, "recurring jobs",
+                 scheduled ? "RollupCatchupJob in config/recurring.yml" : "RollupCatchupJob missing from config/recurring.yml: rollups will lag")
+    else
     token = config.token.to_s
     check.call(!token.empty?, "token",
                token.empty? ? "RAILWATCH_TOKEN is not set" : Railwatch::SecretSafety.token_preview(token),
@@ -112,6 +146,7 @@ namespace :railwatch do
 
     check.call(Railwatch::Transport::Http.new(config).ping, "ingest reachable",
                "GET #{URI.join(config.ingest_url, '/ingest/ping')}", fatal: true)
+    end
 
     middleware = Rails.application.middleware.map(&:name)
     position = middleware.index("Railwatch::Middleware::Request")
@@ -274,6 +309,19 @@ namespace :railwatch do
   desc "Send deploy metadata to Railwatch: rake railwatch:deploy[ref,name,url]"
   task :deploy, [ :ref, :name, :url ] => :environment do |_t, args|
     deploy = Railwatch.config.deploy or abort "RAILWATCH_DEPLOY (or KAMAL_VERSION) is not set"
+    if Railwatch.config.local?
+      # Embedded: the deploy marker is a row in this app's railwatch database.
+      row = Environment.current.deploys.find_or_initialize_by(deploy: deploy.to_s.first(128))
+      row.assign_attributes(ref: (args[:ref] || `git rev-parse HEAD 2>/dev/null`.strip).presence&.first(128),
+                            name: args[:name].presence&.first(255), url: args[:url].presence&.first(1024),
+                            server: Railwatch.config.server, deployed_at: Time.current,
+                            commits: Railwatch::DeployMetadata.commits,
+                            detail: { performer: ENV["KAMAL_PERFORMER"], destination: ENV["KAMAL_DESTINATION"],
+                                      service: ENV["KAMAL_SERVICE"] }.compact)
+      row.save!
+      puts "Deploy #{deploy} recorded"
+      next
+    end
     abort "Plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true" unless Railwatch.config.ingest_url_allowed?
     uri = URI.join(Railwatch.config.ingest_url, "/ingest/deploys")
     req = Net::HTTP::Post.new(uri)

@@ -3,7 +3,19 @@
 # Railwatch: first-class monitoring for Rails. Every option here can also be
 # set by the RAILWATCH_* env var named in the comment.
 Railwatch.configure do |c|
+<% if options[:local] -%>
+  # Telemetry stays in this app's own railwatch_telemetry database and the
+  # dashboard is served at /railwatch. No token, no cloud. Put the mount
+  # behind your own authentication; this only names who is looking.
+  c.transport = :local                              # RAILWATCH_TRANSPORT
+  c.ignored_request_paths += ["/railwatch", %r{\A/railwatch/}]
+  # c.issue_prefix = "APP"                          # RAILWATCH_ISSUE_PREFIX; issue keys like APP-12
+  # c.repository_url = "https://github.com/you/app" # RAILWATCH_REPOSITORY_URL; source links from stack traces
+  # c.retention_days = 7                            # RAILWATCH_RETENTION_DAYS; PruneTelemetryJob keeps this much
+  # c.dashboard_user = ->(request) { { id: 1, name: "Cole", email: "cole@example.com" } }
+<% else -%>
   # c.token = ENV["RAILWATCH_TOKEN"]                    # RAILWATCH_TOKEN (required)
+<% end -%>
   # c.ingest_url = "https://railwatch.rebulk.com"     # RAILWATCH_INGEST_URL
   # c.deploy = "release-name"                       # RAILWATCH_DEPLOY; platform/Git auto-detected
   # c.detect_deploy = false                         # RAILWATCH_DETECT_DEPLOY; default true

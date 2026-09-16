@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+# The dashboard controllers are Inertia controllers; a host that does not use
+# Inertia itself never requires the gem, so the engine does.
+require "inertia_rails"
+
 module Railwatch
   class Engine < ::Rails::Engine
     isolate_namespace Railwatch

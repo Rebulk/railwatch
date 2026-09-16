@@ -480,4 +480,107 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(output).to include("docs/testing.md")
     end
   end
+
+  describe "--local" do
+    def write_file(path, contents)
+      full = File.join(destination_root, path)
+      FileUtils.mkdir_p(File.dirname(full))
+      File.write(full, contents)
+      full
+    end
+
+    def read(path) = File.read(File.join(destination_root, path))
+
+    let(:flat_database_yml) do
+      <<~YAML
+        default: &default
+          adapter: sqlite3
+          timeout: 5000
+
+        development:
+          <<: *default
+          database: storage/development.sqlite3
+
+        # Warning: test is erased.
+        test:
+          <<: *default
+          database: storage/test.sqlite3
+
+        production:
+          primary:
+            <<: *default
+            database: storage/production.sqlite3
+          queue:
+            <<: *default
+            database: storage/production_queue.sqlite3
+            migrations_paths: db/queue_migrate
+      YAML
+    end
+
+    it "writes an initializer that keeps telemetry in the app instead of asking for a token" do
+      write_file("config/database.yml", flat_database_yml)
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      initializer = read("config/initializers/railwatch.rb")
+      expect(initializer).to include("c.transport = :local")
+      expect(initializer).to include('c.ignored_request_paths += ["/railwatch"')
+      expect(initializer).not_to include("(required)")
+      expect(File).not_to exist(File.join(destination_root, ".env"))
+    end
+
+    it "adds railwatch and railwatch_telemetry databases to every environment, nesting a flat one under primary" do
+      write_file("config/database.yml", flat_database_yml)
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
+      expect(yml["development"].keys).to eq(%w[primary railwatch railwatch_telemetry])
+      expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
+      expect(yml["development"]["railwatch"]["database"]).to eq("storage/development_railwatch.sqlite3")
+      expect(yml["development"]["railwatch_telemetry"]["pragmas"]["journal_mode"]).to eq("wal")
+      expect(yml["test"].keys).to eq(%w[primary railwatch railwatch_telemetry])
+      expect(yml["production"].keys).to eq(%w[primary queue railwatch railwatch_telemetry])
+      expect(yml["production"]["queue"]["migrations_paths"]).to eq("db/queue_migrate")
+      expect(read("config/database.yml")).to include("# Warning: test is erased.")
+    end
+
+    it "copies both schema files so db:prepare can create the databases" do
+      write_file("config/database.yml", flat_database_yml)
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      expect(read("db/railwatch_schema.rb")).to include('create_table "issues"')
+      expect(read("db/railwatch_telemetry_schema.rb")).to include('create_table "executions"')
+    end
+
+    it "schedules the rollup, detection and pruning jobs in config/recurring.yml, keeping what is there" do
+      write_file("config/database.yml", flat_database_yml)
+      write_file("config/recurring.yml", <<~YAML)
+        # examples:
+        #   periodic_cleanup:
+        #     class: CleanSoftDeletedRecordsJob
+
+        production:
+          clear_solid_queue_finished_jobs:
+            command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
+            schedule: every hour at minute 12
+      YAML
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      yml = YAML.safe_load(read("config/recurring.yml"))
+      expect(yml["production"]["clear_solid_queue_finished_jobs"]["schedule"]).to eq("every hour at minute 12")
+      expect(yml["production"]["railwatch_rollup_catchup"]).to eq("class" => "RollupCatchupJob", "schedule" => "every minute")
+      expect(yml["production"]["railwatch_prune_telemetry"]["class"]).to eq("PruneTelemetryJob")
+      expect(yml["development"]["railwatch_rollup_catchup"]["class"]).to eq("RollupCatchupJob")
+    end
+
+    it "changes nothing on a second run" do
+      write_file("config/database.yml", flat_database_yml)
+      write_file("config/recurring.yml", "production:\n  x:\n    class: XJob\n    schedule: every hour\n")
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      first = [ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]
+
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      expect([ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]).to eq(first)
+    end
+  end
 end
