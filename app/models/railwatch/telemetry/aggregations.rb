@@ -31,7 +31,7 @@ module Railwatch
         # rows and 55,000 centroids, and merging those digests is 480ms that
         # only changes when RollupJob writes.
         key = [ "aggregations", "grouped", environment.id, record_type, limit, order, sign, from.to_i / 60, to.to_i / 60 ]
-        Rails.cache.fetch(key, expires_in: 1.minute) { grouped_uncached(environment, record_type, from: from, to: to, limit: limit, order: order, sign: sign) }
+        cached(key) { grouped_uncached(environment, record_type, from: from, to: to, limit: limit, order: order, sign: sign) }
       end
 
       def self.grouped_uncached(environment, record_type, from:, to:, limit:, order:, sign:)
@@ -60,6 +60,16 @@ module Railwatch
         end
       end
 
+      # The minute cache exists because the platform's rollups only change
+      # when RollupJob writes. Embedded, every batch updates them and one
+      # person is looking, so the cache would only make the page a minute
+      # stale for nothing.
+      def self.cached(key, &block)
+        return yield if Railwatch.config.local?
+
+        Rails.cache.fetch(key, expires_in: 1.minute, &block)
+      end
+
       # The digest-free half of Rollup.summarize: everything the sort keys
       # that are not percentiles need.
       def self.cheap_summary(rows)
@@ -77,7 +87,7 @@ module Railwatch
       def self.summary_with_delta(environment, record_type, from:, to:, previous_from:, previous_to:, group_hash: nil)
         key = [ "aggregations", "summary_with_delta", environment.id, record_type, group_hash,
                from.to_i / 60, to.to_i / 60, previous_from.to_i / 60, previous_to.to_i / 60 ]
-        Rails.cache.fetch(key, expires_in: 1.minute) do
+        cached(key) do
           environment.with_telemetry do
             current = Telemetry::Rollup.for_type(record_type).between(from, to)
             previous = Telemetry::Rollup.for_type(record_type).between(previous_from, previous_to)

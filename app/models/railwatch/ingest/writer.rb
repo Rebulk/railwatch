@@ -18,6 +18,10 @@ module Railwatch
         @rows_by_class = rows_by_class
       end
 
+      # group_hash => statement, for the queries this batch filed on their
+      # shape; RollupAbsorber names a query group from it.
+      attr_reader :query_shapes
+
       def write!
         exception_ids = []
         TelemetryRecord.transaction do
@@ -47,6 +51,7 @@ module Railwatch
           shapes[group_hash] ||= { group_hash: group_hash, sql: row[:sql] }
           row[:sql] = ""
         end
+        @query_shapes = shapes.transform_values { |shape| shape[:sql] }
         shapes.empty? ? rows_by_class : rows_by_class.merge(Telemetry::QueryShape => shapes.values)
       end
 

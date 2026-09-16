@@ -15,6 +15,11 @@
   initializer with `issue_prefix`, `repository_url`, `retention_days`
   and a `dashboard_user` resolver. `railwatch:doctor`, `railwatch:status`
   and `railwatch:deploy` understand the mode. See docs/embedded.md.
+- Embedded ingest folds each batch into the hourly rollups as it lands
+  (`Ingest::RollupAbsorber`), so the dashboard's counts and percentiles
+  move with every batch; the hosted platform's per-batch RollupJob
+  recompute is not enqueued in embedded mode and the minute-long
+  aggregate cache is bypassed there. RollupCatchupJob still reconciles.
 - The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
 
 ## 0.1.4 (2026-09-15)

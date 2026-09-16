@@ -46,8 +46,10 @@ module Railwatch
         Railwatch.span("ingest.write", records: @records.size) do
           @environment.with_telemetry do
             TelemetryRecord.transaction do
-              @exception_ids = Ingest::Writer.new(@rows_by_class).write!
+              writer = Ingest::Writer.new(@rows_by_class)
+              @exception_ids = writer.write!
               link_profiles!
+              absorb_rollups!(writer) if @embedded
               accepted += @rows_by_class.values.sum(&:size)
               Telemetry::Person.touch_all(@people.map { |rec| [ rec, Time.at(rec["timestamp"].to_f).utc ] })
               accepted += @people.size
@@ -187,8 +189,20 @@ module Railwatch
 
       def enqueue_followups
         GroupExceptionsJob.perform_later(@environment, @exception_ids) if @exception_ids.any?
-        @rollup_buckets.each { |bucket| RollupJob.perform_later(@environment, bucket) if rollup_due?(bucket) }
+        # Embedded batches folded themselves into the rollups already;
+        # RollupCatchupJob reconciles the hour on its schedule.
+        @rollup_buckets.each { |bucket| RollupJob.perform_later(@environment, bucket) if rollup_due?(bucket) } unless @embedded
         @session_buckets.each { |bucket| ReleaseHealthRollupJob.perform_later(@environment, bucket) }
+      end
+
+      # In-process there is no worker to recompute the hour and someone may
+      # be watching this one environment, so the batch folds its own rows
+      # into the hourly rollups as it lands (Ingest::RollupAbsorber). Inside
+      # the batch transaction: the raw rows and their rollup move together.
+      def absorb_rollups!(writer)
+        Railwatch.span("ingest.rollup_absorb") do
+          Ingest::RollupAbsorber.new(@rows_by_class, query_shapes: writer.query_shapes || {}).absorb!
+        end
       end
 
       # Embedded installs skip quota accounting, but last_seen_at still drives

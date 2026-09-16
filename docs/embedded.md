@@ -90,7 +90,7 @@ for Solid Queue:
 
 | Job | Schedule | What it does |
 | --- | --- | --- |
-| `Railwatch::RollupCatchupJob` | every minute | Fills hourly rollups a busy ingest skipped |
+| `Railwatch::RollupCatchupJob` | every minute | Reconciles the current and previous hour's rollups from raw rows |
 | `Railwatch::PerformanceScanJob` | every 5 minutes | Threshold breaches become issues |
 | `Railwatch::AnomalyScanJob` | every 5 minutes | Anomaly rules |
 | `Railwatch::ScheduledTaskScanJob` | every 10 minutes | Missed and late scheduled tasks |
@@ -99,9 +99,11 @@ for Solid Queue:
 | `Railwatch::OptimizeTelemetryJob` | daily | `ANALYZE` on the telemetry database |
 
 Run a Solid Queue worker, or set `SOLID_QUEUE_IN_PUMA=1` to run it
-inside Puma on a single server. A development app on the async adapter
-still gets rollups (they are enqueued from ingest) but not the
-scheduled scans.
+inside Puma on a single server. Rollups themselves do not need a job:
+each batch folds its rows into the hour's rollups as it is written, so
+counts and percentiles on the dashboard move with every batch. The
+catch-up job only reconciles. Without a worker an app still gets live
+rollups but not the scheduled scans that turn thresholds into issues.
 
 ## Settings
 
