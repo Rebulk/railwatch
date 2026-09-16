@@ -536,6 +536,9 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(yml["development"].keys).to eq(%w[primary railwatch railwatch_telemetry])
       expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
       expect(yml["development"]["railwatch"]["database"]).to eq("storage/development_railwatch.sqlite3")
+      expect(yml["development"]["railwatch"]["migrations_paths"]).to end_with("/db/railwatch_migrate")
+      expect(yml["development"]["railwatch_telemetry"]["migrations_paths"]).to end_with("/db/railwatch_telemetry_migrate")
+      expect(yml["development"]["railwatch"]["schema_dump"]).to be(false)
       expect(yml["development"]["railwatch_telemetry"]["pragmas"]["journal_mode"]).to eq("wal")
       expect(yml["test"].keys).to eq(%w[primary railwatch railwatch_telemetry])
       expect(yml["production"].keys).to eq(%w[primary queue railwatch railwatch_telemetry])
@@ -543,12 +546,11 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(read("config/database.yml")).to include("# Warning: test is erased.")
     end
 
-    it "copies both schema files so db:prepare can create the databases" do
+    it "copies no schema or migration files: the engine migrates both databases from the gem" do
       write_file("config/database.yml", flat_database_yml)
       Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
 
-      expect(read("db/railwatch_schema.rb")).to include('create_table "issues"')
-      expect(read("db/railwatch_telemetry_schema.rb")).to include('create_table "executions"')
+      expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
     it "schedules the rollup, detection and pruning jobs in config/recurring.yml, keeping what is there" do

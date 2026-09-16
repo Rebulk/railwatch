@@ -2,6 +2,7 @@
 
 module Railwatch
   class Deploy < ApplicationRecord
+    self.table_name = "railwatch_deploys"
     def environment = Environment.current
 
     validates :deploy, presence: true, uniqueness: { scope: :environment_id }

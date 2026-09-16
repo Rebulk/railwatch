@@ -12,9 +12,13 @@ test:
   railwatch:
     <<: *default
     database: storage/test_railwatch<%= ENV['TEST_ENV_NUMBER'] %>.sqlite3
+    migrations_paths: <%= Railwatch.migrations_path(:railwatch) %>
+    schema_dump: false
   railwatch_telemetry:
     <<: *default
     database: storage/test_railwatch_telemetry<%= ENV['TEST_ENV_NUMBER'] %>.sqlite3
+    migrations_paths: <%= Railwatch.migrations_path(:railwatch_telemetry) %>
+    schema_dump: false
 development:
   <<: *default
   database: storage/development.sqlite3

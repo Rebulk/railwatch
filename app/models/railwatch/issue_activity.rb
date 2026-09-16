@@ -6,15 +6,16 @@ module Railwatch
   # alert sent). `data` holds kind-specific details the frontend renders into a
   # sentence.
   class IssueActivity < ApplicationRecord
+    self.table_name = "railwatch_issue_activities"
     KINDS = %w[created status priority assignee comment merge absorbed unmerge split regressed alert agent].freeze
 
     belongs_to :issue
     def user
-      user_id && User.find_by(id: user_id)
+      viewer_id && User.find_by(id: viewer_id)
     end
 
     def user=(u)
-      self.user_id = u&.id
+      self.viewer_id = u&.id
     end
 
     validates :kind, inclusion: { in: KINDS }

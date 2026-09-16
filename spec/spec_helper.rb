@@ -14,13 +14,13 @@ require "railwatch/spec_helper"
 
 ActiveRecord::Schema.verbose = false
 load File.expand_path("dummy/db/schema.rb", __dir__)
-# The engine's own two databases, for the embedded dashboard specs. Schema
-# files run against ActiveRecord::Base's connection, so each is loaded the
-# way db:schema:load does it: on a temporary pool for that database.
+# The engine's own two databases, for the embedded dashboard specs, built
+# the way a host's db:prepare builds them: from the gem's migrations.
+ActiveRecord::Migration.verbose = false
 %w[railwatch railwatch_telemetry].each do |name|
   db_config = ActiveRecord::Base.configurations.configs_for(env_name: "test", name: name)
-  ActiveRecord::Tasks::DatabaseTasks.with_temporary_connection(db_config) do
-    ActiveRecord::Tasks::DatabaseTasks.load_schema(db_config, :ruby, File.expand_path("../db/#{name}_schema.rb", __dir__))
+  ActiveRecord::Tasks::DatabaseTasks.with_temporary_connection(db_config) do |connection|
+    connection.pool.migration_context.migrate
   end
 end
 

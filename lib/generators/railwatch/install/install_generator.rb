@@ -49,13 +49,12 @@ module Railwatch
       # Two databases of its own, never the app's primary: `railwatch` for
       # what people author (issues, comments, saved views, thresholds) and
       # `railwatch_telemetry` for what the app reports, which is written
-      # continuously and pruned. Rails loads db/<name>_schema.rb for a named
-      # database on db:prepare, the same way Solid Queue ships its schema.
+      # continuously and pruned. Their migrations live in the gem; the
+      # database entries point migrations_paths at them, so db:prepare
+      # creates the tables now and migrates them after every gem update.
+      # Nothing is copied into the app.
       def configure_local_databases
         return unless options[:local]
-
-        copy_file "../../../../../db/railwatch_schema.rb", "db/railwatch_schema.rb"
-        copy_file "../../../../../db/railwatch_telemetry_schema.rb", "db/railwatch_telemetry_schema.rb"
 
         return say("--local: no config/database.yml found; add railwatch and railwatch_telemetry databases yourself (docs/embedded.md).", :yellow) unless File.exist?("config/database.yml")
 
@@ -186,6 +185,8 @@ module Railwatch
 
             Next steps
               1. Create the two databases:  bin/rails db:prepare
+                 (after a future `bundle update railwatch`, the same command
+                 migrates them)
               2. Restart the app and open /railwatch. Put the mount behind your
                  own authentication (a routes constraint or a controller check).
               3. Verify the install:  bin/rails railwatch:doctor
@@ -259,9 +260,13 @@ module Railwatch
         railwatch:
           <<: *default
           database: storage/%<env>s_railwatch.sqlite3
+          migrations_paths: <%%= Railwatch.migrations_path(:railwatch) %%>
+          schema_dump: false
         railwatch_telemetry:
           <<: *default
           database: storage/%<env>s_railwatch_telemetry.sqlite3
+          migrations_paths: <%%= Railwatch.migrations_path(:railwatch_telemetry) %%>
+          schema_dump: false
           pragmas:
             journal_mode: wal
             synchronous: normal

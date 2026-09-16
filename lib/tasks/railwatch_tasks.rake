@@ -101,20 +101,19 @@ namespace :railwatch do
                    configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install --local)",
                    fatal: true)
       end
-      telemetry_ready = begin
-        Railwatch::Environment.current.with_telemetry { Railwatch::Telemetry::Execution.table_exists? }
-      rescue StandardError => e
-        e.message
+      { "railwatch_telemetry" => Railwatch::TelemetryRecord, "railwatch" => Railwatch::ApplicationRecord }.each do |name, base|
+        pending = begin
+          base.connection_pool.migration_context.open.pending_migrations.map(&:version)
+        rescue StandardError => e
+          e.message
+        end
+        check.call(pending == [], "#{name} migrations",
+                   case pending
+                   when [] then "up to date"
+                   when Array then "#{pending.size} pending (bin/rails db:prepare)"
+                   else "cannot check: #{pending}"
+                   end, fatal: true)
       end
-      check.call(telemetry_ready == true, "telemetry schema",
-                 telemetry_ready == true ? "loaded" : "not loaded (bin/rails db:schema:load:railwatch_telemetry)", fatal: true)
-      meta_ready = begin
-        Railwatch::Issue.table_exists?
-      rescue StandardError => e
-        e.message
-      end
-      check.call(meta_ready == true, "railwatch schema",
-                 meta_ready == true ? "loaded" : "not loaded (bin/rails db:schema:load:railwatch)", fatal: true)
       recurring = Rails.root.join("config/recurring.yml")
       scheduled = recurring.exist? && recurring.read.include?("RollupCatchupJob")
       check.call(scheduled, "recurring jobs",

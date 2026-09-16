@@ -76,8 +76,8 @@ begin
     llms.txt
     app/controllers/railwatch/dashboard_controller.rb
     app/views/layouts/railwatch/dashboard.html.erb
-    db/railwatch_schema.rb
-    db/railwatch_telemetry_schema.rb
+    db/railwatch_migrate/20260916000000_create_railwatch_tables.rb
+    db/railwatch_telemetry_migrate/20260903000001_create_telemetry.rb
     public/railwatch/manifest.json
     public/railwatch/icon.svg
   ]

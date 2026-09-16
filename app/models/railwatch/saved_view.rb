@@ -4,6 +4,7 @@ module Railwatch
   # A named, shareable filter on one environment page: "5xx checkout requests",
   # "acme tenant logs". Pinned views appear in the sidebar under the page.
   class SavedView < ApplicationRecord
+    self.table_name = "railwatch_saved_views"
     # page => the index route helper the view links back to. The link is built
     # server-side so the sidebar, the menu, and a pasted URL all agree.
     PAGE_PATHS = {
@@ -28,18 +29,18 @@ module Railwatch
 
     def environment = Environment.current
     def user
-      User.find_by(id: user_id)
+      User.find_by(id: viewer_id)
     end
 
     def user=(u)
-      self.user_id = u&.id
+      self.viewer_id = u&.id
     end
 
     validates :name, presence: true, length: { maximum: 80 }
     validates :page, inclusion: { in: PAGES }
 
     scope :pinned, -> { where(pinned: true) }
-    scope :visible_to, ->(user) { where(shared: true).or(where(user_id: user.id)) }
+    scope :visible_to, ->(user) { where(shared: true).or(where(viewer_id: user.id)) }
 
     # The props every environment page shares, ready for the sidebar and the
     # Views menu: one entry per view this user is allowed to see.
@@ -49,7 +50,7 @@ module Railwatch
 
     def props(environment, user)
       { id: id, name: name, page: page, query: query, window: window, params: params, pinned: pinned, shared: shared,
-        mine: user_id == user&.id, url: path_for(environment) }
+        mine: viewer_id == user&.id, url: path_for(environment) }
     end
 
     # This page's index path with the view's window, query, and extra params

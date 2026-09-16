@@ -14,7 +14,7 @@ module Railwatch
 
     def index
       scope = account_alerts
-      scope = scope.joins(:issue).where(issues: { environment_id: environment.id }) if params[:environment_id]
+      scope = scope.joins(:issue).where(railwatch_issues: { environment_id: environment.id }) if params[:environment_id]
       fields = FilterQuery.parse(params[:q]).fetch(:fields)
       scope = scope.where(event: fields["event"]) if AlertRule::EVENTS.include?(fields["event"].to_s)
       scope = scope.where(status: fields["status"]) if Alert::STATUSES.include?(fields["status"].to_s)

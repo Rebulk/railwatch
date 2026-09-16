@@ -551,4 +551,15 @@ end
 
 require "railwatch/subscribers"
 require "railwatch/dashboard_assets"
+
+module Railwatch
+  # Where the engine's two databases migrate from. database.yml names them
+  # (`migrations_paths: <%= Railwatch.migrations_path(:railwatch) %>`) so a
+  # host's db:prepare creates the tables on install and migrates them after
+  # every gem update, from the gem's own history, the way Active Storage
+  # migrates its tables. Nothing is copied into the app.
+  def self.migrations_path(database)
+    File.expand_path("../db/#{database}_migrate", __dir__)
+  end
+end
 require "railwatch/engine" if defined?(Rails::Engine)

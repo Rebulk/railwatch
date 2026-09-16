@@ -33,7 +33,7 @@ module Railwatch
     # Its owner can change a view; an account admin can too, so a shared view
     # does not outlive the person who made it.
     def editable?(view)
-      view.user_id == Viewer.user.id || true
+      view.viewer_id == Viewer.user.id || true
     end
 
     def fallback = application_environment_overview_path(application, environment)

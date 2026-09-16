@@ -2,15 +2,16 @@
 
 module Railwatch
   class Comment < ApplicationRecord
+    self.table_name = "railwatch_comments"
     SOURCES = %w[railwatch linear].freeze
 
     belongs_to :issue
     def user
-      user_id && User.find_by(id: user_id)
+      viewer_id && User.find_by(id: viewer_id)
     end
 
     def user=(u)
-      self.user_id = u&.id
+      self.viewer_id = u&.id
     end
 
     validates :body, presence: true

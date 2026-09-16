@@ -34,13 +34,24 @@ What `--local` writes, on top of the usual install:
   small, permanent) and `railwatch_telemetry` (everything the app
   reports: written continuously, pruned nightly). A flat
   `development:` entry is nested under `primary:` first, since named
-  databases need that form.
-- `db/railwatch_schema.rb` and `db/railwatch_telemetry_schema.rb`, which
-  `db:prepare` loads the same way it loads Solid Queue's.
+  databases need that form. Each entry's `migrations_paths` points into
+  the gem, so `db:prepare` builds the tables from the gem's own
+  migrations and nothing is copied into `db/`.
 - The recurring jobs in `config/recurring.yml` (below).
 - `mount Railwatch::Engine, at: "/railwatch"`, as always.
 
 Nothing touches your primary database.
+
+## Upgrading
+
+The engine's tables migrate the way Active Storage's do: the migrations
+live in the gem and each database's `migrations_paths` points at them.
+After `bundle update railwatch`, run `bin/rails db:prepare` (or
+`db:migrate`) and whatever is new applies; a deploy that already runs
+one of those needs nothing extra. `bin/rails railwatch:doctor` reports
+pending migrations for both databases. Tables in the `railwatch` file
+are prefixed `railwatch_`; the telemetry file's tables are the hosted
+platform's schema and are unprefixed.
 
 ## What you get
 

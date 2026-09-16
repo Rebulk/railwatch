@@ -4,6 +4,7 @@ module Railwatch
   # A grouped exception or performance problem with a lifecycle. Lives in the
   # primary database so it keeps its sequential id after telemetry is pruned.
   class Issue < ApplicationRecord
+    self.table_name = "railwatch_issues"
     class InvalidMerge < ArgumentError; end
 
     KINDS = %w[exception performance anomaly].freeze

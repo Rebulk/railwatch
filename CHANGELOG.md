@@ -10,7 +10,9 @@
   gem. No token, no Node, no asset pipeline. `c.transport = :local`
   (`RAILWATCH_TRANSPORT=local`) switches the reporter to write batches
   in-process; everything else about sampling, redaction and buffering is
-  unchanged. The installer adds the databases and schemas, the recurring
+  unchanged. The installer adds the databases (migrated from the gem's own
+  migration history, so a gem update is followed by `db:prepare` and
+  nothing else), the recurring
   Solid Queue jobs (rollups, issue detection, pruning), and an
   initializer with `issue_prefix`, `repository_url`, `retention_days`
   and a `dashboard_user` resolver. `railwatch:doctor`, `railwatch:status`

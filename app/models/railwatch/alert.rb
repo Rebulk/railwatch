@@ -2,6 +2,7 @@
 
 module Railwatch
   class Alert < ApplicationRecord
+    self.table_name = "railwatch_alerts"
     MAX_DELIVERY_ATTEMPTS = 5
     DELIVERY_LEASE = 5.minutes
     ENQUEUE_LEASE = 5.minutes

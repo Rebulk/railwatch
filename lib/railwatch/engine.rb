@@ -5,9 +5,11 @@
 require "inertia_rails"
 
 module Railwatch
-  # isolate_namespace would prefix every table with railwatch_; the engine's
-  # models read the hosted platform's schemas, whose tables are unprefixed.
-  # Defined before isolate_namespace runs, which only adds one if missing.
+  # isolate_namespace would give every model a railwatch_ prefix. Only the
+  # engine's own records (issues, comments, deploys: Railwatch::ApplicationRecord)
+  # carry it; the telemetry tables are the hosted platform's schema and stay
+  # unprefixed. Defined before isolate_namespace runs, which only adds a
+  # prefix when none is set.
   def self.table_name_prefix = ""
 
   class Engine < ::Rails::Engine

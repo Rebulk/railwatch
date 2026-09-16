@@ -2,6 +2,7 @@
 
 module Railwatch
   class AlertRule < ApplicationRecord
+    self.table_name = "railwatch_alert_rules"
     TITLE_PATTERN_MAX_LENGTH = 256
     TITLE_PATTERN_TIMEOUT = 0.01
     EVENTS = %w[new_issue regressed_issue resolved_issue ignored_issue assigned_issue threshold anomaly silent_host quota crash_free_drop].freeze

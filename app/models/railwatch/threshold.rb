@@ -4,6 +4,7 @@ module Railwatch
   # A performance rule: "requests to * must keep p95 under 2000 ms over 5
   # minutes". Evaluated by DetectPerformanceIssuesJob against rollups.
   class Threshold < ApplicationRecord
+    self.table_name = "railwatch_thresholds"
     MAX_LIMIT = 1_000_000_000
     MAX_WINDOW_MINUTES = 1_440
     TARGET_KINDS = %w[requests jobs commands queries scheduled_tasks outgoing_requests].freeze

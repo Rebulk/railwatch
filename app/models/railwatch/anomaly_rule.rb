@@ -5,6 +5,7 @@ module Railwatch
   # its 7-day baseline for the same time of day." Evaluated by
   # DetectAnomaliesJob against hourly rollups.
   class AnomalyRule < ApplicationRecord
+    self.table_name = "railwatch_anomaly_rules"
     MIN_BASELINE_DAYS = 3
     MAX_BASELINE_DAYS = 30
     MAX_DEVIATION = 10
