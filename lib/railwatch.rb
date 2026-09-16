@@ -395,6 +395,11 @@ module Railwatch
       reporter.flush
     end
 
+    # For a process that is about to exit: bounded by config.shutdown_timeout.
+    def flush_before_exit
+      reporter.flush_before_exit
+    end
+
     # Internal diagnostics, only when RAILWATCH_DEBUG=1. Goes to stderr rather
     # than Rails.logger so it can never be captured as an app log record.
     def debug

@@ -2,6 +2,7 @@
 
 require "spec_helper"
 require "rake"
+require "socket"
 
 RSpec.describe Railwatch::Patches::RakeTask do
   it "ships a command record with class Rake::Task, the task name, the full rake invocation, and exit_code 0" do
@@ -13,6 +14,35 @@ RSpec.describe Railwatch::Patches::RakeTask do
     expect(cmd[:name]).to eq("railwatch_spec_plain")
     expect(cmd[:command]).to eq("rake railwatch_spec_plain")
     expect(cmd[:exit_code]).to eq(0)
+  end
+
+  it "bounds the flush at the end of a task by shutdown_timeout, so a server that never answers cannot hold the process" do
+    server = TCPServer.new("127.0.0.1", 0)
+    accepted = []
+    acceptor = Thread.new { loop { accepted << server.accept } }
+    WebMock.allow_net_connect!
+    config = Railwatch.config.dup
+    config.ingest_url = "http://127.0.0.1:#{server.addr[1]}"
+    config.allow_http = true
+    config.connect_timeout = 5.0
+    config.timeout = 5.0
+    config.shutdown_timeout = 0.3
+    original = Railwatch.instance_variable_get(:@reporter)
+    Railwatch.instance_variable_set(:@reporter, Railwatch::Reporter.new(config, transport: Railwatch::Transport::Http.new(config)))
+    Rake::Task.define_task(:railwatch_spec_hung_server) { Widget.create!(name: "from_rake") }
+
+    started = Railwatch::Clock.monotonic
+    Rake::Task[:railwatch_spec_hung_server].execute
+    elapsed = Railwatch::Clock.monotonic - started
+
+    expect(elapsed).to be < 1.5
+    expect(Railwatch.reporter.send(:pending_records?)).to be(true)
+  ensure
+    Railwatch.instance_variable_set(:@reporter, original)
+    WebMock.disable_net_connect!
+    acceptor&.kill
+    accepted.each { |sock| sock.close rescue nil }
+    server&.close
   end
 
   it "includes task arguments in the command string" do

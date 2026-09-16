@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+- A rake task or `rails runner` no longer waits out the full timeout ladder
+  on exit when the Railwatch server accepts connections but never answers.
+  The end-of-command flush and the `at_exit` shutdown are both bounded by
+  `shutdown_timeout` (default 2s): the connect timeout is clamped to what
+  remains of it, read and write are re-clamped once the socket is open, the
+  transport's one retry is skipped once it has passed, and whatever is
+  still unsent is retained and reported through `on_unrecoverable` as
+  before. The bound is per socket operation, as Net::HTTP's timeouts are;
+  a server that sends nothing is cut off in one wait, which is the case
+  this exists for. Previously each such process paid
+  ~8s (two read timeouts plus the shutdown flush), which turned a wedged
+  Railwatch into a failed deploy for an app whose container entrypoint boots
+  Rails eleven times before its server. `Transport::Http#deliver` takes an
+  optional monotonic `deadline:`; a custom transport that does not accept
+  it is called exactly as before.
+
 ## 0.1.4 (2026-09-15)
 
 - `llm_call` records what the call carried and how it was configured, not
