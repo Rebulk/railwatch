@@ -67,7 +67,13 @@ module Railwatch
           streaming: p[:streaming] == true,
           message_count: p[:message_count],
           tool_count: Array(p[:tools]).size,
+          tools: tool_names(p),
           cost_nanos: cost_nanos(p),
+          cost_reported: cost_reported(p),
+          finish_reason: finish_reason(p),
+          provider_request_id: provider_request_id(p),
+          params: params(operation, p),
+          **attachments(p),
           **tokens(p),
           **workflow(p),
           **outcome(p),
@@ -103,11 +109,126 @@ module Railwatch
           provider: p[:provider].to_s,
           model: p[:model].to_s,
           tool_name: tool_name[0, 255],
+          tool_call_id: p[:tool_call_id]&.to_s&.slice(0, 128),
+          params: ({ result_class: p[:result_class].to_s[0, 128] } if p[:result_class]),
           duration: micros(event),
           **workflow(p),
           **outcome(p),
           prompt: content(p[:tool_arguments]),
           completion: content(p[:result_content]))
+      end
+
+      # Why the model stopped. :max_tokens means the answer was cut off --
+      # a truncated extraction reads exactly like a complete one without
+      # this, which is the failure most worth being able to see.
+      def finish_reason(payload)
+        response = payload[:response]
+        return nil unless response.respond_to?(:finish_reason)
+
+        response.finish_reason&.to_s&.slice(0, 32)
+      end
+
+      # Message#raw is the Faraday response (protocol.rb hands it in), so the
+      # provider's own request id is in its headers. It is what a provider
+      # support ticket asks for, and the only key that joins our record to
+      # theirs.
+      REQUEST_ID_HEADERS = %w[request-id x-request-id x-amzn-requestid].freeze
+
+      def provider_request_id(payload)
+        raw = payload[:response]
+        raw = raw.raw if raw.respond_to?(:raw)
+        headers = raw.respond_to?(:headers) ? raw.headers : nil
+        return nil unless headers.respond_to?(:[])
+
+        REQUEST_ID_HEADERS.each do |name|
+          value = headers[name]
+          return value.to_s[0, 128] if value.present?
+        end
+        nil
+      end
+
+      # Which tools the model could reach on this call. tool_count alone says
+      # how many; retracing needs which.
+      def tool_names(payload)
+        names = Array(payload[:tools]).map(&:to_s)
+        names.empty? ? nil : names.first(50).join(",")[0, 1024]
+      end
+
+      # Whether the provider priced the call itself, or we estimated it from
+      # the registry. The difference matters when a total is queried against
+      # an invoice.
+      def cost_reported(payload)
+        tokens = payload[:tokens]
+        return nil unless tokens.respond_to?(:reported_cost)
+
+        !tokens.reported_cost.nil?
+      end
+
+      # What the call carried besides text. Images and PDFs are most of the
+      # input tokens on a document-reading call, and without this an
+      # expensive scan is indistinguishable from an expensive prompt.
+      # Only the last user turn is measured: earlier turns were counted by
+      # the calls that sent them, and walking the whole history would both
+      # double-count and cost O(messages) on every call.
+      def attachments(payload)
+        message = last_user_message(payload)
+        list = message.respond_to?(:attachments) ? Array(message.attachments) : []
+        return {} if list.empty?
+
+        types = list.filter_map { |a| a.type.to_s if a.respond_to?(:type) }.tally
+          .sort_by { |_, n| -n }.map { |type, n| n > 1 ? "#{type}x#{n}" : type }.join(",")
+        { attachments: list.size, attachment_types: types[0, 128],
+          attachment_names: content(list.filter_map { |a| a.filename if a.respond_to?(:filename) }.join(", ")) }
+      end
+
+      # The knobs that change what a call costs and what it returns, so a
+      # surprising result can be reproduced with the settings that produced
+      # it. Provider options go through the app's own parameter filter: they
+      # are request configuration, but an app can put anything in them.
+      COMMON_PARAMS = %i[temperature max_output_tokens tool_choice tool_call_limit
+                         thinking caching citations dimensions task_type size count
+                         voice format language pages document_count top_n].freeze
+
+      def params(operation, payload)
+        out = {}
+        COMMON_PARAMS.each do |key|
+          value = payload[key]
+          next if value.nil? || value == false
+          out[key] = value.is_a?(Numeric) || value == true ? value : value.to_s[0, 128]
+        end
+        out[:schema] = true if payload[:schema]
+        out[:server_tools] = Array(payload[:server_tools]).map(&:to_s).first(20) if payload[:server_tools].present?
+        if (usage = payload[:tokens]).respond_to?(:server_tool_use) && usage.server_tool_use.present?
+          out[:server_tool_use] = usage.server_tool_use
+        end
+        if (options = payload[:provider_options]).is_a?(Hash) && !options.empty?
+          out[:provider_options] = provider_options(options)
+        end
+        out[:operation] = operation unless out.empty?
+        out.empty? ? nil : out
+      end
+
+      # Two filters, because one is not enough here. The app's parameter
+      # filter defaults to password-shaped names only, and provider_options
+      # is the one place in this payload where a per-request credential
+      # plausibly lives -- an api_key passed per call sails straight through
+      # a password filter. The redactor's credential-name matcher (the same
+      # one that catches X-Api-Key on a header) closes that.
+      def provider_options(options)
+        filtered = Railwatch.redactor.params(options.transform_keys(&:to_s))
+        filtered.each do |key, _value|
+          # The matcher is written for header names, which are hyphenated;
+          # provider options are Ruby-ish and use underscores, so api_key
+          # would sail past a pattern expecting api-key.
+          filtered[key] = Redactor::FILTERED if Railwatch.redactor.redact_header?(key.tr("_", "-"))
+        end
+      end
+
+      def last_user_message(payload)
+        messages = payload[:input_messages]
+        return nil unless messages.respond_to?(:reverse_each)
+
+        messages.reverse_each.find { |m| m.respond_to?(:role) && m.role.to_s == "user" }
       end
 
       # 2.0 sends a RubyLLM::Tokens; 1.16 sends bare counts on the event.
@@ -161,11 +282,9 @@ module Railwatch
       # The last thing the app asked, which is the half of a conversation
       # worth seeing next to a cost. Earlier turns are the app's own records.
       def prompt_text(payload)
-        messages = payload[:input_messages]
-        return payload[:input] || payload[:prompt] || payload[:query] unless messages.respond_to?(:reverse_each)
+        return payload[:input] || payload[:prompt] || payload[:query] unless payload[:input_messages].respond_to?(:reverse_each)
 
-        last = messages.reverse_each.find { |m| m.respond_to?(:role) && m.role.to_s == "user" }
-        message_text(last)
+        message_text(last_user_message(payload))
       end
 
       def message_text(message)

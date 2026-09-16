@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.1.4 (2026-09-15)
+
+- `llm_call` records what the call carried and how it was configured, not
+  just what it cost. `finish_reason` shows when an answer was cut off
+  (`max_tokens`) or filtered, which previously read exactly like a complete
+  one. `attachments` and `attachment_types` show that a call carried two
+  images and a PDF, so a document read is no longer indistinguishable from
+  an expensive prompt -- on a document-reading call the attachments are most
+  of the input tokens. `params` holds the settings that produced the answer
+  (temperature, max_output_tokens, tool_choice, thinking, caching, whether a
+  schema was used, and the per-operation ones) so a surprising result can be
+  reproduced. `tools` names what the model could reach; `tool_call_id` joins
+  a tool call to the turn that asked for it.
+- `provider_request_id` is read from the response headers (`request-id`,
+  `x-request-id`, `x-amzn-requestid`). It is the only key that joins a
+  Railwatch record to the provider's own record of the same call, and it is
+  what a provider support ticket asks for.
+- `cost_reported` distinguishes a price the provider stated from one
+  estimated against the model registry.
+- `provider_options` is filtered twice before it is stored: through the
+  app's own parameter filter, and again against the credential-name matcher
+  that catches `X-Api-Key` on a header. The default parameter filter is
+  password-shaped, so an `api_key` passed per call went through it
+  untouched. Attachment filenames stay behind `capture_llm_content`, since
+  a filename is business data rather than metadata.
+
 ## 0.1.3 (2026-09-15)
 
 - LLM calls are recorded from RubyLLM's own instrumentation. Every model

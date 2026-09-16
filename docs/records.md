@@ -512,7 +512,11 @@ not a dependency — an app without it never emits these. Requires RubyLLM
 
 The model call also appears as an `outgoing_request`, since it is an HTTP
 call like any other. The two are different grains on purpose: the
-`outgoing_request` is the HTTP truth, the `llm_call` is what it cost.
+`outgoing_request` is the HTTP truth, the `llm_call` is what it cost. That
+difference is useful: RubyLLM retries through Faraday, so one `llm_call`
+with several `outgoing_request` rows against it in the same execution is a
+call that was retried, and the gap between the two counts over a window is
+the retry rate.
 
 **Token counts and cost differ by RubyLLM version.** 1.16 reports token
 counts and no cost at all. 2.0 reports both, from its usage ledger, and
@@ -556,6 +560,15 @@ so cost is always complete.
 | `workflow_step_id` | Step identifier within the workflow (2.0+). |
 | `workflow_step_name` | Step name (2.0+). |
 | `workflow_step_parent_id` | Enclosing step, for nested steps — what reconstructs the tree (2.0+). |
+| `finish_reason` | Why the model stopped: `stop`, `max_tokens`, `tool_calls`, `content_filter`, or whatever the provider spelled it. `max_tokens` means the answer was cut off -- without this a truncated extraction reads exactly like a complete one. |
+| `provider_request_id` | The provider's own id for the request, read from the response headers (`request-id`, `x-request-id`, `x-amzn-requestid`). The only key that joins this record to the provider's side of it, and what a support ticket asks for. |
+| `tools` | Comma-separated names of the tools the model could reach, first 50. `tool_count` says how many; retracing needs which. |
+| `cost_reported` | Whether the provider priced the call itself, or the amount is an estimate from the model registry. Null on gems or operations that report no cost. |
+| `attachments` | How many files the last user turn carried. Absent when it carried none. Only the last turn is measured: earlier turns were counted by the calls that sent them. |
+| `attachment_types` | What they were, by category and count, e.g. `imagex2,pdf`. Categories are RubyLLM's: image, pdf, audio, video, text, document, unknown. On a document-reading call the attachments are most of the input tokens, so without this an expensive scan is indistinguishable from an expensive prompt. |
+| `attachment_names` | Filenames, only when `config.capture_llm_content` is on. A filename like `ACME_invoice_88231.pdf` is business data, not metadata, so it follows the same switch as prompts. |
+| `params` | JSON of the settings that produced the answer, so a surprising one can be reproduced: `temperature`, `max_output_tokens`, `tool_choice`, `tool_call_limit`, `thinking`, `caching`, `citations`, whether a `schema` was used, plus the per-operation ones (`dimensions`, `task_type`, `size`, `count`, `voice`, `format`, `language`, `pages`, `document_count`, `top_n`), `server_tools` and the provider's `server_tool_use` counters. `provider_options` is included, filtered twice: through the app's own parameter filter, and again against the credential-name matcher that catches `X-Api-Key` on a header -- an `api_key` passed per call sails straight through a password-shaped filter. For `operation: "tool"` this holds the tool result's class instead. |
+| `tool_call_id` | The provider's id for a tool invocation, for joining a tool call to the assistant turn that asked for it. |
 | `prompt` | Last user turn, only when `config.capture_llm_content` is on (off by default). Capped at 4 KiB of bytes. |
 | `completion` | The reply, same condition and cap. For `operation: "tool"` these two hold the tool's arguments and result instead. |
 
