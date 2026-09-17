@@ -32,16 +32,27 @@ Puma::Plugin.create do
   private
 
   def active?
-    defined?(::Railwatch) && ::Railwatch.enabled? && ::Railwatch.config.local? && ::Railwatch.config.writer_socket_path
+    return false unless defined?(::Railwatch) && ::Railwatch.enabled? && ::Railwatch.config.local?
+
+    path = ::Railwatch.config.writer_socket_path
+    return false if path.nil?
+    return true if ::Railwatch::Writer.usable_path?(path)
+
+    log "Railwatch writer not started: socket path #{path} is #{path.bytesize} bytes, over the " \
+        "#{::Railwatch::Writer::MAX_SOCKET_PATH}-byte limit; set RAILWATCH_WRITER_SOCKET to a shorter path. " \
+        "Batches are written in-process meanwhile."
+    false
   end
 
   def spawn_writer
-    @writer_pid = fork do
-      # The child inherits the master's reporter, threads and connections;
-      # reset all of it before doing anything, as every forked child does.
-      ::Railwatch.restart_after_fork!
+    # Rails' ForkTracker runs Railwatch.restart_after_fork! in the child the
+    # moment it forks, before this block runs, and that reset reads the
+    # process role to decide which threads to start. Writer.claim! is what
+    # makes that role "writer": it is set from the fork hook itself, ahead
+    # of the reset, so the child never starts a web worker's health or
+    # session threads and then a second set as the writer.
+    @writer_pid = ::Railwatch::Writer.fork_writer! do
       ::Railwatch::Writer.run!(parent: @puma_pid)
-      exit!(0)
     end
     log "Railwatch writer started (pid #{@writer_pid})"
   end

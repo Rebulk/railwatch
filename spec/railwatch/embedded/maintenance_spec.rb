@@ -133,6 +133,22 @@ RSpec.describe Railwatch::Maintenance do
     end
   end
 
+  describe ".tick" do
+    it "stands down while a writer process is listening, so the writer is the one clock" do
+      allow(Railwatch::Writer).to receive(:listening?).and_return(true)
+
+      expect(described_class.tick(now: now)).to eq([])
+      expect(Railwatch::MaintenanceTask.count).to eq(0)
+    end
+
+    it "runs as the writer itself even though the socket is (its own) listening one" do
+      allow(Railwatch::Writer).to receive(:listening?).and_return(true)
+      allow(Railwatch::Writer).to receive(:running?).and_return(true)
+
+      expect(described_class.tick(now: now)).to match_array(described_class::TASKS.keys)
+    end
+  end
+
   describe ".start!" do
     it "starts no thread in the test environment or when the transport is not local" do
       described_class.start!

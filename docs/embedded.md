@@ -103,7 +103,9 @@ plugin :railwatch if defined?(Railwatch)
 
 Every web worker keeps its reporter thread, but instead of writing
 SQLite it hands each batch to the writer over a Unix socket
-(`tmp/sockets/railwatch-writer.sock`, `RAILWATCH_WRITER_SOCKET`). The
+(`tmp/sockets/railwatch-writer.sock`, `RAILWATCH_WRITER_SOCKET`; Linux
+caps the whole path at 108 bytes, so an app checked out deep in the
+filesystem should point this at `/tmp` or `/run`). The
 writer maps the records, writes both databases, folds the rollups,
 groups exceptions into issues and runs the maintenance clock below. It
 is the only process that ever holds the telemetry database's write lock,

@@ -33,7 +33,10 @@ module Railwatch
         @config = config
         @path = path || config.writer_socket_path
         @missing = 0
-        @fallback = nil
+        # A path the kernel cannot bind (over 108 bytes on Linux) can never
+        # have a writer behind it; do not spend three batches finding out.
+        @fallback = Writer.usable_path?(@path) ? nil : Local.new(config)
+        Railwatch.debug { "writer socket path #{@path.inspect} is too long; writing batches in-process" } if @fallback
       end
 
       attr_reader :path
@@ -65,9 +68,11 @@ module Railwatch
       end
 
       def ping
+        return true if @fallback
+
         UNIXSocket.new(@path).close
         true
-      rescue SystemCallError
+      rescue SystemCallError, ArgumentError
         false
       end
 

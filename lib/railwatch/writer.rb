@@ -30,32 +30,67 @@ module Railwatch
     # True in the writer process itself.
     def running? = @running
 
+    # Forks a child that is the writer from its first instruction. ForkTracker
+    # fires Railwatch.restart_after_fork! in the child before the block runs,
+    # and that reset chooses threads and transport by process role; setting
+    # the role here, before the fork, is what makes the child come up with
+    # the writer's set (reporter + Transport::Local + maintenance) rather
+    # than a web worker's followed by the writer's. The parent puts the flag
+    # back the moment fork returns.
+    def fork_writer!
+      @running = true
+      pid = fork do
+        yield
+        exit!(0)
+      end
+      @running = false
+      pid
+    end
+
     # Whether something is listening at the configured socket right now.
     def listening?(path = Railwatch.config.writer_socket_path)
       return false if path.nil?
 
       UNIXSocket.new(path).close
       true
-    rescue SystemCallError
+    rescue SystemCallError, ArgumentError
+      # ArgumentError: the path is over the kernel's sun_path limit (108
+      # bytes on Linux), which a deep checkout can hit; see usable_path?.
       false
+    end
+
+    # Linux caps a Unix socket path at 108 bytes including the terminator. A
+    # path past that cannot be bound or connected to at all, so the plugin
+    # refuses to start rather than fail on every batch, and the doctor says
+    # which path to set.
+    MAX_SOCKET_PATH = 107
+
+    def usable_path?(path)
+      !path.nil? && path.bytesize <= MAX_SOCKET_PATH
     end
 
     # Serves until stopped or until `parent` (a pid) is gone. Never returns
     # to a caller that expects the app to keep running; it is the process.
     def run!(parent: nil)
       path = Railwatch.config.writer_socket_path or raise ArgumentError, "Railwatch.config.writer_socket is unset"
+      unless usable_path?(path)
+        raise ArgumentError, "writer socket path is #{path.bytesize} bytes; Linux allows #{MAX_SOCKET_PATH}. " \
+                             "Set RAILWATCH_WRITER_SOCKET to a shorter path (an absolute one under /tmp or /run works)."
+      end
       @running = true
       @stopping = false
-      Railwatch.reporter.ensure_thread
       $PROGRAM_NAME = "railwatch-writer: #{File.basename(path)}"
       trap_signals
       FileUtils.mkdir_p(File.dirname(path))
       File.unlink(path) if File.exist?(path)
       @server = UNIXServer.new(path)
       Railwatch.debug { "writer listening at #{path} (pid #{Process.pid})" }
+      # Under the Puma plugin ForkTracker has already reset and started
+      # everything for the writer role; run standalone (bin/rails runner)
+      # nothing has, so these are idempotent second calls at worst.
+      Railwatch.reporter.ensure_thread
       Maintenance.start!
       watch_parent(parent) if parent
-      Subscribers::ProcessInfo.record!
       serve
     ensure
       cleanup(path)

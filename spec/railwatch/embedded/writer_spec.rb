@@ -114,6 +114,22 @@ RSpec.describe Railwatch::Writer, type: :request do
     end
   end
 
+  describe ".fork_writer!" do
+    it "makes the child the writer before ForkTracker's reset runs, and restores the parent" do
+      seen = nil
+      allow(described_class).to receive(:fork) do |&block|
+        seen = { running_in_child: described_class.running?, role: Railwatch::Subscribers::ProcessInfo.role }
+        4242
+      end
+
+      pid = described_class.fork_writer! { :never_called_here }
+
+      expect(pid).to eq(4242)
+      expect(seen).to eq(running_in_child: true, role: "writer")
+      expect(described_class.running?).to be(false)
+    end
+  end
+
   describe "transport selection" do
     it "hands a Puma worker the socket transport and the writer itself the SQLite one" do
       expect(Railwatch.local_transport).to be_a(Railwatch::Transport::Socket)
@@ -121,6 +137,17 @@ RSpec.describe Railwatch::Writer, type: :request do
       allow(described_class).to receive(:running?).and_return(true)
       expect(Railwatch.local_transport).to be_a(Railwatch::Transport::Local)
       expect(Railwatch::Subscribers::ProcessInfo.role).to eq("writer")
+    end
+
+    it "writes in-process from the first batch when the socket path is longer than the kernel allows" do
+      long = File.join(Dir.mktmpdir("rw-writer"), "x" * 120, "w.sock")
+      transport = Railwatch::Transport::Socket.new(Railwatch.config, path: long)
+      records = records_for("/widgets")
+
+      expect(transport.fallback?).to be(true)
+      expect(described_class.listening?(long)).to be(false)
+      expect(transport.deliver(records, batch_id: SecureRandom.uuid).ok).to be(true)
+      expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
     end
 
     it "uses the SQLite transport when the socket is configured off" do

@@ -128,7 +128,11 @@ namespace :railwatch do
                    "no tick recorded yet (runs inside the app's web and worker processes, not in rake)"
                  end)
       socket_path = config.writer_socket_path
-      if socket_path
+      if socket_path && !Railwatch::Writer.usable_path?(socket_path)
+        check.call(false, "writer process",
+                   "socket path is #{socket_path.bytesize} bytes, over Linux's #{Railwatch::Writer::MAX_SOCKET_PATH}; " \
+                   "set RAILWATCH_WRITER_SOCKET to a shorter path (e.g. /tmp/#{Rails.application.class.module_parent_name.parameterize}-railwatch.sock)")
+      elsif socket_path
         listening = Railwatch::Writer.listening?(socket_path)
         puma_rb = Rails.root.join("config/puma.rb")
         plugged = puma_rb.exist? && puma_rb.read.include?("plugin :railwatch")

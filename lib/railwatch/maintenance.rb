@@ -130,7 +130,15 @@ module Railwatch
     # Runs every task that is due and unclaimed. Returns the names it ran.
     # Public so a spec, or an operator in a console, can drive the clock by
     # hand. One failing task is reported and does not stop the others.
+    #
+    # A web worker's clock starts at boot, before the Puma plugin has forked
+    # the writer, so the start-time check in start! cannot see it. Checked
+    # again on every tick: once a writer is listening this process's clock
+    # stands down and stays down (the lease table would keep both honest,
+    # but there is no reason to run a second one).
     def tick(now: Time.current)
+      return [] if !Writer.running? && Writer.listening?
+
       ran = []
       Rails.application.executor.wrap do
         env = Environment.current
