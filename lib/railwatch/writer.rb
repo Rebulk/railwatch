@@ -3,6 +3,11 @@
 require "socket"
 require "zlib"
 require "json"
+require "fileutils"
+# The writer runs the maintenance clock. The engine requires it too, but a
+# writer forked by the Puma plugin before the app has finished loading must
+# not depend on that ordering.
+require "railwatch/maintenance"
 
 module Railwatch
   # The embedded install's writer process. Puma workers hand their batches

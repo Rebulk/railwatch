@@ -53,8 +53,14 @@ Puma::Plugin.create do
 
   private
 
+  # Puma evaluates config/puma.rb, and so this plugin's start, before the
+  # app is loaded. `defined?(Railwatch)` is true as soon as the gem's
+  # entrypoint has been required (Bundler.require), which is the normal
+  # `rails server` path; a bare `puma` on an app that has not required it yet
+  # sees the constant but not the API and must not raise out of Puma's boot.
   def active?
-    return false unless defined?(::Railwatch) && ::Railwatch.enabled? && ::Railwatch.config.local?
+    return false unless defined?(::Railwatch) && ::Railwatch.respond_to?(:enabled?)
+    return false unless ::Railwatch.enabled? && ::Railwatch.config.local?
 
     path = ::Railwatch.config.writer_socket_path
     return false if path.nil?

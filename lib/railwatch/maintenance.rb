@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+# TASKS is built from duration literals at load time; the engine has these
+# loaded already, but a writer process required ahead of the app must not
+# depend on that.
+require "active_support/core_ext/numeric/time"
+
 module Railwatch
   # The embedded install's own clock. One background thread per web/worker
   # process wakes every TICK seconds and runs whichever maintenance task is
