@@ -73,7 +73,13 @@ RSpec.describe "embedded dashboard", type: :request do
     allow(Railwatch::GroupExceptionsJob).to receive(:new).and_call_original
     Railwatch::Maintenance.tick
     expect(Railwatch::Issue.sole.title).to eq("ArgumentError: kaboom")
+    expect(Railwatch::Issue.sole.occurrences).to eq(1)
     expect(telemetry { Railwatch::Telemetry::IngestBatch.with_pending_followups.count }).to eq(0)
+
+    # And once more, as the maintenance drain would if the outbox clear had
+    # not stuck: the receipt makes the second pass a no-op.
+    Railwatch::Maintenance.tick(now: Time.current + 2.minutes)
+    expect(Railwatch::Issue.sole.occurrences).to eq(1)
   end
 
   it "writes a request record into the telemetry database and shows it on the requests page" do

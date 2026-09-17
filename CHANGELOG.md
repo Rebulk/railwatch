@@ -47,6 +47,22 @@
   938 ms writing on the worker threads and 716 ms with Railwatch off, and
   each worker's reporter thread fell from 7 s of CPU per minute of load
   to 2 s over the whole run.
+- Hardening from an adversarial review of the writer: a batch's
+  exceptions are counted onto an issue exactly once however many times
+  its follow-ups run (a `railwatch_followup_receipts` row per batch and
+  group, committed with the count); the wedge guard tracks each write by
+  invocation so a retry of the same batch cannot hide a stuck original;
+  the writer reads and writes under deadlines, bounds inflation and the
+  accept queue, binds inside a 0700 directory as a 0600 socket, and
+  refuses to take over a socket another writer is answering on; Puma
+  phased restarts restart the writer rather than losing it; workers
+  under the plugin retain batches while the writer is away, and any
+  other process falls back to in-process writing on the first miss
+  (including a stale socket file); a maintenance lease is released only
+  by the token that claimed it and a failed task is retried next tick;
+  maintenance failures report through `on_unrecoverable`, never
+  `Rails.error`; pruning is bounded per run. The plugin is cluster-mode
+  only.
 - Embedded ingest keeps a delivery ledger. The reporter's batch id is
   stored on the `ingest_batches` row inside the batch's own transaction,
   so a batch the reporter retries after a failure is written once, and

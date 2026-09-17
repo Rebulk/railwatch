@@ -9,19 +9,28 @@ module Railwatch
   class MaintenanceTask < ApplicationRecord
     self.table_name = "railwatch_maintenance_tasks"
 
-    # True when this process won the right to run `name` now: the task is
-    # due (last_run_at older than `every`, or never) and nobody holds a live
+    # The token for a claim this process won, or nil: the task is due
+    # (last_run_at older than `every`, or never) and nobody holds a live
     # lease on it. A lease left by a process that died expires on its own.
+    # The token is per claim, not per process, so a claim that outlived its
+    # lease cannot later release the lease the next claimant holds.
     def self.claim(name, every:, lease:, owner:, now: Time.current)
       ensure_row(name)
-      where(name: name)
+      token = "#{owner}:#{SecureRandom.hex(8)}"
+      won = where(name: name)
         .where("lease_expires_at IS NULL OR lease_expires_at < ?", now)
         .where("last_run_at IS NULL OR last_run_at <= ?", now - every)
-        .update_all(lease_owner: owner, lease_expires_at: now + lease, updated_at: now) == 1
+        .update_all(lease_owner: token, lease_expires_at: now + lease, updated_at: now) == 1
+      won ? token : nil
     end
 
-    def self.release(name, ran_at:)
-      where(name: name).update_all(last_run_at: ran_at, lease_owner: nil, lease_expires_at: nil, updated_at: ran_at)
+    # Releases only the lease this token holds. A task that succeeded records
+    # the run so the interval starts again; one that failed records nothing,
+    # so it is eligible on the next tick rather than a full interval later.
+    def self.release(name, token:, ran_at:, succeeded:)
+      changes = { lease_owner: nil, lease_expires_at: nil, updated_at: ran_at }
+      changes[:last_run_at] = ran_at if succeeded
+      where(name: name, lease_owner: token).update_all(changes)
     end
 
     # The newest tick across every task: what the doctor reports as "last

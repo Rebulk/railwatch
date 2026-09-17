@@ -103,9 +103,14 @@ plugin :railwatch if defined?(Railwatch)
 
 Every web worker keeps its reporter thread, but instead of writing
 SQLite it hands each batch to the writer over a Unix socket
-(`tmp/sockets/railwatch-writer.sock`, `RAILWATCH_WRITER_SOCKET`; Linux
+(`tmp/sockets/railwatch-writer.sock`, `RAILWATCH_WRITER_SOCKET`). The
+socket's directory is created mode 0700 and the socket 0600, so only
+the app's own user can reach it; keep it that way if you move it. Linux
 caps the whole path at 108 bytes, so an app checked out deep in the
-filesystem should point this at `/tmp` or `/run`). The
+filesystem should point this at a directory of its own under
+`/run/user/$UID` or `/tmp` (not a bare file in `/tmp`). Cluster mode
+only: in single mode Puma's request threads are already running when
+the plugin would fork, so a single-mode server writes its own batches. The
 writer maps the records, writes both databases, folds the rollups,
 groups exceptions into issues and runs the maintenance clock below. It
 is the only process that ever holds the telemetry database's write lock,
@@ -125,11 +130,16 @@ doctor reports both whether the socket answers and when the last batch
 was actually written, since a process that is alive and a process that
 is doing its job are different questions.
 
-A process that has no writer to talk to (`bin/rails runner`, a Solid
-Queue worker, a `rails server` without the plugin, the test suite)
-notices the socket is absent, says so once under `RAILWATCH_DEBUG`, and
+Whether a writer is expected decides what a missing one means. Puma
+workers under the plugin expect one: a socket that is absent or not
+answering is a writer that is starting or restarting, and they retain
+batches and retry for as long as it takes. A process with no plugin
+(`bin/rails runner`, a Solid Queue worker, a `rails server` without it,
+the test suite) expects none, says so once under `RAILWATCH_DEBUG`, and
 writes its own batches in-process for the rest of its life. Nothing is
 lost either way; what changes is which process pays for the write.
+A Puma phased restart stops the writer and starts a fresh one once the
+new workers are up.
 
 ## Maintenance
 

@@ -49,24 +49,42 @@ RSpec.describe Railwatch::Maintenance do
       first = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now)
       second = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now)
 
-      expect([ first, second ]).to eq([ true, false ])
-      expect(task("prune").lease_owner).to eq("a:1")
+      expect(first).to start_with("a:1:")
+      expect(second).to be_nil
+      expect(task("prune").lease_owner).to eq(first)
     end
 
     it "does not hand a task out again until its interval has passed since the last run" do
-      described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now)
-      described_class.release("prune", ran_at: now)
+      token = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now)
+      described_class.release("prune", token: token, ran_at: now, succeeded: true)
 
-      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now + 23.hours)).to be(false)
-      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now + 25.hours)).to be(true)
+      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now + 23.hours)).to be_nil
+      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now + 25.hours)).to be_truthy
+    end
+
+    it "makes a task that failed eligible on the next tick instead of a full interval later" do
+      token = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now)
+      described_class.release("prune", token: token, ran_at: now, succeeded: false)
+
+      expect(task("prune").last_run_at).to be_nil
+      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now + 30.seconds)).to be_truthy
     end
 
     it "lets another process take over a lease whose owner never released it" do
       described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "dead:9", now: now)
 
-      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now + 30.minutes)).to be(false)
-      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now + 61.minutes)).to be(true)
-      expect(task("prune").lease_owner).to eq("b:2")
+      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now + 30.minutes)).to be_nil
+      expect(described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now + 61.minutes)).to start_with("b:2:")
+    end
+
+    it "does not let an owner whose lease expired release the lease its successor now holds" do
+      stale = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "a:1", now: now)
+      successor = described_class.claim("prune", every: 1.day, lease: 1.hour, owner: "b:2", now: now + 61.minutes)
+
+      described_class.release("prune", token: stale, ran_at: now + 62.minutes, succeeded: true)
+
+      expect(task("prune").lease_owner).to eq(successor)
+      expect(task("prune").lease_expires_at).to be_present
     end
   end
 
@@ -87,22 +105,19 @@ RSpec.describe Railwatch::Maintenance do
       expect(described_class.tick(now: now + 6.minutes)).to match_array(%w[drain_followups release_health performance_scan anomaly_scan])
     end
 
-    it "reports a failing task and still runs the ones after it" do
+    it "reports a failing task through on_unrecoverable (never Rails.error, which Railwatch itself captures), keeps going, and retries it next tick" do
       allow(Railwatch::ReleaseHealthRollupJob).to receive(:new).and_raise(RuntimeError, "boom")
-      subscriber = Class.new do
-        attr_reader :contexts
-        def initialize = @contexts = []
-        def report(_error, handled:, severity:, context:, source: nil) = @contexts << context
-      end.new
-      Rails.error.subscribe(subscriber)
+      allow(Railwatch).to receive(:notify_unrecoverable)
 
       ran = described_class.tick(now: now)
 
       expect(ran).to match_array(described_class::TASKS.keys - [ "release_health" ])
-      expect(subscriber.contexts).to include(hash_including(railwatch_maintenance: "release_health"))
-      expect(task("release_health")).to have_attributes(last_run_at: now, lease_owner: nil)
-    ensure
-      Rails.error.unsubscribe(subscriber) if subscriber
+      expect(Railwatch).to have_received(:notify_unrecoverable).with(an_instance_of(Railwatch::Maintenance::TaskError))
+      expect(railwatch_records(:exception)).to be_empty
+      expect(task("release_health")).to have_attributes(last_run_at: nil, lease_owner: nil)
+
+      allow(Railwatch::ReleaseHealthRollupJob).to receive(:new).and_call_original
+      expect(described_class.tick(now: now + 30.seconds)).to include("release_health")
     end
 
     it "does not record any of its own work as telemetry" do

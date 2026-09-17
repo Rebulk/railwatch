@@ -14,6 +14,11 @@ module Railwatch
     # hourly buckets per run and let the nightly schedule drain the backlog.
     SESSION_HOURS_PER_RUN = 48
     BATCH = 5_000
+    # Per raw table per run. A backlog past this (a retention change, a
+    # restore of an old file) drains over successive runs rather than in one
+    # that holds SQLite's write lock for as long as it takes. In the embedded
+    # writer that long hold would look like a wedge and end the process.
+    MAX_BATCHES_PER_TABLE = 40
 
     RAW = [ Telemetry::Execution, Telemetry::Query, Telemetry::Exception, Telemetry::CacheEvent, Telemetry::Mail,
             Telemetry::Broadcast, Telemetry::Notification, Telemetry::OutgoingRequest, Telemetry::StorageOp,
@@ -60,7 +65,7 @@ module Railwatch
     # ones. Tables without such an index still scan, but they are the small
     # ones.
     def prune(klass, cutoff)
-      loop do
+      MAX_BATCHES_PER_TABLE.times do
         ids = klass.where(occurred_at: ...cutoff).order(:occurred_at).limit(BATCH).pluck(:id)
         break if ids.empty?
         klass.where(id: ids).delete_all
@@ -88,9 +93,13 @@ module Railwatch
     # for a log line have to be withdrawn while its row (and message) is still
     # there. Deleting the rows first would leave the index permanently out of
     # sync -- searches would keep returning rowids that no longer exist.
+    # Bounded the same way as the rows it precedes: the postings for at most
+    # MAX_BATCHES_PER_TABLE * BATCH expired lines are withdrawn per run, which
+    # is exactly the set prune(Telemetry::Log) will delete this run.
     def unindex_logs(cutoff)
       Telemetry::Log.connection.execute(Telemetry::Log.sanitize_sql_array([
-        "INSERT INTO logs_fts(logs_fts, rowid, message) SELECT 'delete', id, message FROM logs WHERE occurred_at < ?", cutoff
+        "INSERT INTO logs_fts(logs_fts, rowid, message) SELECT 'delete', id, message FROM logs " \
+        "WHERE occurred_at < ? ORDER BY occurred_at LIMIT ?", cutoff, MAX_BATCHES_PER_TABLE * BATCH
       ]))
     end
   end

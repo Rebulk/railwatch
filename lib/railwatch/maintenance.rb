@@ -66,6 +66,7 @@ module Railwatch
       "prune" => [ 24.hours, 60.minutes, lambda { |env|
         PruneTelemetryJob.new.perform(env, checkpoint: "PASSIVE")
         OptimizeTelemetryJob.new.perform(env)
+        FollowupReceipt.prune!
       } ]
     }.freeze
 
@@ -143,16 +144,21 @@ module Railwatch
       Rails.application.executor.wrap do
         env = Environment.current
         TASKS.each do |name, (every, lease, body)|
-          next unless MaintenanceTask.claim(name, every: every, lease: lease, owner: owner, now: now)
+          token = MaintenanceTask.claim(name, every: every, lease: lease, owner: owner, now: now) or next
 
+          succeeded = false
           begin
             Railwatch.ignore { body.call(env) }
+            succeeded = true
             ran << name
           rescue StandardError => e
+            # Not Rails.error: this thread has no execution for Railwatch.ignore
+            # to pause, so a report there would be captured by Railwatch's own
+            # subscriber and opened as an application issue about Railwatch.
             Railwatch.debug { "maintenance #{name} failed: #{e.class}: #{e.message}" }
-            Rails.error.report(e, handled: true, context: { railwatch_maintenance: name })
+            Railwatch.notify_unrecoverable(TaskError.new("maintenance task #{name} failed: #{e.class}: #{e.message}"))
           ensure
-            MaintenanceTask.release(name, ran_at: now)
+            MaintenanceTask.release(name, token: token, ran_at: now, succeeded: succeeded)
           end
         end
       end
@@ -166,5 +172,7 @@ module Railwatch
     def owner
       "#{Railwatch.config.server}:#{Process.pid}"
     end
+
+    class TaskError < StandardError; end
   end
 end

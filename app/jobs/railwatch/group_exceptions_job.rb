@@ -16,20 +16,33 @@ module Railwatch
     DEPLOY_GRACE = 3.minutes
     DEPLOY_NETWORK_ERRORS = %w[HttpNetworkError AxiosError InertiaException NetworkError TypeError:NetworkError].freeze
 
-    def perform(environment, exception_ids)
+    # batch_id: the embedded ledger's id for the batch these rows came from.
+    # With one, each group's occurrence count is committed together with a
+    # FollowupReceipt for (batch, group), so running this again for the same
+    # batch (a crash after the count but before the ledger was cleared, or
+    # the inline drain racing the maintenance drain) counts nothing twice.
+    # The hosted platform enqueues this once per HTTP batch and passes none.
+    def perform(environment, exception_ids, batch_id: nil)
       rows = environment.with_telemetry { Telemetry::Exception.where(id: exception_ids).to_a }
       rows = rows.reject { |row| deploy_swap_noise?(environment, row) }
       rows.group_by(&:group_hash).each do |group_hash, group|
-        latest = group.max_by(&:occurred_at)
-        issue, outcome = Issue.record_occurrence!(
-          environment: environment, group_hash: group_hash, kind: "exception",
-          title: "#{latest.class_name}: #{latest.message.to_s.first(200)}",
-          culprit: [ latest.file, latest.line ].compact.join(":").presence,
-          occurred_at: latest.occurred_at, deploy: latest.deploy, user_ref: latest.user_ref, source: latest.source,
-          sample: { exception_id: latest.id, handled: latest.handled, execution_id: latest.execution_id,
-                    execution_preview: latest.execution_preview, deploy: latest.deploy,
-                    fingerprint: latest.fingerprint, fingerprint_source: latest.fingerprint_source })
-        issue.increment!(:occurrences, group.size - 1) if group.size > 1
+        issue = outcome = nil
+        Issue.transaction do
+          next if batch_id && !FollowupReceipt.claim!(batch_id: batch_id, group_hash: group_hash)
+
+          latest = group.max_by(&:occurred_at)
+          issue, outcome = Issue.record_occurrence!(
+            environment: environment, group_hash: group_hash, kind: "exception",
+            title: "#{latest.class_name}: #{latest.message.to_s.first(200)}",
+            culprit: [ latest.file, latest.line ].compact.join(":").presence,
+            occurred_at: latest.occurred_at, deploy: latest.deploy, user_ref: latest.user_ref, source: latest.source,
+            sample: { exception_id: latest.id, handled: latest.handled, execution_id: latest.execution_id,
+                      execution_preview: latest.execution_preview, deploy: latest.deploy,
+                      fingerprint: latest.fingerprint, fingerprint_source: latest.fingerprint_source })
+          issue.increment!(:occurrences, group.size - 1) if group.size > 1
+        end
+        next unless issue
+
         update_affected_users(environment, issue) if affected_users_due?(issue, outcome)
         alert(issue, outcome)
       end

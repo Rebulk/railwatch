@@ -14,13 +14,16 @@ module Railwatch
         batch_id.present? ? find_by(batch_id: batch_id) : nil
       end
 
-      # Runs the follow-ups a batch left behind and clears them. Idempotent:
-      # grouping the same exception ids twice only bumps nothing, since the
-      # issue's occurrence count comes from the rows, not from the call.
+      # Runs the follow-ups a batch left behind and clears them. Safe to run
+      # more than once: the grouping commits a FollowupReceipt per (batch,
+      # group) in the railwatch database together with the occurrence count,
+      # so a second run finds the receipts and counts nothing. Clearing the
+      # outbox here is only what stops the maintenance drain from picking the
+      # row up again; it is not what makes the replay safe.
       def drain_followups!(environment)
         work = followups || {}
         ids = Array(work["group_exception_ids"])
-        GroupExceptionsJob.new.perform(environment, ids) if ids.any?
+        GroupExceptionsJob.new.perform(environment, ids, batch_id: batch_id) if ids.any?
         update_columns(followups: nil)
       end
     end

@@ -72,6 +72,22 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect(enqueued_jobs).to be_empty
     end
 
+    it "counts a batch's exceptions onto an issue exactly once however many times its follow-ups run" do
+      records = records_for("/boom")
+      id = SecureRandom.uuid
+      with_writer { transport.deliver(records, batch_id: id) }
+      ledger = telemetry { Railwatch::Telemetry::IngestBatch.find_by!(batch_id: id) }
+      expect(Railwatch::Issue.sole.occurrences).to eq(1)
+
+      # A crash after the count committed but before the outbox was cleared.
+      telemetry { ledger.update_columns(followups: { "group_exception_ids" => records.select { |r| r[:t] == "exception" }.size.times.map { |i| i + 1 } }) }
+      telemetry { Railwatch::Telemetry::IngestBatch.find_by!(batch_id: id).drain_followups!(environment) }
+      Railwatch::Maintenance.tick
+
+      expect(Railwatch::Issue.sole.occurrences).to eq(1)
+      expect(Railwatch::FollowupReceipt.where(batch_id: id).count).to eq(1)
+    end
+
     it "answers a failed write with a retryable error and no exception record of its own" do
       records = records_for("/widgets")
       allow(Railwatch::Ingest::Writer).to receive(:new).and_raise(ActiveRecord::StatementInvalid, "database is locked")
@@ -87,30 +103,90 @@ RSpec.describe Railwatch::Writer, type: :request do
   end
 
   describe "when nothing is listening" do
-    it "retries while the socket file exists but refuses, and never falls back" do
-      File.write(socket_path, "") # a stale socket file: ECONNREFUSED / ENOTSOCK, not ENOENT
+    it "retains and retries, for as long as it takes, when a writer is expected (under the Puma plugin)" do
+      expecting = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: true)
       records = records_for("/widgets")
 
-      results = 5.times.map { transport.deliver(records, batch_id: SecureRandom.uuid) }
+      absent = expecting.deliver(records, batch_id: SecureRandom.uuid)
+      File.write(socket_path, "") # a stale inode: refuses rather than ENOENT
+      stale = expecting.deliver(records, batch_id: SecureRandom.uuid)
 
-      expect(results.map(&:ok)).to all(be(false))
-      expect(results.map(&:retryable?)).to all(be(true))
-      expect(transport.fallback?).to be(false)
+      expect([ absent.ok, stale.ok ]).to eq([ false, false ])
+      expect([ absent.retryable?, stale.retryable? ]).to eq([ true, true ])
+      expect(expecting.fallback?).to be(false)
       expect(telemetry { Railwatch::Telemetry::Execution.count }).to eq(0)
     end
 
-    it "falls back to writing in-process after three misses when there is no socket file at all" do
+    it "writes in-process from the first miss when no writer is expected (a runner, a Solid Queue worker)" do
+      alone = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: false)
       records = records_for("/widgets")
 
-      first, second = 2.times.map { transport.deliver(records, batch_id: SecureRandom.uuid) }
-      expect([ first.ok, second.ok ]).to eq([ false, false ])
-      expect(transport.fallback?).to be(false)
+      result = alone.deliver(records, batch_id: SecureRandom.uuid)
 
-      third = transport.deliver(records, batch_id: SecureRandom.uuid)
-
-      expect(third.ok).to be(true)
-      expect(transport.fallback?).to be(true)
+      expect(result.ok).to be(true)
+      expect(alone.fallback?).to be(true)
       expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
+    end
+
+    it "treats a stale socket inode with no writer behind it as no writer, not as a permanent retry" do
+      File.write(socket_path, "")
+      alone = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: false)
+      records = records_for("/widgets")
+
+      expect(alone.deliver(records, batch_id: SecureRandom.uuid).ok).to be(true)
+      expect(alone.fallback?).to be(true)
+    end
+  end
+
+  describe "the socket's own limits" do
+    it "gives up on a client that connects and never finishes sending, instead of parking a writer thread" do
+      stub_const("Railwatch::Writer::WEDGE_TIMEOUT", 0.2)
+      server = UNIXServer.new(socket_path)
+      client = UNIXSocket.new(socket_path)
+      accepted = server.accept
+      client.write([ 100 ].pack("N") + "only a few bytes")
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      described_class.handle(accepted)
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      expect(elapsed).to be < 2
+      expect(accepted).to be_closed
+    ensure
+      client&.close
+      server&.close
+    end
+
+    it "refuses a request that inflates past the ceiling before materialising it" do
+      stub_const("Railwatch::Writer::MAX_INFLATED_BYTES", 10_000)
+      bomb = Zlib.gzip("0" * 1_000_000)
+
+      expect { described_class.inflate_bounded(bomb) }.to raise_error(IOError, /inflates past/)
+    end
+
+    it "refuses new connections once MAX_PENDING are already waiting, so workers back off instead of piling up" do
+      stub_const("Railwatch::Writer::MAX_PENDING", 1)
+      stub_const("Railwatch::Writer::THREADS", 1)
+      described_class.instance_variable_set(:@server, UNIXServer.new(socket_path))
+      described_class.instance_variable_set(:@stopping, false)
+      gate = Queue.new
+      allow(described_class).to receive(:handle) { |sock| gate.pop; sock.close }
+      serving = Thread.new { described_class.serve }
+
+      busy = UNIXSocket.new(socket_path)      # taken by the one thread
+      sleep 0.05
+      waiting = UNIXSocket.new(socket_path)   # fills the queue
+      sleep 0.05
+      refused = UNIXSocket.new(socket_path)   # closed by the accept loop
+      sleep 0.05
+
+      expect(refused.wait_readable(1)).to be_truthy
+      expect(refused.read_nonblock(1, exception: false)).to be_nil # EOF: closed by the writer
+    ensure
+      2.times { gate << :go }
+      described_class.instance_variable_get(:@server)&.close
+      serving&.join(2)
+      [ busy, waiting, refused ].each { |s| s&.close }
     end
   end
 
@@ -121,13 +197,29 @@ RSpec.describe Railwatch::Writer, type: :request do
 
     it "sees a write that is still running, and nothing once it has finished" do
       gate = Queue.new
-      thread = Thread.new { described_class.track_in_flight("b1") { gate.pop } }
+      thread = Thread.new { described_class.track_in_flight { gate.pop } }
       sleep 0.01 until described_class.oldest_in_flight
 
       expect(described_class.oldest_in_flight).to be >= 0
       gate << :go
       thread.join(1)
       expect(described_class.oldest_in_flight).to be_nil
+    end
+
+    it "keeps seeing a wedged write after a retry of the same batch finished" do
+      stuck = Queue.new
+      quick = Queue.new
+      wedged = Thread.new { described_class.track_in_flight { stuck.pop } }
+      sleep 0.01 until described_class.oldest_in_flight
+      retried = Thread.new { described_class.track_in_flight { quick.pop } }
+      sleep 0.02
+      quick << :go
+      retried.join(1)
+
+      expect(described_class.oldest_in_flight).to be >= 0.02
+    ensure
+      stuck << :go
+      wedged&.join(1)
     end
 
     it "exits the process once a write has run past WEDGE_TIMEOUT so Puma respawns a fresh writer" do
@@ -138,7 +230,7 @@ RSpec.describe Railwatch::Writer, type: :request do
       allow(Railwatch).to receive(:notify_unrecoverable)
 
       gate = Queue.new
-      writing = Thread.new { described_class.track_in_flight("stuck") { gate.pop } }
+      writing = Thread.new { described_class.track_in_flight { gate.pop } }
       sleep 0.01 until described_class.oldest_in_flight
       watcher = described_class.watch_wedge
       code = Timeout.timeout(2) { exits.pop }
@@ -148,6 +240,22 @@ RSpec.describe Railwatch::Writer, type: :request do
 
       expect(code).to eq(75)
       expect(Railwatch).to have_received(:notify_unrecoverable).with(an_instance_of(Railwatch::Writer::WedgedError))
+    end
+  end
+
+  describe ".bind" do
+    it "creates a private directory and a private socket, and refuses to take over a live one" do
+      dir = File.join(Dir.mktmpdir("rw-bind"), "private")
+      path = File.join(dir, "w.sock")
+
+      described_class.bind(path)
+      expect(File.stat(dir).mode & 0o777).to eq(0o700)
+      expect(File.stat(path).mode & 0o777).to eq(0o600)
+
+      expect { described_class.bind(path) }.to raise_error(Errno::EADDRINUSE)
+    ensure
+      described_class.instance_variable_get(:@server)&.close
+      described_class.instance_variable_set(:@server, nil)
     end
   end
 
@@ -163,6 +271,13 @@ RSpec.describe Railwatch::Writer, type: :request do
 
       expect(pid).to eq(4242)
       expect(seen).to eq(running_in_child: true, role: "writer")
+    end
+
+    it "restores the parent's flag when fork itself fails" do
+      allow(described_class).to receive(:fork).and_raise(Errno::EAGAIN)
+
+      expect { described_class.fork_writer! { nil } }.to raise_error(Errno::EAGAIN)
+      expect(described_class.running?).to be(false)
       expect(described_class.running?).to be(false)
     end
   end

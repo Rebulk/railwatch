@@ -7,6 +7,12 @@ require "puma/plugin"
 # it dies, and stops it with Puma. Same shape as Solid Queue's
 # `solid_queue_mode :fork`. A no-op when Railwatch is off or the transport
 # is not :local, so it is safe to leave in place.
+#
+# Cluster mode only, on purpose. In single mode Puma's request threads are
+# already running when after_booted fires, and forking a whole Rails process
+# from a multithreaded parent inherits whatever locks those threads hold at
+# that instant. A single-mode server writes its own batches, which is the
+# path it always had.
 Puma::Plugin.create do
   attr_reader :log_writer, :writer_pid
 
@@ -15,8 +21,20 @@ Puma::Plugin.create do
   def start(launcher)
     @log_writer = launcher.log_writer
     @puma_pid = $$
-    @stopping = false
+    @launcher = launcher
+    @shutting_down = false
     @booted = false
+
+    return unless active?
+    unless launcher.options[:workers].to_i.positive?
+      log "Railwatch writer not started: Puma is in single mode (set workers > 0). Batches are written in-process."
+      return
+    end
+
+    # The workers fork from this process after start; they inherit this flag
+    # and so retain batches while the writer is starting rather than writing
+    # them in-process (Transport::Socket).
+    ::Railwatch::Writer.expected!
 
     # in_background blocks are collected at plugin start and started by the
     # cluster once, so this has to be registered here, not from after_booted
@@ -25,8 +43,12 @@ Puma::Plugin.create do
     in_background { supervise }
 
     launcher.events.after_booted { @booted = true }
-    launcher.events.after_stopped { stop_writer }
-    launcher.events.before_restart { stop_writer }
+    # A phased restart fires before_restart and then, once the new workers
+    # are up, after_booted again. The writer is stopped for the restart and
+    # the supervisor, which is still running, respawns it when @booted flips
+    # back. Only a real stop latches shutdown.
+    launcher.events.before_restart { restart_writer }
+    launcher.events.after_stopped { shutdown_writer }
   end
 
   private
@@ -45,32 +67,26 @@ Puma::Plugin.create do
   end
 
   def spawn_writer
-    # Rails' ForkTracker runs Railwatch.restart_after_fork! in the child the
-    # moment it forks, before this block runs, and that reset reads the
-    # process role to decide which threads to start. Writer.claim! is what
-    # makes that role "writer": it is set from the fork hook itself, ahead
-    # of the reset, so the child never starts a web worker's health or
-    # session threads and then a second set as the writer.
     @writer_pid = ::Railwatch::Writer.fork_writer! do
       ::Railwatch::Writer.run!(parent: @puma_pid)
     end
     log "Railwatch writer started (pid #{@writer_pid})"
+  rescue SystemCallError => e
+    @writer_pid = nil
+    log "Railwatch writer could not be forked (#{e.class}: #{e.message}); retrying"
   end
 
   # Puma's cluster reaps every child with wait2(-1), the writer included, so
   # waitpid on the writer's pid raises ECHILD after it has died. Liveness is
   # asked with signal 0 instead, which works whoever reaped it.
   def supervise
-    sleep POLL until @booted || @stopping
-    return if @stopping || !active?
-
-    spawn_writer
     loop do
       sleep POLL
-      break if @stopping
+      break if @shutting_down
+      next unless @booted
       next if writer_alive?
 
-      log "Railwatch writer (pid #{@writer_pid}) is gone; restarting"
+      log "Railwatch writer (pid #{@writer_pid}) is gone; starting" if @writer_pid
       spawn_writer
     end
   end
@@ -93,8 +109,19 @@ Puma::Plugin.create do
     end
   end
 
+  # For a restart: stop the writer and mark the cluster as not booted, so the
+  # supervisor spawns a fresh one once after_booted fires again.
+  def restart_writer
+    @booted = false
+    stop_writer
+  end
+
+  def shutdown_writer
+    @shutting_down = true
+    stop_writer
+  end
+
   def stop_writer
-    @stopping = true
     return unless @writer_pid
 
     Process.kill(:TERM, @writer_pid)
