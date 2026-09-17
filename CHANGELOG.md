@@ -31,6 +31,22 @@
   move with every batch; the hosted platform's per-batch RollupJob
   recompute is not enqueued in embedded mode and the minute-long
   aggregate cache is bypassed there.
+- Embedded ingest keeps a delivery ledger. The reporter's batch id is
+  stored on the `ingest_batches` row inside the batch's own transaction,
+  so a batch the reporter retries after a failure is written once, and
+  a write that fails is now retried with the same backoff the HTTP
+  transport gets instead of being dropped. The exception grouping a
+  batch owes is recorded on that row as well and cleared when done; a
+  process that dies in between leaves it for `Railwatch::Maintenance` to
+  finish on its next tick, so an exception can no longer be stored
+  without ever becoming an issue.
+- A missed scheduled task says why, when Solid Queue is the adapter:
+  the scheduler never enqueued the run, it was enqueued but no worker
+  is running, or it is enqueued and waiting behind a backlog. Read from
+  Solid Queue's own `recurring_executions` and `processes` tables.
+- `rails runner script/x.rb` is a deployed script even when the whole
+  application is checked out under a scratch directory such as `/tmp`;
+  only a scratch path inside the app still counts as interactive.
 - `RollupJob` no longer overwrites a rollup that a batch folded into
   between its read and its write: a stored count higher than the
   recomputed one is kept, and the next run picks the group up.

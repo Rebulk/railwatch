@@ -20,11 +20,23 @@ module Railwatch
   module Maintenance
     ROLES = %w[web worker].freeze
     TICK = 30
+    FOLLOWUP_BATCHES_PER_TICK = 200
 
     # name => [interval, lease, body]. The lease is how long a claim is held
     # by a process that never releases it (crashed mid-task); it is a ceiling
     # on the work, not an estimate of it.
     TASKS = {
+      # A batch's exceptions are grouped into issues right after it commits;
+      # a process that dies in between leaves the work recorded on the
+      # batch's ledger row. Bounded per tick so a long outage drains over a
+      # few ticks rather than one long one.
+      "drain_followups" => [ 1.minute, 5.minutes, lambda { |env|
+        env.with_telemetry do
+          Telemetry::IngestBatch.with_pending_followups.limit(FOLLOWUP_BATCHES_PER_TICK).each do |batch|
+            batch.drain_followups!(env)
+          end
+        end
+      } ],
       "release_health" => [ 1.minute, 5.minutes, lambda { |env|
         now = Time.current
         [ now.beginning_of_hour, (now - 1.hour).beginning_of_hour ].each do |bucket|

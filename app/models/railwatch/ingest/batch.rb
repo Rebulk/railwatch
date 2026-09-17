@@ -19,8 +19,9 @@ module Railwatch
       # every 2s) but must not be able to break ingest in an app that has no
       # Action Cable adapter configured.
       def initialize(environment, records, dropped_by_client: 0, backpressure_factor: nil, bytes: 0, gem_version: nil,
-                     received_at: nil, embedded: false)
+                     received_at: nil, embedded: false, batch_id: nil)
         @embedded = embedded
+        @batch_id = batch_id
         @environment = environment
         @records = records
         @dropped_by_client = dropped_by_client
@@ -39,6 +40,13 @@ module Railwatch
         @exception_ids = []
       end
 
+      # The ledger row for a batch id that has already been written, or nil.
+      # The row is created inside the batch's transaction, so seeing it is
+      # seeing the commit. Callers run this inside environment.with_telemetry.
+      def self.committed(batch_id)
+        Telemetry::IngestBatch.committed(batch_id)
+      end
+
       def write!
         map_all
         log_truncations
@@ -53,10 +61,11 @@ module Railwatch
               accepted += @rows_by_class.values.sum(&:size)
               Telemetry::Person.touch_all(@people.map { |rec| [ rec, Time.at(rec["timestamp"].to_f).utc ] })
               accepted += @people.size
-              Telemetry::IngestBatch.create!(received_at: @received_at, accepted: accepted, rejected: @rejections.size,
-                                             dropped_by_client: @dropped_by_client, backpressure_factor: @backpressure_factor,
-                                             bytes: @bytes, gem_version: @gem_version,
-                                             counts_by_type: @counts, rejections: @rejections.first(20))
+              @ledger = Telemetry::IngestBatch.create!(received_at: @received_at, accepted: accepted, rejected: @rejections.size,
+                                                       dropped_by_client: @dropped_by_client, backpressure_factor: @backpressure_factor,
+                                                       bytes: @bytes, gem_version: @gem_version,
+                                                       counts_by_type: @counts, rejections: @rejections.first(20),
+                                                       batch_id: @batch_id, followups: followups)
             end
           end
         end
@@ -69,6 +78,18 @@ module Railwatch
         enqueue_followups
         broadcast_live
         Result.new(accepted: accepted, rejected: @rejections.size, rejections: @rejections)
+      end
+
+      # What this batch still owes once its own transaction has committed, in
+      # embedded mode: the work that writes the railwatch database and so
+      # cannot share the telemetry transaction. Recorded on the ledger row in
+      # that same transaction and cleared when done, so a crash in between
+      # leaves a row Railwatch::Maintenance can finish rather than a batch
+      # whose exceptions never become issues. nil (nothing owed) otherwise.
+      def followups
+        return nil unless @embedded && @exception_ids.any?
+
+        { "group_exception_ids" => @exception_ids }
       end
 
       private
@@ -200,11 +221,13 @@ module Railwatch
       end
 
       # Outside the telemetry transaction (it writes the railwatch database),
-      # and a failure here must not fail a batch that has already committed.
+      # and a failure here must not fail a batch that has already committed:
+      # the ledger row keeps the follow-ups, and the maintenance clock drains
+      # them on its next tick.
       def group_exceptions_now
         return if @exception_ids.empty?
 
-        GroupExceptionsJob.new.perform(@environment, @exception_ids)
+        @environment.with_telemetry { @ledger.drain_followups!(@environment) }
       rescue StandardError => e
         Rails.error.report(e, handled: true, context: { ingest_group_exceptions: @environment.slug })
       end

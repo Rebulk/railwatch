@@ -109,6 +109,7 @@ The work that keeps the dashboard current happens in two places:
 
 | Task | Cadence | What it does |
 | --- | --- | --- |
+| drain follow-ups | every minute | Finishes the exception grouping of any batch whose process died right after the batch committed |
 | release health | every minute | Hourly crash-free aggregates for the current and previous hour |
 | rollup reconcile | hourly | Recomputes the previous hour's rollups from raw rows, for records that arrived after their hour closed |
 | performance scan | every 5 minutes | Threshold breaches become issues |
@@ -119,7 +120,16 @@ The work that keeps the dashboard current happens in two places:
 
 Because the clock lives in the web process, it keeps running when the
 job worker is down, which is exactly when "scheduled task X missed its
-run" needs to be raised. `bin/rails railwatch:doctor` reports the last
+run" needs to be raised. With Solid Queue, the issue also says which of
+three things happened: the scheduler never enqueued the run, it was
+enqueued but no worker is running, or a worker is alive and it is
+waiting behind a backlog.
+
+Every batch is written exactly once. The reporter gives each batch an
+id before its first attempt and the write records it in the same
+transaction as the rows, so a write that fails (the file locked by a
+backup, say) is retried with backoff and a retry of a batch that did
+commit is a no-op. `bin/rails railwatch:doctor` reports the last
 tick. If you installed a pre-release that added `Railwatch::*` entries to
 `config/recurring.yml`, remove them; the doctor says so too.
 

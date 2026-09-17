@@ -83,8 +83,8 @@ RSpec.describe Railwatch::Maintenance do
     it "runs only the tasks whose interval has elapsed on later ticks" do
       described_class.tick(now: now)
 
-      expect(described_class.tick(now: now + 90.seconds)).to eq([ "release_health" ])
-      expect(described_class.tick(now: now + 6.minutes)).to match_array(%w[release_health performance_scan anomaly_scan])
+      expect(described_class.tick(now: now + 90.seconds)).to match_array(%w[drain_followups release_health])
+      expect(described_class.tick(now: now + 6.minutes)).to match_array(%w[drain_followups release_health performance_scan anomaly_scan])
     end
 
     it "reports a failing task and still runs the ones after it" do

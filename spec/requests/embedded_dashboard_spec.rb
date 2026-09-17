@@ -17,10 +17,58 @@ RSpec.describe "embedded dashboard", type: :request do
 
   def inertia_headers = { "X-Inertia" => "true", "X-Inertia-Version" => Railwatch::AssetsHelper.digest }
 
-  def local_write!(records)
-    result = Railwatch::Transport::Local.new(Railwatch.config).deliver(records)
+  def local_write!(records, batch_id: SecureRandom.uuid)
+    result = Railwatch::Transport::Local.new(Railwatch.config).deliver(records, batch_id: batch_id)
     expect(result.ok).to be(true), result.error.to_s
     result
+  end
+
+  def telemetry(&) = Railwatch::Environment.current.with_telemetry(&)
+
+  it "writes a batch exactly once when the reporter replays it with the same id" do
+    get "/widgets"
+    records = railwatch_records
+    id = SecureRandom.uuid
+
+    first = local_write!(records, batch_id: id)
+    replay = local_write!(records, batch_id: id)
+
+    expect(first.accepted).to eq(replay.accepted)
+    expect(telemetry { Railwatch::Telemetry::IngestBatch.where(batch_id: id).count }).to eq(1)
+    expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
+  end
+
+  it "asks the reporter to retry a batch whose write failed, and counts a malformed record as rejected rather than failing" do
+    get "/widgets"
+    records = railwatch_records
+    allow(Railwatch::Ingest::Writer).to receive(:new).and_raise(ActiveRecord::StatementInvalid, "database is locked")
+    locked = Railwatch::Transport::Local.new(Railwatch.config).deliver(records, batch_id: SecureRandom.uuid)
+    expect(locked.ok).to be(false)
+    expect(locked.retryable?).to be(true)
+
+    allow(Railwatch::Ingest::Writer).to receive(:new).and_call_original
+    mixed = Railwatch::Transport::Local.new(Railwatch.config).deliver(records + [ "not a record" ], batch_id: SecureRandom.uuid)
+    expect(mixed.ok).to be(true)
+    expect(mixed.rejected).to eq(1)
+    expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
+  end
+
+  it "leaves a batch's exception grouping on its ledger row when grouping fails, for the maintenance clock to finish" do
+    get "/boom"
+    records = railwatch_records
+    allow(Railwatch::GroupExceptionsJob).to receive(:new).and_raise(RuntimeError, "meta db unavailable")
+
+    local_write!(records)
+
+    pending = telemetry { Railwatch::Telemetry::IngestBatch.with_pending_followups.to_a }
+    expect(pending.size).to eq(1)
+    expect(pending.first.followups["group_exception_ids"]).to be_present
+    expect(Railwatch::Issue.count).to eq(0)
+
+    allow(Railwatch::GroupExceptionsJob).to receive(:new).and_call_original
+    Railwatch::Maintenance.tick
+    expect(Railwatch::Issue.sole.title).to eq("ArgumentError: kaboom")
+    expect(telemetry { Railwatch::Telemetry::IngestBatch.with_pending_followups.count }).to eq(0)
   end
 
   it "writes a request record into the telemetry database and shows it on the requests page" do
@@ -50,6 +98,7 @@ RSpec.describe "embedded dashboard", type: :request do
     expect(enqueued_jobs).to be_empty
 
     issue = Railwatch::Issue.sole
+    expect(telemetry { Railwatch::Telemetry::IngestBatch.with_pending_followups.count }).to eq(0)
     expect(issue.key).to eq("DUMM-1")
     expect(issue.title).to eq("ArgumentError: kaboom")
     expect(issue.environment_id).to eq(1)

@@ -46,11 +46,12 @@ module Railwatch
           next
         end
         next if last_deploy_at && expected.between?(last_deploy_at - DEPLOY_GRACE, last_deploy_at + DEPLOY_GRACE)
+        diagnosis = diagnose(key, expected)
         issue, outcome = Issue.record_occurrence!(
           environment: environment, group_hash: "missed:#{key}", kind: "performance",
-          title: "Scheduled task #{key} missed its run (expected #{expected.utc.iso8601})",
+          title: "Scheduled task #{key} missed its run (expected #{expected.utc.iso8601})#{diagnosis[:title_suffix]}",
           culprit: key, occurred_at: Time.current, deploy: nil, user_ref: nil,
-          sample: { task_key: key, schedule: schedule, last_run: last_run.iso8601, expected: expected.iso8601 })
+          sample: { task_key: key, schedule: schedule, last_run: last_run.iso8601, expected: expected.iso8601 }.merge(diagnosis[:sample]))
         next unless outcome == :new || outcome == :regressed
 
         # Only on a new or regressed issue: the detectors re-run every few minutes
@@ -73,6 +74,31 @@ module Railwatch
     end
 
     private
+
+    # Where the run went, from Solid Queue's own ledger when it is in this
+    # process. A RecurringExecution row is written by the scheduler the moment
+    # it enqueues a run, so its presence without a scheduled_task execution
+    # means "enqueued, never performed" (no worker, or a wedged one); its
+    # absence means the scheduler itself never fired. The hosted platform, and
+    # any adapter other than Solid Queue, only ever sees the absence of the
+    # run and reports it as before.
+    def diagnose(key, expected)
+      return NO_DIAGNOSIS unless defined?(::SolidQueue::RecurringExecution)
+
+      enqueued_at = Railwatch.ignore { ::SolidQueue::RecurringExecution.where(task_key: key).where("run_at >= ?", expected - 1.minute).maximum(:run_at) }
+      workers = Railwatch.ignore { ::SolidQueue::Process.where(kind: "Worker").count }
+      if enqueued_at
+        { title_suffix: workers.zero? ? ": enqueued, but no Solid Queue worker is running" : ": enqueued, not yet performed",
+          sample: { enqueued_at: enqueued_at.iso8601, workers: workers, cause: workers.zero? ? "no_worker" : "backlog" } }
+      else
+        { title_suffix: ": the scheduler never enqueued it",
+          sample: { enqueued_at: nil, workers: workers, cause: "scheduler" } }
+      end
+    rescue StandardError
+      NO_DIAGNOSIS
+    end
+
+    NO_DIAGNOSIS = { title_suffix: "", sample: {} }.freeze
 
     # Sentry Crons marked a monitor OK again on the next successful check-in;
     # the same here: once the task has run inside its window again, the open

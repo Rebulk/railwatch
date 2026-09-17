@@ -127,15 +127,29 @@ RSpec.describe Railwatch::Patches::RunnerCommand do
   end
 
   describe ".interactive?" do
+    # A deployed `rails runner script/x.rb` runs with the app root as its
+    # working directory, so the relative case is judged from there.
     it "classifies by where the code came from, not by what it does" do
       expect(described_class.interactive?("-")).to be(true)
       expect(described_class.interactive?(nil)).to be(true)
       expect(described_class.interactive?("Widget.count")).to be(true)
       expect(described_class.interactive?("/tmp/probe.rb")).to be(true)
       expect(described_class.interactive?("/var/tmp/probe.rb")).to be(true)
-      expect(described_class.interactive?("script/nightly.rb")).to be(false)
+      Dir.chdir(Rails.root) { expect(described_class.interactive?("script/nightly.rb")).to be(false) }
       expect(described_class.interactive?("/opt/app/script/nightly.rb")).to be(false)
       expect(described_class.interactive?(Rails.root.join("script/nightly.rb").to_s)).to be(false)
+    end
+
+    # This gem's own suite runs from a checkout under /tmp. The app's files
+    # are still the app's files there; only a configured scratch path that
+    # sits inside the app keeps matching.
+    it "does not treat the application's own files as scratch when the app lives under a scratch directory" do
+      Railwatch.config.interactive_runner_paths = [ "#{Rails.root}/", "#{Rails.root}/tmp/" ]
+
+      expect(described_class.interactive?(Rails.root.join("script/nightly.rb").to_s)).to be(false)
+      expect(described_class.interactive?(Rails.root.join("tmp/probe.rb").to_s)).to be(true)
+    ensure
+      Railwatch.config.interactive_runner_paths = Railwatch::Configuration::DEFAULT_INTERACTIVE_RUNNER_PATHS.dup
     end
 
     # A relative path is judged by where it resolves, so `runner ../../tmp/x.rb`
@@ -169,7 +183,7 @@ RSpec.describe Railwatch::Patches::RunnerCommand do
     end
 
     it "still reports the exception of a deployed script" do
-      path = write_script(File.join(Dir.pwd, "script", "railwatch_probe_#{Process.pid}.rb"), "")
+      path = write_script(Rails.root.join("script", "railwatch_probe_#{Process.pid}.rb").to_s, "")
       expect { run_unpatched_perform(path, "arg1") { raise "nightly_died" } }.to raise_error("nightly_died")
 
       expect(railwatch_records(:command).sole).not_to include(:interactive)
