@@ -179,6 +179,10 @@ module Railwatch
     private
 
     def enqueue_initial_work
+      # An embedded install has no integration to deliver to and no delivery
+      # jobs to enqueue on; the alert is recorded and that is the end of it.
+      return if integration.nil?
+
       if status == "pending"
         enqueue_delivery!
       elsif status == "collapsed" && alert_rule

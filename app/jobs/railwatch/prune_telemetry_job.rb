@@ -22,7 +22,12 @@ module Railwatch
             Telemetry::LlmCall,
             Telemetry::Profile, Telemetry::Attachment ].freeze
 
-    def perform(environment = nil)
+    # checkpoint: the WAL checkpoint mode run at the end. TRUNCATE (the
+    # default, for a dedicated worker) hands the space back to the filesystem
+    # but blocks every reader and writer while it does; PASSIVE checkpoints
+    # what it can without waiting on anyone, which is what a prune running
+    # inside a Puma worker (Railwatch::Maintenance) must use.
+    def perform(environment = nil, checkpoint: "TRUNCATE")
       return [ Environment.current ].each { |env| self.class.perform_later(env) } if environment.nil?
 
       cutoff = environment.retention_days.days.ago
@@ -40,7 +45,7 @@ module Railwatch
         Telemetry::IngestBatch.where(received_at: ...cutoff).delete_all
         Telemetry::Process.where(booted_at: ...cutoff).delete_all
         Telemetry::HealthSample.where(sampled_at: ...cutoff).delete_all
-        TelemetryRecord.connection.execute("PRAGMA wal_checkpoint(TRUNCATE)") if TelemetryRecord.connection.adapter_name =~ /sqlite/i
+        TelemetryRecord.connection.execute("PRAGMA wal_checkpoint(#{checkpoint})") if TelemetryRecord.connection.adapter_name =~ /sqlite/i
       end
     end
 

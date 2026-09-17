@@ -9,7 +9,7 @@ module Railwatch
       source_root File.expand_path("templates", __dir__)
 
       desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers. " \
-           "With --local, also the two SQLite databases and recurring jobs the in-app dashboard needs."
+           "With --local, also the two SQLite databases the in-app dashboard needs."
 
       class_option :local, type: :boolean, default: false,
                            desc: "Keep telemetry in this app and serve the dashboard at /railwatch: no token, no cloud."
@@ -63,19 +63,6 @@ module Railwatch
         return say_status(:identical, "config/database.yml", :blue) if updated == contents
 
         create_file "config/database.yml", updated, force: true
-      end
-
-      # Rollups, issue detection and pruning run as recurring Solid Queue jobs
-      # in the app's own worker (or Puma with SOLID_QUEUE_IN_PUMA=1).
-      def configure_local_recurring_jobs
-        return unless options[:local]
-        return say("--local: no config/recurring.yml found; schedule the jobs in docs/embedded.md yourself.", :yellow) unless File.exist?("config/recurring.yml")
-
-        contents = File.read("config/recurring.yml")
-        updated = self.class.recurring_yml_with_railwatch(contents)
-        return say_status(:identical, "config/recurring.yml", :blue) if updated == contents
-
-        create_file "config/recurring.yml", updated, force: true
       end
 
       def create_kamal_hook
@@ -190,8 +177,9 @@ module Railwatch
               2. Restart the app and open /railwatch. Put the mount behind your
                  own authentication (a routes constraint or a controller check).
               3. Verify the install:  bin/rails railwatch:doctor
-              4. Rollups and issue detection are Solid Queue recurring jobs
-                 (config/recurring.yml); run a worker, or SOLID_QUEUE_IN_PUMA=1.
+              4. Nothing else to run: Railwatch keeps its own maintenance
+                 (issues, release health, scans, pruning) on a background
+                 thread in every web and worker process. No job worker needed.
           STEPS
           return
         end
@@ -301,50 +289,6 @@ module Railwatch
           lines = insert_lines(lines, stop, entries.join).lines
         end
         lines.join
-      end
-
-      RAILWATCH_RECURRING = <<~YAML
-        railwatch_rollup_catchup:
-          class: Railwatch::RollupCatchupJob
-          schedule: every minute
-        railwatch_performance_scan:
-          class: Railwatch::PerformanceScanJob
-          schedule: every 5 minutes
-        railwatch_anomaly_scan:
-          class: Railwatch::AnomalyScanJob
-          schedule: every 5 minutes
-        railwatch_scheduled_task_scan:
-          class: Railwatch::ScheduledTaskScanJob
-          schedule: every 10 minutes
-        railwatch_auto_resolve_issues:
-          class: Railwatch::AutoResolveIssuesJob
-          schedule: every day at 4am
-        railwatch_prune_telemetry:
-          class: Railwatch::PruneTelemetryJob
-          schedule: every day at 3am
-        railwatch_optimize_telemetry:
-          class: Railwatch::OptimizeTelemetryJob
-          schedule: every day at 3:30am
-      YAML
-
-      # Adds the engine's recurring jobs under development and production in
-      # config/recurring.yml, creating either block when it is missing.
-      def self.recurring_yml_with_railwatch(contents)
-        text = contents
-        %w[development production].each do |env|
-          lines = text.lines
-          start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
-          entries = RAILWATCH_RECURRING.lines.map { |line| "  #{line}" }.join
-          if start.nil?
-            text = "#{text.sub(/\n*\z/, "\n")}\n#{env}:\n#{entries}"
-            next
-          end
-          stop = block_end(lines, start)
-          next if lines[start...stop].any? { |line| line.match?(/\A\s+railwatch_rollup_catchup:/) }
-
-          text = insert_lines(lines, stop, entries)
-        end
-        text
       end
 
       # Index of the first line after the block opened at `start`: the next

@@ -114,10 +114,23 @@ namespace :railwatch do
                    else "cannot check: #{pending}"
                    end, fatal: true)
       end
+      # The maintenance clock runs in web and worker processes, not in this
+      # rake process, so what can be checked here is whether one has ticked.
+      last_tick = begin
+        Railwatch::MaintenanceTask.last_tick_at
+      rescue StandardError
+        nil
+      end
+      check.call(last_tick && last_tick > 10.minutes.ago, "maintenance",
+                 if last_tick
+                   "last tick #{ActiveSupport::Duration.build((Time.current - last_tick).round).inspect} ago"
+                 else
+                   "no tick recorded yet (runs inside the app's web and worker processes, not in rake)"
+                 end)
       recurring = Rails.root.join("config/recurring.yml")
-      scheduled = recurring.exist? && recurring.read.include?("RollupCatchupJob")
-      check.call(scheduled, "recurring jobs",
-                 scheduled ? "RollupCatchupJob in config/recurring.yml" : "RollupCatchupJob missing from config/recurring.yml: rollups will lag")
+      leftover = recurring.exist? && recurring.read.include?("Railwatch::")
+      check.call(!leftover, "recurring.yml",
+                 leftover ? "Railwatch::* jobs listed in config/recurring.yml are no longer needed in embedded mode; remove them" : "no Railwatch entries (none needed)")
     else
     token = config.token.to_s
     check.call(!token.empty?, "token",

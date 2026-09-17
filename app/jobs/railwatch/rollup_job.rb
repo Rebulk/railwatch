@@ -7,7 +7,10 @@ module Railwatch
   # concurrency control discards an enqueue while a run for that bucket is
   # already queued or running (the default :block would let a busy hour pile
   # up thousands of identical jobs). RollupCatchupJob sweeps the current and
-  # previous hour every 5 minutes for anything either debounce dropped.
+  # previous hour on its recurring schedule for anything either debounce
+  # dropped; an embedded install instead runs this once an hour for the
+  # previous hour from Railwatch::Maintenance, since its batches already
+  # fold themselves into the current hour as they land.
   class RollupJob < ApplicationJob
     queue_as :rollups
     limits_concurrency to: 1, key: ->(environment, bucket) { "#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
@@ -72,7 +75,17 @@ module Railwatch
           # and an INSERT per group: a busy hour of queries is 2,000 groups,
           # and this job was 20,000 of the platform's own N+1 records a week.
           Telemetry::Rollup.transaction do
-            Telemetry::Rollup.where(record_type: type, group_hash: groups.keys, bucket: bucket).delete_all
+            # The hour was read outside this transaction (above), so a batch
+            # that landed in between has already been folded into the row
+            # about to be replaced (Ingest::RollupAbsorber). A stored count
+            # higher than the recomputed one means exactly that: keep the
+            # stored row rather than overwrite it with a snapshot that
+            # predates the batch. The next run picks the group up.
+            stored = Telemetry::Rollup.where(record_type: type, group_hash: groups.keys, bucket: bucket).pluck(:group_hash, :count).to_h
+            rows = rows.reject { |row| stored[row[:group_hash]].to_i > row[:count] }
+            next if rows.empty?
+
+            Telemetry::Rollup.where(record_type: type, group_hash: rows.map { |row| row[:group_hash] }, bucket: bucket).delete_all
             rows.each_slice(INSERT_SLICE) { |slice| Telemetry::Rollup.insert_all(slice) }
           end
         end

@@ -30,12 +30,29 @@ module Railwatch
                     execution_preview: latest.execution_preview, deploy: latest.deploy,
                     fingerprint: latest.fingerprint, fingerprint_source: latest.fingerprint_source })
         issue.increment!(:occurrences, group.size - 1) if group.size > 1
-        update_affected_users(environment, issue)
+        update_affected_users(environment, issue) if affected_users_due?(issue, outcome)
         alert(issue, outcome)
       end
     end
 
+    # The affected-user count is a DISTINCT over every retained occurrence of
+    # the group, so on a busy issue it grows with the retention window and
+    # used to run once per batch per group. Once per window per issue, and
+    # always for a new issue, keeps the number fresh at a bounded cost.
+    AFFECTED_USERS_WINDOW = 5.minutes
+    AFFECTED_USERS_AT = Concurrent::Map.new
+
     private
+
+    def affected_users_due?(issue, outcome)
+      now = Time.current
+      return AFFECTED_USERS_AT[issue.id] = now if outcome == :new
+
+      last = AFFECTED_USERS_AT[issue.id]
+      return false if last && now - last < AFFECTED_USERS_WINDOW
+
+      AFFECTED_USERS_AT[issue.id] = now
+    end
 
     def deploy_swap_noise?(environment, row)
       return false unless row.source == "browser" && DEPLOY_NETWORK_ERRORS.include?(row.class_name)

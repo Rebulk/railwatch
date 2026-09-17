@@ -90,6 +90,7 @@ module Railwatch
       Subscribers::ProcessInfo.restart_after_fork!
       Health.restart_after_fork!
       Sessions.restart_after_fork!
+      Maintenance.restart_after_fork!
     end
 
     # --- execution lifecycle -------------------------------------------------

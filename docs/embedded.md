@@ -37,7 +37,6 @@ What `--local` writes, on top of the usual install:
   databases need that form. Each entry's `migrations_paths` points into
   the gem, so `db:prepare` builds the tables from the gem's own
   migrations and nothing is copied into `db/`.
-- The recurring jobs in `config/recurring.yml` (below).
 - `mount Railwatch::Engine, at: "/railwatch"`, as always.
 
 Nothing touches your primary database.
@@ -93,28 +92,36 @@ end
 
 Without one, the dashboard shows a single "Operator".
 
-## Jobs
+## Maintenance
 
-Rollups, issue detection and pruning are Active Job jobs, enqueued from
-ingest and on a schedule. `--local` adds them to `config/recurring.yml`
-for Solid Queue:
+Railwatch needs no job worker and nothing in `config/recurring.yml`.
+The work that keeps the dashboard current happens in two places:
 
-| Job | Schedule | What it does |
+- **As each batch lands.** The reporter thread writes the batch, folds
+  its rows into the hour's rollups, and groups any exceptions into
+  issues, all before it picks up the next batch. Counts, percentiles and
+  the issues list move with every batch.
+- **On Railwatch's own clock.** Every web and worker process runs a
+  `railwatch-maintenance` thread that wakes every 30 seconds. One process
+  at a time runs each task, claimed through a lease row in the
+  `railwatch` database, so a Puma cluster and a Solid Queue worker on the
+  same server do not all prune at once.
+
+| Task | Cadence | What it does |
 | --- | --- | --- |
-| `Railwatch::RollupCatchupJob` | every minute | Reconciles the current and previous hour's rollups from raw rows |
-| `Railwatch::PerformanceScanJob` | every 5 minutes | Threshold breaches become issues |
-| `Railwatch::AnomalyScanJob` | every 5 minutes | Anomaly rules |
-| `Railwatch::ScheduledTaskScanJob` | every 10 minutes | Missed and late scheduled tasks |
-| `Railwatch::AutoResolveIssuesJob` | daily | Resolves issues quiet for 14 days |
-| `Railwatch::PruneTelemetryJob` | daily | Deletes telemetry older than `retention_days` |
-| `Railwatch::OptimizeTelemetryJob` | daily | `ANALYZE` on the telemetry database |
+| release health | every minute | Hourly crash-free aggregates for the current and previous hour |
+| rollup reconcile | hourly | Recomputes the previous hour's rollups from raw rows, for records that arrived after their hour closed |
+| performance scan | every 5 minutes | Threshold breaches become issues |
+| anomaly scan | every 5 minutes | Anomaly rules, when any are enabled |
+| scheduled tasks | every 10 minutes | Missed and late scheduled tasks |
+| auto-resolve | daily | Resolves issues quiet for 14 days |
+| prune | daily | Deletes telemetry older than `retention_days`, then `ANALYZE` |
 
-Run a Solid Queue worker, or set `SOLID_QUEUE_IN_PUMA=1` to run it
-inside Puma on a single server. Rollups themselves do not need a job:
-each batch folds its rows into the hour's rollups as it is written, so
-counts and percentiles on the dashboard move with every batch. The
-catch-up job only reconciles. Without a worker an app still gets live
-rollups but not the scheduled scans that turn thresholds into issues.
+Because the clock lives in the web process, it keeps running when the
+job worker is down, which is exactly when "scheduled task X missed its
+run" needs to be raised. `bin/rails railwatch:doctor` reports the last
+tick. If you installed a pre-release that added `Railwatch::*` entries to
+`config/recurring.yml`, remove them; the doctor says so too.
 
 ## Settings
 

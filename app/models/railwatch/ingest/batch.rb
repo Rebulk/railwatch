@@ -84,15 +84,14 @@ module Railwatch
         [ factor, 1.0 ].max
       end
 
-      # Puma runs one process with a pool of threads in this app (see bin/dev),
-      # so a plain Concurrent::Map keyed by environment id is enough to
-      # throttle across every thread writing batches -- no need for Rails.cache
+      # A plain Concurrent::Map keyed by environment id throttles across every
+      # thread writing batches in this process -- no need for Rails.cache
       # (which is :null_store in test anyway, so it wouldn't throttle there at
-      # all) or a database column. This does not coordinate across separate
-      # Puma *worker processes*; under cluster mode a busy environment could
-      # broadcast up to once per 2s per worker instead of once globally, which
-      # is fine since these broadcasts are only a "data changed, go refetch"
-      # ping, not the data itself.
+      # all) or a database column. It does not coordinate across separate
+      # Puma *worker processes*: a host running cluster mode broadcasts up to
+      # once per 2s per worker instead of once globally, which is fine since
+      # these broadcasts are only a "data changed, go refetch" ping, not the
+      # data itself.
       LAST_BROADCAST_AT = Concurrent::Map.new
       THROTTLE_WINDOW = 2.seconds
 
@@ -187,12 +186,27 @@ module Railwatch
         Rails.logger.info("ingest truncated #{@truncations.size} field(s) for #{@environment.slug}: #{counts.to_json}")
       end
 
+      # Embedded: nothing is enqueued, ever. The host may have no worker, and
+      # its queue adapter may be its primary database, which this gem never
+      # writes. Exceptions are grouped here, right after the batch commits;
+      # rollups were folded in by absorb_rollups!; release health and the
+      # detectors run from Railwatch::Maintenance on its own clock.
       def enqueue_followups
+        return group_exceptions_now if @embedded
+
         GroupExceptionsJob.perform_later(@environment, @exception_ids) if @exception_ids.any?
-        # Embedded batches folded themselves into the rollups already;
-        # RollupCatchupJob reconciles the hour on its schedule.
-        @rollup_buckets.each { |bucket| RollupJob.perform_later(@environment, bucket) if rollup_due?(bucket) } unless @embedded
+        @rollup_buckets.each { |bucket| RollupJob.perform_later(@environment, bucket) if rollup_due?(bucket) }
         @session_buckets.each { |bucket| ReleaseHealthRollupJob.perform_later(@environment, bucket) }
+      end
+
+      # Outside the telemetry transaction (it writes the railwatch database),
+      # and a failure here must not fail a batch that has already committed.
+      def group_exceptions_now
+        return if @exception_ids.empty?
+
+        GroupExceptionsJob.new.perform(@environment, @exception_ids)
+      rescue StandardError => e
+        Rails.error.report(e, handled: true, context: { ingest_group_exceptions: @environment.slug })
       end
 
       # In-process there is no worker to recompute the hour and someone may

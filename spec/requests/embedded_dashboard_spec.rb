@@ -43,11 +43,11 @@ RSpec.describe "embedded dashboard", type: :request do
     expect(page["props"]["execution"]).to include("name" => "GET /widgets(.:format)", "kind" => "request")
   end
 
-  it "groups a raised exception into an issue with the app's prefix and lists it" do
+  it "groups a raised exception into an issue as the batch lands, without touching the host's job queue" do
     get "/boom"
     result = local_write!(railwatch_records)
     expect(result.rejected).to eq(0)
-    perform_enqueued_jobs(only: Railwatch::GroupExceptionsJob)
+    expect(enqueued_jobs).to be_empty
 
     issue = Railwatch::Issue.sole
     expect(issue.key).to eq("DUMM-1")

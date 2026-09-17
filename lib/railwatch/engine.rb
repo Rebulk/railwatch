@@ -159,6 +159,17 @@ module Railwatch
       at_exit { Railwatch::Sessions.stop! }
     end
 
+    # The embedded install's maintenance clock (release health, scans,
+    # pruning). Same shape and ordering rationale as "railwatch.health":
+    # stopped before the reporter's final flush. Maintenance.start! is a
+    # no-op unless the transport is local.
+    initializer "railwatch.maintenance" do
+      next unless Railwatch.enabled?
+
+      Railwatch::Maintenance.start!
+      at_exit { Railwatch::Maintenance.stop! }
+    end
+
     # lib/tasks/railwatch_tasks.rake is picked up by Rails::Engine's default
     # lib/tasks convention; the rake_tasks block above only installs the
     # Rake::Task patch.
@@ -168,6 +179,7 @@ end
 require "railwatch/console"
 require "railwatch/health"
 require "railwatch/sessions"
+require "railwatch/maintenance"
 require "railwatch/middleware/request"
 require "railwatch/job_tracing"
 require "railwatch/controller_helpers"

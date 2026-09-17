@@ -553,25 +553,19 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
-    it "schedules the rollup, detection and pruning jobs in config/recurring.yml, keeping what is there" do
+    it "leaves config/recurring.yml alone: maintenance runs on Railwatch's own clock, not Solid Queue" do
       write_file("config/database.yml", flat_database_yml)
-      write_file("config/recurring.yml", <<~YAML)
-        # examples:
-        #   periodic_cleanup:
-        #     class: CleanSoftDeletedRecordsJob
-
+      recurring = <<~YAML
         production:
           clear_solid_queue_finished_jobs:
             command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
             schedule: every hour at minute 12
       YAML
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      write_file("config/recurring.yml", recurring)
+      output = Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
 
-      yml = YAML.safe_load(read("config/recurring.yml"))
-      expect(yml["production"]["clear_solid_queue_finished_jobs"]["schedule"]).to eq("every hour at minute 12")
-      expect(yml["production"]["railwatch_rollup_catchup"]).to eq("class" => "Railwatch::RollupCatchupJob", "schedule" => "every minute")
-      expect(yml["production"]["railwatch_prune_telemetry"]["class"]).to eq("Railwatch::PruneTelemetryJob")
-      expect(yml["development"]["railwatch_rollup_catchup"]["class"]).to eq("Railwatch::RollupCatchupJob")
+      expect(read("config/recurring.yml")).to eq(recurring)
+      expect(output).to include("No job worker needed")
     end
 
     it "changes nothing on a second run" do

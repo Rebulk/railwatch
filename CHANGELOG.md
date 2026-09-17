@@ -12,16 +12,33 @@
   in-process; everything else about sampling, redaction and buffering is
   unchanged. The installer adds the databases (migrated from the gem's own
   migration history, so a gem update is followed by `db:prepare` and
-  nothing else), the recurring
-  Solid Queue jobs (rollups, issue detection, pruning), and an
+  nothing else) and an
   initializer with `issue_prefix`, `repository_url`, `retention_days`
   and a `dashboard_user` resolver. `railwatch:doctor`, `railwatch:status`
   and `railwatch:deploy` understand the mode. See docs/embedded.md.
+- Embedded mode needs no job worker. Exceptions are grouped into issues
+  as each batch lands, and release health, threshold and anomaly scans,
+  missed scheduled tasks, auto-resolve and pruning run from
+  `Railwatch::Maintenance`, a clocked thread in every web and worker
+  process (one process per server runs each task, leased through the new
+  `railwatch_maintenance_tasks` table). Nothing goes through Active Job,
+  so the gem never writes the host's queue adapter, and a dead worker
+  cannot hide its own missed runs. The installer no longer edits
+  `config/recurring.yml`; remove any `Railwatch::*` entries a pre-release
+  added there.
 - Embedded ingest folds each batch into the hourly rollups as it lands
   (`Ingest::RollupAbsorber`), so the dashboard's counts and percentiles
   move with every batch; the hosted platform's per-batch RollupJob
   recompute is not enqueued in embedded mode and the minute-long
-  aggregate cache is bypassed there. RollupCatchupJob still reconciles.
+  aggregate cache is bypassed there.
+- `RollupJob` no longer overwrites a rollup that a batch folded into
+  between its read and its write: a stored count higher than the
+  recomputed one is kept, and the next run picks the group up.
+- `PruneTelemetryJob` takes `checkpoint:`; the embedded clock prunes with
+  a PASSIVE WAL checkpoint so it never blocks the app's own readers.
+- The affected-user count on an issue is recomputed at most once every
+  five minutes per issue (and always for a new one) instead of on every
+  batch that touched the group.
 - The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
 
 ## 0.1.4 (2026-09-15)
