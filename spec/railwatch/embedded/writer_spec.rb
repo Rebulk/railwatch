@@ -128,6 +128,22 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
     end
 
+    it "retains once the plugin marks a writer expected, even on a transport built before it did (rails server boots the app first)" do
+      built_early = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path)
+      records = records_for("/widgets")
+      expect(Railwatch::Writer.expected?).to be(false)
+
+      Railwatch::Writer.expected!
+      result = built_early.deliver(records, batch_id: SecureRandom.uuid)
+
+      expect(result.ok).to be(false)
+      expect(result.retryable?).to be(true)
+      expect(built_early.fallback?).to be(false)
+      expect(telemetry { Railwatch::Telemetry::Execution.count }).to eq(0)
+    ensure
+      Railwatch::Writer.instance_variable_set(:@expected, false)
+    end
+
     it "treats a stale socket inode with no writer behind it as no writer, not as a permanent retry" do
       File.write(socket_path, "")
       alone = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: false)

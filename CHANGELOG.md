@@ -88,6 +88,16 @@
   five minutes per issue (and always for a new one) instead of on every
   batch that touched the group.
 - The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
+- Puma workers under the plugin actually use the writer. The socket
+  transport captured "is a writer expected" when it was built, and
+  `rails server` builds the reporter (app boot) before Puma evaluates
+  `config/puma.rb` (where the plugin sets the flag), so every worker
+  inherited a transport that expected no writer, missed the socket once
+  during the writer's startup, and wrote its own batches in-process for
+  the rest of its life. The flag is now read at delivery time. On the
+  dogfood host this is the difference between a reporter thread at 3.6 ms
+  of CPU per request in each worker and one at 0.2 ms, with the writer
+  process doing the 2.8 ms.
 - The per-record memory estimate on the request thread
   (`Record.buffered_bytes`, run once for every query, cache event and log
   line an execution buffers) walks a record in one loop instead of one

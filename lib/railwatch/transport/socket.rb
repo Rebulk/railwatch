@@ -35,7 +35,7 @@ module Railwatch
       def initialize(config, path: nil, expected: nil)
         @config = config
         @path = path || config.writer_socket_path
-        @expected = expected.nil? ? Writer.expected? : expected
+        @expected = expected
         # A path the kernel cannot bind (over 108 bytes on Linux) can never
         # have a writer behind it; do not spend a batch finding out.
         @fallback = Writer.usable_path?(@path) ? nil : Local.new(config)
@@ -46,6 +46,15 @@ module Railwatch
 
       def fallback? = !@fallback.nil?
 
+      # Read when a batch misses, not when the transport is built: under
+      # `rails server` the app boots (and the reporter picks this transport)
+      # before Puma evaluates config/puma.rb, so the plugin's Writer.expected!
+      # lands after construction, and the workers inherit a copy of this
+      # object at fork. A flag captured here at construction was always false
+      # in every worker, and the first flush before the writer was listening
+      # fell back to in-process writes for the life of the worker.
+      def expected? = @expected.nil? ? Writer.expected? : @expected
+
       def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: nil)
         return @fallback.deliver(records, dropped: dropped, dropped_bytes: dropped_bytes,
                                  backpressure_factor: backpressure_factor, batch_id: batch_id) if @fallback
@@ -55,7 +64,7 @@ module Railwatch
         reply = exchange(payload)
         Result.new(**reply.slice("ok", "status", "accepted", "rejected", "rejections", "error", "retryable_error").transform_keys(&:to_sym))
       rescue Errno::ENOENT, Errno::ECONNREFUSED, Errno::ENOTSOCK => e
-        if @expected
+        if expected?
           Railwatch.debug { "writer not answering at #{@path} (#{e.class}); retaining the batch" }
           return Result.new(ok: false, error: "writer unavailable: #{e.message}", retryable_error: true)
         end
