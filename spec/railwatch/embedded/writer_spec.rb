@@ -114,6 +114,43 @@ RSpec.describe Railwatch::Writer, type: :request do
     end
   end
 
+  describe "the wedge guard" do
+    # The in-flight table is process state; other examples in this file drive
+    # Writer.handle on a thread, so start each example from an empty table.
+    before { described_class.instance_variable_get(:@in_flight).clear }
+
+    it "sees a write that is still running, and nothing once it has finished" do
+      gate = Queue.new
+      thread = Thread.new { described_class.track_in_flight("b1") { gate.pop } }
+      sleep 0.01 until described_class.oldest_in_flight
+
+      expect(described_class.oldest_in_flight).to be >= 0
+      gate << :go
+      thread.join(1)
+      expect(described_class.oldest_in_flight).to be_nil
+    end
+
+    it "exits the process once a write has run past WEDGE_TIMEOUT so Puma respawns a fresh writer" do
+      stub_const("Railwatch::Writer::WEDGE_TIMEOUT", 0)
+      stub_const("Railwatch::Writer::PARENT_POLL", 0.01)
+      exits = Queue.new
+      allow(described_class).to receive(:exit!) { |code| exits << code; Thread.current.kill }
+      allow(Railwatch).to receive(:notify_unrecoverable)
+
+      gate = Queue.new
+      writing = Thread.new { described_class.track_in_flight("stuck") { gate.pop } }
+      sleep 0.01 until described_class.oldest_in_flight
+      watcher = described_class.watch_wedge
+      code = Timeout.timeout(2) { exits.pop }
+      watcher.join(1)
+      gate << :go
+      writing.join(1)
+
+      expect(code).to eq(75)
+      expect(Railwatch).to have_received(:notify_unrecoverable).with(an_instance_of(Railwatch::Writer::WedgedError))
+    end
+  end
+
   describe ".fork_writer!" do
     it "makes the child the writer before ForkTracker's reset runs, and restores the parent" do
       seen = nil

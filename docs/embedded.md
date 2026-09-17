@@ -117,6 +117,14 @@ the same byte ceiling and backoff as the HTTP transport, and every
 batch carries an id the writer records inside the write transaction, so
 a batch delivered twice is written once.
 
+The writer judges its own health. A single batch write that runs past
+sixty seconds is a stuck writer, not a slow one (a lock that never
+clears, a lost connection), and the process exits so Puma restarts it;
+the batch is retained on the worker and written by the new writer. The
+doctor reports both whether the socket answers and when the last batch
+was actually written, since a process that is alive and a process that
+is doing its job are different questions.
+
 A process that has no writer to talk to (`bin/rails runner`, a Solid
 Queue worker, a `rails server` without the plugin, the test suite)
 notices the socket is absent, says so once under `RAILWATCH_DEBUG`, and

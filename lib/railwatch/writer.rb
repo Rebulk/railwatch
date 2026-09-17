@@ -20,10 +20,20 @@ module Railwatch
     THREADS = 2
     MAX_REQUEST_BYTES = 64 << 20
     PARENT_POLL = 2
+    # A batch write that has run this long is not slow, it is stuck: a
+    # SQLite lock that never clears, a t-digest on a pathological input, a
+    # connection pool that lost a connection. The supervisor cannot tell a
+    # wedged writer from a busy one (kill 0 answers for both), so the writer
+    # judges itself: past this the process exits and the plugin respawns it.
+    # The batch is retained on the worker, retried, and written by the new
+    # writer, with the ledger making that safe.
+    WEDGE_TIMEOUT = 60
 
     @running = false
     @server = nil
     @stopping = false
+    @in_flight = {}
+    @in_flight_mutex = Mutex.new
 
     module_function
 
@@ -91,6 +101,7 @@ module Railwatch
       Railwatch.reporter.ensure_thread
       Maintenance.start!
       watch_parent(parent) if parent
+      watch_wedge
       serve
     ensure
       cleanup(path)
@@ -107,7 +118,7 @@ module Railwatch
     # batch, reply. Public so a spec can drive it without a real socket.
     def handle(sock)
       request = read_request(sock)
-      result = write_batch(request)
+      result = track_in_flight(request["batch_id"]) { write_batch(request) }
       reply = JSON.generate(result.to_h)
       sock.write([ reply.bytesize ].pack("N"), reply)
     rescue StandardError => e
@@ -189,6 +200,42 @@ module Railwatch
         end
       end
     end
+
+    def track_in_flight(batch_id)
+      key = batch_id || Thread.current.object_id
+      @in_flight_mutex.synchronize { @in_flight[key] = Clock.monotonic }
+      yield
+    ensure
+      @in_flight_mutex.synchronize { @in_flight.delete(key) }
+    end
+
+    # The oldest write still running, in seconds, or nil.
+    def oldest_in_flight
+      @in_flight_mutex.synchronize do
+        started = @in_flight.values.min
+        started && Clock.monotonic - started
+      end
+    end
+
+    # Exits the process, with a note, the moment any single write has run
+    # past WEDGE_TIMEOUT. Deliberately exit! and not stop!: a stuck write is
+    # holding whatever is stuck, and a graceful drain would wait on it.
+    def watch_wedge
+      Thread.new do
+        Thread.current.name = "railwatch-writer-wedge"
+        until @stopping
+          sleep PARENT_POLL
+          age = oldest_in_flight
+          next unless age && age > WEDGE_TIMEOUT
+
+          warn "[railwatch] writer: a batch write has run #{age.round}s (limit #{WEDGE_TIMEOUT}s); exiting so Puma restarts the writer"
+          Railwatch.notify_unrecoverable(WedgedError.new("writer batch write exceeded #{WEDGE_TIMEOUT}s"))
+          exit!(75)
+        end
+      end
+    end
+
+    class WedgedError < StandardError; end
 
     def trap_signals
       %w[TERM INT].each do |signal|

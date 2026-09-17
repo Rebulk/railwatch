@@ -144,6 +144,23 @@ namespace :railwatch do
                    else
                      "not configured: add `plugin :railwatch` to config/puma.rb so batches are written outside the web workers"
                    end)
+        # A socket that answers is a process that is alive; the ledger is
+        # what says it is doing its job. Nothing written in a while with the
+        # app serving traffic is a writer that is stuck or a worker that is
+        # not reaching it.
+        if listening
+          last_write = begin
+            Railwatch::Environment.current.with_telemetry { Railwatch::Telemetry::IngestBatch.maximum(:received_at) }
+          rescue StandardError
+            nil
+          end
+          check.call(last_write && last_write > 5.minutes.ago, "last write",
+                     if last_write
+                       "#{ActiveSupport::Duration.build((Time.current - last_write).round).inspect} ago"
+                     else
+                       "no batch written yet"
+                     end)
+        end
       end
       recurring = Rails.root.join("config/recurring.yml")
       leftover = recurring.exist? && recurring.read.include?("Railwatch::")
