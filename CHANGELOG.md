@@ -88,6 +88,11 @@
   five minutes per issue (and always for a new one) instead of on every
   batch that touched the group.
 - The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
+- The per-record memory estimate on the request thread
+  (`Record.buffered_bytes`, run once for every query, cache event and log
+  line an execution buffers) walks a record in one loop instead of one
+  method call per value: 6.2 to 2.7 us for a query record, about 120 us
+  off a 20-query request. Same numbers, same depth bound.
 
 ## 0.1.4 (2026-09-15)
 
