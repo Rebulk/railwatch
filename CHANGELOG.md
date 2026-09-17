@@ -40,8 +40,8 @@
   maintenance clock all run in a process whose interpreter no request
   shares. The writer is restarted by Puma if it dies and stops with it;
   a process with no writer (a runner, a Solid Queue worker, a server
-  without the plugin) falls back to writing in-process after three
-  attempts. The doctor reports whether the writer is listening. Measured
+  without the plugin) writes in-process from its first miss. The doctor
+  reports whether the writer is listening. Measured
   on a two-worker Puma host under five minutes of open-loop load with
   every record sampled: all-paths p95 817 ms with the writer against
   938 ms writing on the worker threads and 716 ms with Railwatch off, and
