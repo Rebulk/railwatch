@@ -45,6 +45,11 @@ RSpec.describe "embedded dashboard", type: :request do
     locked = Railwatch::Transport::Local.new(Railwatch.config).deliver(records, batch_id: SecureRandom.uuid)
     expect(locked.ok).to be(false)
     expect(locked.retryable?).to be(true)
+    # The failure stays Railwatch's: the executor must not have reported it
+    # to Rails.error, where Railwatch would capture it as an app exception
+    # and open an issue about itself (seen on the first boot of a dogfood
+    # host, before the telemetry database was migrated).
+    expect(railwatch_records(:exception)).to be_empty
 
     allow(Railwatch::Ingest::Writer).to receive(:new).and_call_original
     mixed = Railwatch::Transport::Local.new(Railwatch.config).deliver(records + [ "not a record" ], batch_id: SecureRandom.uuid)
