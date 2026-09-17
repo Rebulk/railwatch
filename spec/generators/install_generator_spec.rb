@@ -553,6 +553,28 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
+    it "adds the writer plugin to config/puma.rb once, at the end, and only with --local" do
+      write_file("config/database.yml", flat_database_yml)
+      puma = "threads 3, 3\nport ENV.fetch(\"PORT\", 3000)\nplugin :tmp_restart\n"
+      write_file("config/puma.rb", puma)
+
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      updated = read("config/puma.rb")
+      expect(updated).to start_with(puma)
+      expect(updated.scan("plugin :railwatch").size).to eq(1)
+      expect(updated).to end_with("plugin :railwatch if defined?(Railwatch)\n")
+    end
+
+    it "leaves config/puma.rb alone without --local" do
+      write_file("config/puma.rb", "plugin :tmp_restart\n")
+
+      Dir.chdir(destination_root) { run_generator }
+
+      expect(read("config/puma.rb")).to eq("plugin :tmp_restart\n")
+    end
+
     it "leaves config/recurring.yml alone: maintenance runs on Railwatch's own clock, not Solid Queue" do
       write_file("config/database.yml", flat_database_yml)
       recurring = <<~YAML

@@ -61,7 +61,7 @@ module Railwatch
     ].freeze
 
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
-                  :issue_prefix, :repository_url, :retention_days, :dashboard_user,
+                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -95,6 +95,11 @@ module Railwatch
       @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
       @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
       @dashboard_user = nil
+      # Embedded mode's writer process (lib/railwatch/writer.rb): the Unix
+      # socket the Puma workers hand their batches to. Relative paths are
+      # under Rails.root. nil disables the writer and every process writes
+      # its own batches, as before.
+      @writer_socket = ENV.fetch("RAILWATCH_WRITER_SOCKET", "tmp/sockets/railwatch-writer.sock")
       @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://railwatch.rebulk.com")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
@@ -251,6 +256,15 @@ module Railwatch
     # :local writes telemetry into the engine's own database in-process;
     # anything else ships it to ingest_url over HTTPS.
     def local? = transport.to_s == "local"
+
+    # Absolute path of the writer socket, or nil when the writer is off.
+    def writer_socket_path
+      path = writer_socket.to_s
+      return nil if path.empty?
+
+      root = defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd
+      File.expand_path(path, root)
+    end
 
     # Who the embedded dashboard shows as the signed-in operator. A host
     # passes a lambda taking the request (cookies, warden, whatever it uses)

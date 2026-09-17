@@ -18,7 +18,7 @@ module Railwatch
   # A task must never be visible to the app it is maintaining: each body runs
   # inside Railwatch.ignore and rescues everything.
   module Maintenance
-    ROLES = %w[web worker].freeze
+    ROLES = %w[web worker writer].freeze
     TICK = 30
     FOLLOWUP_BATCHES_PER_TICK = 200
 
@@ -83,6 +83,9 @@ module Railwatch
       return unless Railwatch.enabled? && Railwatch.config.local?
       return if defined?(Rails) && Rails.env.test?
       return unless ROLES.include?(Subscribers::ProcessInfo.role)
+      # With a writer process listening, it is the one clock. The lease table
+      # would keep two clocks honest, but there is no reason to run a second.
+      return if !Writer.running? && Writer.listening?
       return if @thread&.alive? && @pid == Process.pid
 
       @mutex.synchronize do

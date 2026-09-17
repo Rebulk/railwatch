@@ -92,20 +92,50 @@ end
 
 Without one, the dashboard shows a single "Operator".
 
+## The writer process
+
+Puma forks one Railwatch writer from its master when `config/puma.rb`
+carries the plugin (`--local` adds it):
+
+```ruby
+plugin :railwatch if defined?(Railwatch)
+```
+
+Every web worker keeps its reporter thread, but instead of writing
+SQLite it hands each batch to the writer over a Unix socket
+(`tmp/sockets/railwatch-writer.sock`, `RAILWATCH_WRITER_SOCKET`). The
+writer maps the records, writes both databases, folds the rollups,
+groups exceptions into issues and runs the maintenance clock below. It
+is the only process that ever holds the telemetry database's write lock,
+and its Ruby interpreter is its own, so none of that work is ever
+interleaved with a request. Same shape as Solid Queue's
+`solid_queue_mode :fork`: it exits when Puma does, and Puma restarts it
+if it dies. While it is down the reporter keeps batches in memory, with
+the same byte ceiling and backoff as the HTTP transport, and every
+batch carries an id the writer records inside the write transaction, so
+a batch delivered twice is written once.
+
+A process that has no writer to talk to (`bin/rails runner`, a Solid
+Queue worker, a `rails server` without the plugin, the test suite)
+notices the socket is absent, says so once under `RAILWATCH_DEBUG`, and
+writes its own batches in-process for the rest of its life. Nothing is
+lost either way; what changes is which process pays for the write.
+
 ## Maintenance
 
 Railwatch needs no job worker and nothing in `config/recurring.yml`.
 The work that keeps the dashboard current happens in two places:
 
-- **As each batch lands.** The reporter thread writes the batch, folds
-  its rows into the hour's rollups, and groups any exceptions into
-  issues, all before it picks up the next batch. Counts, percentiles and
-  the issues list move with every batch.
-- **On Railwatch's own clock.** Every web and worker process runs a
-  `railwatch-maintenance` thread that wakes every 30 seconds. One process
-  at a time runs each task, claimed through a lease row in the
-  `railwatch` database, so a Puma cluster and a Solid Queue worker on the
-  same server do not all prune at once.
+- **As each batch lands.** The writer writes the batch, folds its rows
+  into the hour's rollups, and groups any exceptions into issues, all
+  before it picks up the next batch. Counts, percentiles and the issues
+  list move with every batch.
+- **On Railwatch's own clock.** The writer runs a `railwatch-maintenance`
+  thread that wakes every 30 seconds. Without a writer, every web and
+  worker process runs one, and one process at a time runs each task,
+  claimed through a lease row in the `railwatch` database, so a Puma
+  cluster and a Solid Queue worker on the same server do not all prune
+  at once.
 
 | Task | Cadence | What it does |
 | --- | --- | --- |

@@ -31,6 +31,17 @@
   move with every batch; the hosted platform's per-batch RollupJob
   recompute is not enqueued in embedded mode and the minute-long
   aggregate cache is bypassed there.
+- Embedded mode gets a writer process. `plugin :railwatch` in
+  `config/puma.rb` (added by `--local`) forks one `Railwatch::Writer`
+  from the Puma master, the way Solid Queue's in-Puma mode does. Web
+  workers hand their batches to it over a Unix socket
+  (`Transport::Socket`) instead of writing SQLite on their own reporter
+  thread, so mapping, the write lock, rollups, issue grouping and the
+  maintenance clock all run in a process whose interpreter no request
+  shares. The writer is restarted by Puma if it dies and stops with it;
+  a process with no writer (a runner, a Solid Queue worker, a server
+  without the plugin) falls back to writing in-process after three
+  attempts. The doctor reports whether the writer is listening.
 - Embedded ingest keeps a delivery ledger. The reporter's batch id is
   stored on the `ingest_batches` row inside the batch's own transaction,
   so a batch the reporter retries after a failure is written once, and

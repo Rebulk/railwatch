@@ -94,13 +94,18 @@ module Railwatch
       end
       private_class_method :serialization_columns_for
 
-      def row_for(rec, truncations: nil, validate_identifiers: true)
-        validate_record!(rec, identifiers: validate_identifiers)
+      # trusted: this record was produced by the gem in this process (an
+      # embedded batch), not parsed from an HTTP body. Validation and the
+      # control-character/encoding scrub are the trust boundary and are
+      # skipped; every limit and cap still applies, since those are a storage
+      # contract rather than a question of who sent the record.
+      def row_for(rec, truncations: nil, validate_identifiers: true, trusted: false)
+        validate_record!(rec, identifiers: validate_identifiers) unless trusted
         type = rec["t"].to_s
         pair = PARENTS.include?(type) ? execution(rec) : mapped(type, rec)
         return nil if pair.nil?
         klass, attrs = pair
-        [ klass, serialize(klass, attrs, truncations: truncations) ]
+        [ klass, serialize(klass, attrs, truncations: truncations, trusted: trusted) ]
       end
 
       def validate_record!(rec, identifiers: true)
@@ -427,13 +432,13 @@ module Railwatch
       # skips SQLite's own DEFAULT clause because it names every column
       # explicitly, so a bare nil would otherwise hit a NOT NULL violation
       # that AR's insert would have silently defaulted around.
-      def serialize(klass, attrs, truncations: nil)
+      def serialize(klass, attrs, truncations: nil, trusted: false)
         out = {}
         serialization_columns_for(klass).each do |name, type, limit, null, default|
           next unless attrs.key?(name)
           value = attrs[name]
           value = default if value.nil? && !null && !default.nil?
-          out[name] = cast_value(value, type, limit, klass: klass, name: name, truncations: truncations)
+          out[name] = cast_value(value, type, limit, klass: klass, name: name, truncations: truncations, trusted: trusted)
         end
         return out if out.size == attrs.size
 
@@ -444,7 +449,7 @@ module Railwatch
         attrs.each do |name, value|
           type, limit, null, default = columns.fetch(name.to_s)
           value = default if value.nil? && !null && !default.nil?
-          out[name] = cast_value(value, type, limit, klass: klass, name: name, truncations: truncations)
+          out[name] = cast_value(value, type, limit, klass: klass, name: name, truncations: truncations, trusted: trusted)
         end
         out
       end
@@ -475,14 +480,14 @@ module Railwatch
         format("%04d-%02d-%02d %02d:%02d:%02d.%06d", t.year, t.month, t.day, t.hour, t.min, t.sec, t.usec)
       end
 
-      def cast_value(value, type, limit, klass: nil, name: nil, truncations: nil)
+      def cast_value(value, type, limit, klass: nil, name: nil, truncations: nil, trusted: false)
         return nil if value.nil?
         if type == :json
           # Health detail is already JSON-encoded on the wire. Decode it before
           # sanitising so the database stores an object, not a JSON string that
           # merely contains another document.
-          value = JSON.parse(sanitize_string(value)) if value.is_a?(String)
-          sanitized = sanitize_json(value)
+          value = JSON.parse(trusted ? value : sanitize_string(value)) if value.is_a?(String)
+          sanitized = trusted ? value : sanitize_json(value)
           encoded = JSON.generate(sanitized)
           replacement = sanitized.is_a?(Array) ? JSON_ARRAY_TRUNCATED : JSON_TRUNCATED
           return cap_text(encoded, text_limit(klass, name), klass, name, truncations, replacement: replacement)
@@ -503,9 +508,9 @@ module Railwatch
         else
           case type
           when :string
-            cap_text(sanitize_string(value.to_s), limit, klass, name, truncations)
+            cap_text(trusted ? value.to_s : sanitize_string(value.to_s), limit, klass, name, truncations)
           when :text
-            cap_text(sanitize_string(value.to_s), text_limit(klass, name), klass, name, truncations)
+            cap_text(trusted ? value.to_s : sanitize_string(value.to_s), text_limit(klass, name), klass, name, truncations)
           when :integer, :bigint
             # Signed: queue_latency and drift are clock differences between an
             # enqueuing host and a worker, and skew makes them negative.

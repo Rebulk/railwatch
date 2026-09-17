@@ -65,6 +65,19 @@ module Railwatch
         create_file "config/database.yml", updated, force: true
       end
 
+      # The writer process: one per Puma master, forked by the gem's Puma
+      # plugin, so batches are mapped and written outside the web workers.
+      def configure_local_writer
+        return unless options[:local]
+        return say("--local: no config/puma.rb found; add `plugin :railwatch` to your Puma config yourself (docs/embedded.md).", :yellow) unless File.exist?("config/puma.rb")
+
+        contents = File.read("config/puma.rb")
+        updated = self.class.puma_rb_with_railwatch(contents)
+        return say_status(:identical, "config/puma.rb", :blue) if updated == contents
+
+        create_file "config/puma.rb", updated, force: true
+      end
+
       def create_kamal_hook
         return unless File.exist?("config/deploy.yml")
         template "post-deploy", ".kamal/hooks/post-deploy"
@@ -177,9 +190,11 @@ module Railwatch
               2. Restart the app and open /railwatch. Put the mount behind your
                  own authentication (a routes constraint or a controller check).
               3. Verify the install:  bin/rails railwatch:doctor
-              4. Nothing else to run: Railwatch keeps its own maintenance
-                 (issues, release health, scans, pruning) on a background
-                 thread in every web and worker process. No job worker needed.
+              4. Nothing else to run. With `plugin :railwatch` in config/puma.rb
+                 (added if the file exists) Puma forks one Railwatch writer
+                 process that writes every batch and runs the maintenance
+                 clock, so no web worker ever holds the telemetry database.
+                 No job worker needed.
           STEPS
           return
         end
@@ -289,6 +304,21 @@ module Railwatch
           lines = insert_lines(lines, stop, entries.join).lines
         end
         lines.join
+      end
+
+      PUMA_PLUGIN_LINES = <<~RUBY
+
+        # Railwatch (embedded): fork one writer process from the Puma master so
+        # telemetry is mapped and written outside the web workers.
+        plugin :railwatch if defined?(Railwatch)
+      RUBY
+
+      # Appends the plugin line once. Puma's config is plain Ruby evaluated top
+      # to bottom, so the end of the file is always a valid place for it.
+      def self.puma_rb_with_railwatch(contents)
+        return contents if contents.include?("plugin :railwatch")
+
+        "#{contents.sub(/\n*\z/, "\n")}#{PUMA_PLUGIN_LINES}"
       end
 
       # Index of the first line after the block opened at `start`: the next

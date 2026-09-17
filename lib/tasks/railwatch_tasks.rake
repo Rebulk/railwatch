@@ -127,6 +127,20 @@ namespace :railwatch do
                  else
                    "no tick recorded yet (runs inside the app's web and worker processes, not in rake)"
                  end)
+      socket_path = config.writer_socket_path
+      if socket_path
+        listening = Railwatch::Writer.listening?(socket_path)
+        puma_rb = Rails.root.join("config/puma.rb")
+        plugged = puma_rb.exist? && puma_rb.read.include?("plugin :railwatch")
+        check.call(listening || plugged, "writer process",
+                   if listening
+                     "listening at #{socket_path}"
+                   elsif plugged
+                     "config/puma.rb has `plugin :railwatch`; the writer starts with Puma (not running now)"
+                   else
+                     "not configured: add `plugin :railwatch` to config/puma.rb so batches are written outside the web workers"
+                   end)
+      end
       recurring = Rails.root.join("config/recurring.yml")
       leftover = recurring.exist? && recurring.read.include?("Railwatch::")
       check.call(!leftover, "recurring.yml",

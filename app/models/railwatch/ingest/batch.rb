@@ -127,7 +127,15 @@ module Railwatch
 
       def map_all
         @records.each do |rec|
-          Ingest::Mapper.validate_record!(rec)
+          if @embedded
+            # These two the mapper's own dispatch depends on; the rest of
+            # validate_record! is the untrusted-input check that an in-process
+            # batch does not need.
+            raise TypeError, "record must be an object" unless rec.is_a?(Hash)
+            raise TypeError, "t must be a string" unless rec["t"].is_a?(String)
+          else
+            Ingest::Mapper.validate_record!(rec)
+          end
           type = rec["t"]
           unless timestamp_in_range?(rec["timestamp"])
             reject(rec, "timestamp out of range")
@@ -138,7 +146,7 @@ module Railwatch
             @counts[type] += 1
             next
           end
-          row = Ingest::Mapper.row_for(rec, truncations: @truncations)
+          row = Ingest::Mapper.row_for(rec, truncations: @truncations, validate_identifiers: !@embedded, trusted: @embedded)
           if row.nil?
             reject(rec, "unknown type")
             next
@@ -168,7 +176,15 @@ module Railwatch
         timestamp = value.to_f
         raise RangeError, "timestamp is not finite" unless timestamp.finite?
 
-        timestamp.between?((@received_at - MAX_PAST_AGE).to_f, (@received_at + MAX_FUTURE_AGE).to_f)
+        min, max = timestamp_bounds
+        timestamp.between?(min, max)
+      end
+
+      # Time - 30.days walks the calendar through ActiveSupport::Duration, and
+      # recomputing both ends per record was 13% of an embedded batch's write.
+      # The window is fixed for the batch; compute it once.
+      def timestamp_bounds
+        @timestamp_bounds ||= [ (@received_at - MAX_PAST_AGE).to_f, (@received_at + MAX_FUTURE_AGE).to_f ]
       end
 
       def bucket_for(value)

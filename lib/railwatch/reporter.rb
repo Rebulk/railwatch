@@ -187,6 +187,12 @@ module Railwatch
     end
 
     def forked_transport
+      # A child may be a different kind of process from its parent: the
+      # writer forked from a Puma master must write SQLite itself, not hand
+      # batches back to the socket it is about to serve.
+      reselected = Railwatch.local_transport if @config.local?
+      return reselected if reselected && reselected.class != @transport.class
+
       transport = @transport.dup
       transport.reset_after_fork! if transport.respond_to?(:reset_after_fork!)
       transport

@@ -22,6 +22,8 @@ require "railwatch/record"
 require "railwatch/buffer"
 require "railwatch/transport/http"
 require "railwatch/transport/local"
+require "railwatch/transport/socket"
+require "railwatch/writer"
 require "railwatch/embedded"
 require "railwatch/ingest_request_body_limit"
 require "railwatch/reporter"
@@ -59,7 +61,17 @@ module Railwatch
     end
 
     def reporter
-      @reporter ||= Reporter.new(config, transport: (Transport::Local.new(config) if config.local?))
+      @reporter ||= Reporter.new(config, transport: local_transport)
+    end
+
+    # Embedded mode: a Puma worker hands its batches to the writer process
+    # over the socket; the writer itself, and any process when no socket is
+    # configured, writes them straight into SQLite. nil means HTTP.
+    def local_transport
+      return nil unless config.local?
+      return Transport::Local.new(config) if Writer.running? || config.writer_socket_path.nil?
+
+      Transport::Socket.new(config)
     end
 
     def redactor
