@@ -66,7 +66,11 @@ module Railwatch
     # ones.
     def prune(klass, cutoff)
       MAX_BATCHES_PER_TABLE.times do
-        ids = klass.where(occurred_at: ...cutoff).order(:occurred_at).limit(BATCH).pluck(:id)
+        # Ordered by (occurred_at, id), not occurred_at alone: rows that tie
+        # on the timestamp at the limit boundary would otherwise be a
+        # different set here than in unindex_logs above, which leaves stale
+        # FTS postings behind and withdraws postings for logs that are staying.
+        ids = klass.where(occurred_at: ...cutoff).order(:occurred_at, :id).limit(BATCH).pluck(:id)
         break if ids.empty?
         klass.where(id: ids).delete_all
         break if ids.size < BATCH
@@ -99,7 +103,7 @@ module Railwatch
     def unindex_logs(cutoff)
       Telemetry::Log.connection.execute(Telemetry::Log.sanitize_sql_array([
         "INSERT INTO logs_fts(logs_fts, rowid, message) SELECT 'delete', id, message FROM logs " \
-        "WHERE occurred_at < ? ORDER BY occurred_at LIMIT ?", cutoff, MAX_BATCHES_PER_TABLE * BATCH
+        "WHERE occurred_at < ? ORDER BY occurred_at, id LIMIT ?", cutoff, MAX_BATCHES_PER_TABLE * BATCH
       ]))
     end
   end

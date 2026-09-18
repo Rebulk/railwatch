@@ -577,6 +577,28 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(yml["development"]["primary"]["adapter"]).to eq("postgresql")
     end
 
+    it "adds the databases to a custom environment, not only development, test and production" do
+      write_file("config/database.yml", <<~YAML)
+        default: &default
+          adapter: sqlite3
+
+        development:
+          <<: *default
+          database: storage/development.sqlite3
+
+        staging:
+          <<: *default
+          database: storage/staging.sqlite3
+      YAML
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
+      expect(yml["staging"]["railwatch_telemetry"]["database"]).to eq("storage/staging_railwatch_telemetry.sqlite3")
+      expect(yml["staging"]["primary"]["database"]).to eq("storage/staging.sqlite3")
+      # The YAML anchor is not an environment.
+      expect(yml).not_to have_key("railwatch")
+    end
+
     it "writes usable entries into a database.yml that has no &default anchor" do
       write_file("config/database.yml", <<~YAML)
         development:

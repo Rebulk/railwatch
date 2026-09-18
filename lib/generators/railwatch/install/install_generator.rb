@@ -369,7 +369,7 @@ module Railwatch
         lines = lines.map do |line|
           line.sub(%r{\A(\s+)# database: path/to/persistent/storage/(\S+)$}, '\1database: storage/\2')
         end
-        %w[development test production].each do |env|
+        environments_in(lines).each do |env|
           start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
           next unless start
 
@@ -406,6 +406,18 @@ module Railwatch
         return contents if contents.include?("plugin :railwatch")
 
         "#{contents.sub(/\n*\z/, "\n")}#{PUMA_PLUGIN_LINES}"
+      end
+
+      # Every environment the file defines, not a fixed three: an app with a
+      # `staging` (or `review`, or `qa`) environment needs the databases
+      # there too, and hardcoding names silently left it without them. A
+      # top-level key with a block under it, minus YAML's own anchors.
+      NON_ENVIRONMENT_KEYS = %w[default shared].freeze
+
+      def self.environments_in(lines)
+        lines.filter_map { |line| line[/\A([a-z_][a-z0-9_]*):\s*(?:&\S+\s*)?(?:#.*)?$/, 1] }
+             .reject { |name| NON_ENVIRONMENT_KEYS.include?(name) }
+             .uniq
       end
 
       # Index of the first line after the block opened at `start`: the next
