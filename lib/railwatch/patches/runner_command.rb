@@ -107,13 +107,33 @@ module Railwatch
       # Expanded so a relative path is judged by where it actually resolves.
       # An argument File.expand_path refuses (a "~nobody/x.rb") is matched
       # as-is rather than assumed interactive: when in doubt, report.
+      #
+      # A scratch directory that contains the application itself is not a
+      # scratch directory for the application's own files: an app checked out
+      # under /tmp (a CI runner, a throwaway worktree) must not have its
+      # script/ classified as a shell session because of where the checkout
+      # lives. A scratch path inside the app (an operator's own
+      # `Rails.root/tmp/`) is left alone by this rule and still matches.
       def self.scratch?(argument)
         path = begin
           File.expand_path(argument)
         rescue StandardError
           argument
         end
-        Railwatch.config.interactive_runner_paths.any? { |directory| path.start_with?(directory) }
+        root = application_root
+        Railwatch.config.interactive_runner_paths.any? do |directory|
+          next false if root && "#{root}/".start_with?(directory) && path.start_with?("#{root}/")
+
+          path.start_with?(directory)
+        end
+      end
+
+      def self.application_root
+        return nil unless defined?(Rails) && Rails.respond_to?(:root) && Rails.root
+
+        Rails.root.to_s
+      rescue StandardError
+        nil
       end
     end
   end

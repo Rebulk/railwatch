@@ -21,6 +21,13 @@ require "railwatch/current"
 require "railwatch/record"
 require "railwatch/buffer"
 require "railwatch/transport/http"
+require "railwatch/transport/local"
+require "railwatch/transport/socket"
+require "railwatch/writer"
+require "railwatch/authentication"
+require "railwatch/json_compat"
+require "railwatch/embedded"
+require "railwatch/ingest_request_body_limit"
 require "railwatch/reporter"
 require "railwatch/sampler"
 require "railwatch/redactor"
@@ -56,7 +63,17 @@ module Railwatch
     end
 
     def reporter
-      @reporter ||= Reporter.new(config)
+      @reporter ||= Reporter.new(config, transport: local_transport)
+    end
+
+    # Embedded mode: a Puma worker hands its batches to the writer process
+    # over the socket; the writer itself, and any process when no socket is
+    # configured, writes them straight into SQLite. nil means HTTP.
+    def local_transport
+      return nil unless config.local?
+      return Transport::Local.new(config) if Writer.running? || config.writer_socket_path.nil?
+
+      Transport::Socket.new(config)
     end
 
     def redactor
@@ -87,6 +104,7 @@ module Railwatch
       Subscribers::ProcessInfo.restart_after_fork!
       Health.restart_after_fork!
       Sessions.restart_after_fork!
+      Maintenance.restart_after_fork!
     end
 
     # --- execution lifecycle -------------------------------------------------
@@ -547,4 +565,23 @@ module Railwatch
 end
 
 require "railwatch/subscribers"
+require "railwatch/dashboard_assets"
+
+module Railwatch
+  # Where the engine's two databases migrate from. database.yml names them
+  # (`migrations_paths: <%= Railwatch.migrations_path(:railwatch) %>`) so a
+  # host's db:prepare creates the tables on install and migrates them after
+  # every gem update, from the gem's own history, the way Active Storage
+  # migrates its tables. Nothing is copied into the app.
+  def self.migrations_path(database)
+    File.expand_path("../db/#{database}_migrate", __dir__)
+  end
+
+  # Raised when the engine's models are used in an app whose database.yml
+  # has no entry for them. They must never fall back to the host's primary
+  # connection: the telemetry tables are unprefixed (`sessions`, `visits`,
+  # `people`, `notifications`, `logs`), so a query there would read, and a
+  # write would corrupt, the application's own tables.
+  class DatabaseNotConfigured < StandardError; end
+end
 require "railwatch/engine" if defined?(Rails::Engine)

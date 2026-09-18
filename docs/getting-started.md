@@ -4,6 +4,11 @@ Five minutes from `bundle add` to a request on the dashboard, on a
 Rails 8 app. Everything below is the gem's own generator and rake tasks;
 nothing else has to be wired by hand.
 
+Running one server and want the dashboard inside the app itself, with
+no token and no cloud? That is `bin/rails generate railwatch:install
+--local`; see [Embedded mode](embedded.md). The rest of this page is
+the cloud install.
+
 ## 1. Add the gem
 
 ```sh

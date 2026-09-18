@@ -8,8 +8,11 @@ module Railwatch
     class InstallGenerator < Rails::Generators::Base
       source_root File.expand_path("templates", __dir__)
 
-      desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers."
+      desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers. " \
+           "With --local, also the two SQLite databases the in-app dashboard needs."
 
+      class_option :local, type: :boolean, default: false,
+                           desc: "Keep telemetry in this app and serve the dashboard at /railwatch: no token, no cloud."
       class_option :token, type: :string,
                            desc: "Deprecated: token in process arguments. Prefer --prompt-token, --token-stdin, or RAILWATCH_TOKEN."
       class_option :prompt_token, type: :boolean, default: false,
@@ -41,6 +44,75 @@ module Railwatch
 
       def create_initializer
         template "initializer.rb", "config/initializers/railwatch.rb"
+      end
+
+      # Not a gemspec dependency: the breakage is the host application's
+      # either way (its own sessions are failing), so this offers the pin in
+      # the app's Gemfile, where the app can drop it the day Rails ships the
+      # fix, rather than constraining every bundle that installs this gem.
+      def pin_json_when_it_cannot_decode
+        return unless Railwatch::JsonCompat.broken?
+        return say("#{Railwatch::JsonCompat.advice} (no Gemfile here to add it to)", :yellow) unless File.exist?("Gemfile")
+
+        contents = File.read("Gemfile")
+        return say_status(:identical, "Gemfile (json pin)", :blue) if contents.match?(/^\s*gem ["']json["']/)
+
+        append_to_file "Gemfile", "#{contents.end_with?("\n") ? "" : "\n"}\n" \
+                                  "# #{Railwatch::JsonCompat::ISSUE}: Rails cannot decode with json 3 yet. Remove when it can.\n" \
+                                  "#{Railwatch::JsonCompat::PIN}\n"
+        @needs_bundle = true
+        say "#{Railwatch::JsonCompat.advice} Added the pin to your Gemfile; run `bundle install`, then " \
+            "`bin/rails db:prepare`.", :yellow
+      end
+
+      # Embedded mode stores telemetry in SQLite files whatever the app's own
+      # database is, so an app on PostgreSQL or MySQL needs the adapter gem
+      # added before those files can be created.
+      def ensure_sqlite3_gem
+        return unless options[:local]
+        return if Gem.loaded_specs.key?("sqlite3")
+        return say("--local needs the sqlite3 gem for its two databases; add `gem \"sqlite3\"` and re-run.", :yellow) unless File.exist?("Gemfile")
+
+        contents = File.read("Gemfile")
+        unless contents.match?(/^\s*gem ["']sqlite3["']/)
+          append_to_file "Gemfile", %(#{contents.end_with?("\n") ? "" : "\n"}\n# Railwatch (embedded) keeps its telemetry in two SQLite files of its own.\ngem "sqlite3"\n)
+        end
+        @needs_bundle = true
+        say "Added `gem \"sqlite3\"` to the Gemfile: Railwatch's two databases are SQLite files whatever this app's " \
+            "own database is. Run `bundle install`, then `bin/rails db:prepare` to create them.", :yellow
+      end
+
+
+      # Two databases of its own, never the app's primary: `railwatch` for
+      # what people author (issues, comments, saved views, thresholds) and
+      # `railwatch_telemetry` for what the app reports, which is written
+      # continuously and pruned. Their migrations live in the gem; the
+      # database entries point migrations_paths at them, so db:prepare
+      # creates the tables now and migrates them after every gem update.
+      # Nothing is copied into the app.
+      def configure_local_databases
+        return unless options[:local]
+
+        return say("--local: no config/database.yml found; add railwatch and railwatch_telemetry databases yourself (docs/embedded.md).", :yellow) unless File.exist?("config/database.yml")
+
+        contents = File.read("config/database.yml")
+        updated = self.class.database_yml_with_railwatch(contents)
+        return say_status(:identical, "config/database.yml", :blue) if updated == contents
+
+        create_file "config/database.yml", updated, force: true
+      end
+
+      # The writer process: one per Puma master, forked by the gem's Puma
+      # plugin, so batches are mapped and written outside the web workers.
+      def configure_local_writer
+        return unless options[:local]
+        return say("--local: no config/puma.rb found; add `plugin :railwatch` to your Puma config yourself (docs/embedded.md).", :yellow) unless File.exist?("config/puma.rb")
+
+        contents = File.read("config/puma.rb")
+        updated = self.class.puma_rb_with_railwatch(contents)
+        return say_status(:identical, "config/puma.rb", :blue) if updated == contents
+
+        create_file "config/puma.rb", updated, force: true
       end
 
       def create_kamal_hook
@@ -92,6 +164,8 @@ module Railwatch
       # A token lands in .env only when Git confirms the file is ignored.
       # URLs are not secret and can still be written to a tracked dotenv file.
       def write_env
+        return if options[:local]
+
         token = resolved_token
         if options[:token]
           say("--token exposes #{Railwatch::SecretSafety.token_preview(options[:token])} in process arguments; " \
@@ -142,7 +216,53 @@ module Railwatch
         create_file "config/deploy.yml", updated, force: true
       end
 
+      # The two databases exist and are migrated when the generator returns:
+      # config/database.yml was just rewritten, so this re-reads it and runs
+      # the same prepare a deploy runs, for both databases only. The host's
+      # own databases are not touched, and a schema file is never written.
+      def prepare_local_databases
+        return unless options[:local]
+        return unless File.exist?("config/database.yml")
+        return if @needs_bundle
+        return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
+
+        say "\nbin/rails db:prepare (railwatch, railwatch_telemetry)", :green
+        require "active_record"
+        ActiveRecord::Base.configurations = Rails.application.config.database_configuration
+        %w[railwatch railwatch_telemetry].each do |name|
+          db_config = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
+          next say("  #{name}: not in config/database.yml for #{Rails.env}", :yellow) unless db_config
+
+          ActiveRecord::Tasks::DatabaseTasks.with_temporary_pool_for_each(env: Rails.env, name: name) do
+            ActiveRecord::Tasks::DatabaseTasks.migrate
+          end
+          say_status :prepared, "#{name} (#{db_config.database})", :green
+        end
+        @prepared = true
+      rescue StandardError => e
+        say "Could not prepare the Railwatch databases here (#{e.class}: #{e.message}). Run `bin/rails db:prepare` yourself.", :yellow
+      end
+
       def show_next_steps
+        if options[:local]
+          say <<~STEPS, :green
+
+            Next steps
+              1. Set the dashboard's HTTP Basic credentials (it is closed until
+                 you do):  bin/rails railwatch:authentication:configure
+                 Using your own admin auth instead? See docs/embedded.md,
+                 Authentication (base_controller_class or a routes constraint).
+              2. Restart the app and open /railwatch.
+              3. #{@prepared ? "Nothing else to run. Both databases were created just now and" : "Create the two databases:  bin/rails db:prepare\n     Then"}
+                 `bin/rails db:prepare` (which a deploy already runs) migrates
+                 them after every gem update. With `plugin :railwatch` in
+                 config/puma.rb Puma forks one Railwatch writer process that
+                 writes every batch and runs the maintenance clock, so no web
+                 process ever holds the telemetry database. No job worker.
+          STEPS
+          return
+        end
+
         say <<~STEPS, :green
 
           Next steps
@@ -166,6 +286,10 @@ module Railwatch
       # note below says so rather than letting a ✗ look like a broken install.
       def run_doctor
         return unless options[:doctor]
+        # This process read its configuration before the initializer was
+        # written, so in local mode the doctor would report an http transport
+        # with no token. The databases it would check were prepared above.
+        return if options[:local]
         return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
         say "\nbin/rails railwatch:doctor", :green
@@ -197,6 +321,103 @@ module Railwatch
         return insert_lines(lines, env_start + 1, "  secret:\n    - #{name}\n") unless secret_start
 
         insert_lines(lines, block_end(lines, secret_start), "    - #{name}\n")
+      end
+
+      # Spelled out rather than `<<: *default`, on purpose. The host's default
+      # block carries ITS adapter: on a PostgreSQL or MySQL app inheriting it
+      # would ask that server for a database called
+      # "storage/production_railwatch.sqlite3". These two are always SQLite
+      # files the app owns, whatever the app's own database is, so they name
+      # their adapter themselves -- which also means the file needs no
+      # `&default` anchor to exist at all.
+      RAILWATCH_DATABASES = <<~YAML
+        railwatch:
+          adapter: sqlite3
+          database: storage/%<env>s_railwatch.sqlite3
+          pool: <%%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %%>
+          timeout: 5000
+          migrations_paths: <%%= Railwatch.migrations_path(:railwatch) %%>
+          schema_dump: false
+        railwatch_telemetry:
+          adapter: sqlite3
+          database: storage/%<env>s_railwatch_telemetry.sqlite3
+          pool: <%%= ENV.fetch("RAILS_MAX_THREADS") { 5 } %%>
+          timeout: 5000
+          migrations_paths: <%%= Railwatch.migrations_path(:railwatch_telemetry) %%>
+          schema_dump: false
+          pragmas:
+            journal_mode: wal
+            synchronous: normal
+            mmap_size: 134217728
+            cache_size: -65536
+            temp_store: memory
+      YAML
+
+      # Adds the railwatch and railwatch_telemetry databases to every
+      # environment in config/database.yml. A flat environment
+      # (`development:` straight to `<<: *default`) becomes a `primary:`
+      # entry first, since named databases need the nested form. Text
+      # insertion rather than a YAML round trip, for the same reason as
+      # deploy_yml_with_secret: the comments are most of the file.
+      def self.database_yml_with_railwatch(contents)
+        lines = contents.lines
+        # Rails 8.1's non-Docker template leaves every production `database:`
+        # commented out ("path/to/persistent/storage/..."), so db:prepare
+        # cannot run in production at all until the host fills them in. The
+        # storage/ paths are what the Docker template writes and what
+        # config/deploy.yml mounts; use them.
+        lines = lines.map do |line|
+          line.sub(%r{\A(\s+)# database: path/to/persistent/storage/(\S+)$}, '\1database: storage/\2')
+        end
+        environments_in(lines).each do |env|
+          start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
+          next unless start
+
+          stop = block_end(lines, start)
+          block = lines[(start + 1)...stop]
+          next if block.any? { |line| line.match?(/\A\s+railwatch_telemetry:\s*$/) }
+
+          nested = block.any? { |line| line.match?(/\A  [a-z_]+:\s*$/) }
+          unless nested
+            lines[(start + 1)...stop] = block.map { |line| line.strip.empty? ? line : "  #{line}" }
+            lines.insert(start + 1, "  primary:\n")
+            stop += 1
+          end
+          entries = format(RAILWATCH_DATABASES, env: env).lines.map { |line| "  #{line}" }
+          lines = insert_lines(lines, stop, entries.join).lines
+        end
+        lines.join
+      end
+
+      # Unconditional: `bundle exec puma` evaluates this file before it loads
+      # the Rack app, so `if defined?(Railwatch)` would be false there and the
+      # writer would never start. The plugin itself is inert when Railwatch is
+      # absent, off, or not in embedded mode.
+      PUMA_PLUGIN_LINES = <<~RUBY
+
+        # Railwatch (embedded): fork one writer process from Puma so telemetry
+        # is mapped and written outside the processes serving requests.
+        plugin :railwatch
+      RUBY
+
+      # Appends the plugin line once. Puma's config is plain Ruby evaluated top
+      # to bottom, so the end of the file is always a valid place for it.
+      def self.puma_rb_with_railwatch(contents)
+        return contents if contents.include?("plugin :railwatch")
+
+        "#{contents.sub(/\n*\z/, "\n")}#{PUMA_PLUGIN_LINES}"
+      end
+
+      # Every environment the file defines, not a fixed three: an app with a
+      # `staging` (or `review`, or `qa`) environment needs the databases
+      # there too, and hardcoding names silently left it without them. A
+      # top-level key with a block under it, minus YAML's own anchors.
+      NON_ENVIRONMENT_KEYS = %w[default shared].freeze
+
+      def self.environments_in(lines)
+        lines.filter_map { |line| line[/\A([a-z_][a-z0-9_]*):\s*(?:&\S+\s*)?(?:#.*)?$/, 1] }
+             .reject { |name| NON_ENVIRONMENT_KEYS.include?(name) }
+             .uniq
       end
 
       # Index of the first line after the block opened at `start`: the next

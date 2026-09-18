@@ -187,6 +187,12 @@ module Railwatch
     end
 
     def forked_transport
+      # A child may be a different kind of process from its parent: the
+      # writer forked from a Puma master must write SQLite itself, not hand
+      # batches back to the socket it is about to serve.
+      reselected = Railwatch.local_transport if @config.local?
+      return reselected if reselected && reselected.class != @transport.class
+
       transport = @transport.dup
       transport.reset_after_fork! if transport.respond_to?(:reset_after_fork!)
       transport
@@ -327,6 +333,16 @@ module Railwatch
           @retry_attempt = 0
           @retry_at = nil
           Railwatch.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
+          # Losing a batch is not a debug-level event: with an ingest (or an
+          # embedded writer) that never comes back this is the only place the
+          # loss is ever reported, and the dropped counter it leaves behind
+          # rides on the NEXT successful delivery, which may never happen.
+          Railwatch.notify_unrecoverable(
+            DeliveryError.new("Railwatch dropped #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} failed delivery attempts: " \
+                              "#{result.error || result.status}",
+                              status: result.status, records: batch.records.size, bytes: batch.bytes,
+                              dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
+          )
           next
         end
         @retry_batch = batch

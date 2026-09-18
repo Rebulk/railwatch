@@ -8,6 +8,14 @@
 # (https://kamal-deploy.org/docs/hooks/overview/), so it POSTs straight to the
 # ingest host instead of shelling into a container. Never fails a deploy.
 set -e
+
+# Embedded install (transport = :local): the marker is a row in the app's own
+# railwatch database, so record it inside the deployed container and stop.
+if [ "${RAILWATCH_TRANSPORT:-}" = "local" ]; then
+  bin/kamal app exec --primary --reuse "bin/rails railwatch:deploy[$KAMAL_VERSION]" || true
+  exit 0
+fi
+
 [ -z "$RAILWATCH_TOKEN" ] && exit 0
 
 # Optional: .kamal/hooks/post-deploy --sourcemaps, or set

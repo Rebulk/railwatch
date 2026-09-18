@@ -65,6 +65,10 @@ namespace :railwatch do
 
   desc "Check that the app can reach Railwatch with the configured token"
   task status: :environment do
+    if Railwatch.config.local?
+      puts "Railwatch OK: embedded (telemetry in this app's railwatch_telemetry database; dashboard at /railwatch)"
+      next
+    end
     unless Railwatch.config.token.present?
       abort "RAILWATCH_TOKEN is not set"
     end
@@ -86,6 +90,107 @@ namespace :railwatch do
       ok
     end
 
+    if config.local?
+      # Embedded: no token and no ingest host. What can go wrong instead is
+      # the two databases the engine writes to and the jobs that derive
+      # rollups and issues from them.
+      check.call(true, "transport", "local (telemetry stays in this app; dashboard at the engine mount)")
+      %w[railwatch railwatch_telemetry].each do |name|
+        configured = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
+        check.call(!configured.nil?, "#{name} database",
+                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install --local)",
+                   fatal: true)
+      end
+      { "railwatch_telemetry" => Railwatch::TelemetryRecord, "railwatch" => Railwatch::ApplicationRecord }.each do |name, base|
+        pending = begin
+          base.connection_pool.migration_context.open.pending_migrations.map(&:version)
+        rescue StandardError => e
+          e.message
+        end
+        check.call(pending == [], "#{name} migrations",
+                   case pending
+                   when [] then "up to date"
+                   when Array then "#{pending.size} pending (bin/rails db:prepare)"
+                   else "cannot check: #{pending}"
+                   end, fatal: true)
+      end
+      # The maintenance clock runs in web and worker processes, not in this
+      # rake process, so what can be checked here is whether one has ticked.
+      last_tick = begin
+        Railwatch::MaintenanceTask.last_tick_at
+      rescue StandardError
+        nil
+      end
+      check.call(last_tick && last_tick > 10.minutes.ago, "maintenance",
+                 if last_tick
+                   "last tick #{ActiveSupport::Duration.build((Time.current - last_tick).round).inspect} ago"
+                 else
+                   "no tick recorded yet (runs inside the app's web and worker processes, not in rake)"
+                 end)
+      socket_path = config.writer_socket_path
+      if socket_path && !Railwatch::Writer.usable_path?(socket_path)
+        check.call(false, "writer process",
+                   "socket path is #{socket_path.bytesize} bytes, over Linux's #{Railwatch::Writer::MAX_SOCKET_PATH}; " \
+                   "set RAILWATCH_WRITER_SOCKET to a shorter path (e.g. /tmp/#{Rails.application.class.module_parent_name.parameterize}-railwatch.sock)")
+      elsif socket_path
+        listening = Railwatch::Writer.listening?(socket_path)
+        puma_rb = Rails.root.join("config/puma.rb")
+        plugged = puma_rb.exist? && puma_rb.read.include?("plugin :railwatch")
+        # Not listening is only fine when the app is not running: this task
+        # is its own process and cannot tell, so it says which case it is
+        # looking at instead of calling a missing writer a pass.
+        check.call(listening, "writer process",
+                   if listening
+                     "listening at #{socket_path}"
+                   elsif plugged
+                     "not listening at #{socket_path} right now. Expected if the app is stopped; if it is serving, " \
+                     "the writer died or `plugin :railwatch` never activated (check the Puma log)"
+                   else
+                     "not configured: add `plugin :railwatch` to config/puma.rb so batches are written outside the " \
+                     "processes serving requests"
+                   end)
+        # A socket that answers is a process that is alive; the ledger is
+        # what says it is doing its job. Nothing written in a while with the
+        # app serving traffic is a writer that is stuck or a worker that is
+        # not reaching it.
+        if listening
+          last_write = begin
+            Railwatch::Environment.current.with_telemetry { Railwatch::Telemetry::IngestBatch.maximum(:received_at) }
+          rescue StandardError
+            nil
+          end
+          check.call(last_write && last_write > 5.minutes.ago, "last write",
+                     if last_write
+                       "#{ActiveSupport::Duration.build((Time.current - last_write).round).inspect} ago"
+                     else
+                       "no batch written yet"
+                     end)
+        end
+      end
+      # HTTP Basic is on and closed until credentials exist; a deploy that
+      # forgot gets a 401, not a public page, and this says so first.
+      gate = config.dashboard_gate
+      check.call(gate != :undeclared && !(gate == :basic && !config.http_basic_auth_configured?), "dashboard access",
+                 case gate
+                 when :basic
+                   config.http_basic_auth_configured? ? "HTTP Basic, user #{config.http_basic_auth_user}" :
+                     "closed: HTTP Basic is on with no credentials, so every dashboard request is 401. " \
+                     "Run `bin/rails railwatch:authentication:configure`"
+                 when :controller then "your own: c.base_controller_class = #{config.base_controller_class}"
+                 when :resolver then "your own: c.dashboard_user decides, and live updates follow it"
+                 when :open then "deliberately open: anyone who can reach the mount can read it (c.dashboard_open)"
+                 else
+                   "undeclared: HTTP Basic is off and no base_controller_class, dashboard_user or dashboard_open " \
+                   "is set. If a routes constraint gates the mount, say so with `c.dashboard_open = true` " \
+                   "(it also enables live updates); otherwise the dashboard is public"
+                 end)
+      check.call(!Railwatch::JsonCompat.broken?, "json compatibility",
+                 Railwatch::JsonCompat.broken? ? Railwatch::JsonCompat.advice : "json #{Railwatch::JsonCompat.json_version} decodes on Rails #{Rails.version}")
+      recurring = Rails.root.join("config/recurring.yml")
+      leftover = recurring.exist? && recurring.read.include?("Railwatch::")
+      check.call(!leftover, "recurring.yml",
+                 leftover ? "Railwatch::* jobs listed in config/recurring.yml are no longer needed in embedded mode; remove them" : "no Railwatch entries (none needed)")
+    else
     token = config.token.to_s
     check.call(!token.empty?, "token",
                token.empty? ? "RAILWATCH_TOKEN is not set" : Railwatch::SecretSafety.token_preview(token),
@@ -112,6 +217,7 @@ namespace :railwatch do
 
     check.call(Railwatch::Transport::Http.new(config).ping, "ingest reachable",
                "GET #{URI.join(config.ingest_url, '/ingest/ping')}", fatal: true)
+    end
 
     middleware = Rails.application.middleware.map(&:name)
     position = middleware.index("Railwatch::Middleware::Request")
@@ -271,9 +377,31 @@ namespace :railwatch do
     TEXT
   end
 
+  # The same shape as `mission_control:jobs:authentication:configure`: asks
+  # for a user and password and writes them to the current environment's
+  # credentials under `railwatch:`, which the engine reads at boot.
+  #   RAILS_ENV=production bin/rails railwatch:authentication:configure
+  desc "Configure HTTP Basic authentication for the embedded dashboard (writes Rails credentials)"
+  task "authentication:configure" => :environment do
+    Railwatch::Authentication.configure
+  end
+
   desc "Send deploy metadata to Railwatch: rake railwatch:deploy[ref,name,url]"
   task :deploy, [ :ref, :name, :url ] => :environment do |_t, args|
     deploy = Railwatch.config.deploy or abort "RAILWATCH_DEPLOY (or KAMAL_VERSION) is not set"
+    if Railwatch.config.local?
+      # Embedded: the deploy marker is a row in this app's railwatch database.
+      row = Railwatch::Environment.current.deploys.find_or_initialize_by(deploy: deploy.to_s.first(128))
+      row.assign_attributes(ref: (args[:ref] || `git rev-parse HEAD 2>/dev/null`.strip).presence&.first(128),
+                            name: args[:name].presence&.first(255), url: args[:url].presence&.first(1024),
+                            server: Railwatch.config.server, deployed_at: Time.current,
+                            commits: Railwatch::DeployMetadata.commits,
+                            detail: { performer: ENV["KAMAL_PERFORMER"], destination: ENV["KAMAL_DESTINATION"],
+                                      service: ENV["KAMAL_SERVICE"] }.compact)
+      row.save!
+      puts "Deploy #{deploy} recorded"
+      next
+    end
     abort "Plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true" unless Railwatch.config.ingest_url_allowed?
     uri = URI.join(Railwatch.config.ingest_url, "/ingest/deploys")
     req = Net::HTTP::Post.new(uri)

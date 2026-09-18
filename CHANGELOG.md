@@ -1,5 +1,210 @@
 # Changelog
 
+## Unreleased
+
+- Embedded mode: `bin/rails generate railwatch:install --local` keeps
+  every record in two SQLite databases the app owns (`railwatch` for
+  issues, comments, saved views, thresholds and deploys;
+  `railwatch_telemetry` for what the app reports) and serves the whole
+  Railwatch dashboard at `/railwatch`, from a bundle shipped inside the
+  gem. No token, no Node, no asset pipeline. `c.transport = :local`
+  (`RAILWATCH_TRANSPORT=local`) switches the reporter to write batches
+  in-process; everything else about sampling, redaction and buffering is
+  unchanged. The installer adds the databases (migrated from the gem's own
+  migration history, so a gem update is followed by `db:prepare` and
+  nothing else) and an
+  initializer with `issue_prefix`, `repository_url`, `retention_days`
+  and a `dashboard_user` resolver. `railwatch:doctor`, `railwatch:status`
+  and `railwatch:deploy` understand the mode. See docs/embedded.md.
+- Embedded mode needs no job worker. Exceptions are grouped into issues
+  as each batch lands, and release health, threshold and anomaly scans,
+  missed scheduled tasks, auto-resolve and pruning run from
+  `Railwatch::Maintenance`, a clocked thread in every web and worker
+  process (one process per server runs each task, leased through the new
+  `railwatch_maintenance_tasks` table). Nothing goes through Active Job,
+  so the gem never writes the host's queue adapter, and a dead worker
+  cannot hide its own missed runs. The installer no longer edits
+  `config/recurring.yml`; remove any `Railwatch::*` entries a pre-release
+  added there.
+- Embedded ingest folds each batch into the hourly rollups as it lands
+  (`Ingest::RollupAbsorber`), so the dashboard's counts and percentiles
+  move with every batch; the hosted platform's per-batch RollupJob
+  recompute is not enqueued in embedded mode and the minute-long
+  aggregate cache is bypassed there.
+- Embedded mode gets a writer process. `plugin :railwatch` in
+  `config/puma.rb` (added by `--local`) forks one `Railwatch::Writer`
+  from the Puma master, the way Solid Queue's in-Puma mode does. Web
+  workers hand their batches to it over a Unix socket
+  (`Transport::Socket`) instead of writing SQLite on their own reporter
+  thread, so mapping, the write lock, rollups, issue grouping and the
+  maintenance clock all run in a process whose interpreter no request
+  shares. The writer is restarted by Puma if it dies and stops with it;
+  a process with no writer (a runner, a Solid Queue worker, a server
+  without the plugin) writes in-process from its first miss. The doctor
+  reports whether the writer is listening. Measured
+  on a two-worker Puma host under five minutes of open-loop load with
+  every record sampled: all-paths p95 817 ms with the writer against
+  938 ms writing on the worker threads and 716 ms with Railwatch off, and
+  each worker's reporter thread fell from 7 s of CPU per minute of load
+  to 2 s over the whole run.
+- Hardening from an adversarial review of the writer: a batch's
+  exceptions are counted onto an issue exactly once however many times
+  its follow-ups run (a `railwatch_followup_receipts` row per batch and
+  group, committed with the count); the wedge guard tracks each write by
+  invocation so a retry of the same batch cannot hide a stuck original;
+  the writer reads and writes under deadlines, bounds inflation and the
+  accept queue, binds inside a 0700 directory as a 0600 socket, and
+  refuses to take over a socket another writer is answering on; Puma
+  phased restarts restart the writer rather than losing it; workers
+  under the plugin retain batches while the writer is away, and any
+  other process falls back to in-process writing on the first miss
+  (including a stale socket file); a maintenance lease is released only
+  by the token that claimed it and a failed task is retried next tick;
+  maintenance failures report through `on_unrecoverable`, never
+  `Rails.error`; pruning is bounded per run. The plugin is cluster-mode
+  only.
+- Embedded ingest keeps a delivery ledger. The reporter's batch id is
+  stored on the `ingest_batches` row inside the batch's own transaction,
+  so a batch the reporter retries after a failure is written once, and
+  a write that fails is now retried with the same backoff the HTTP
+  transport gets instead of being dropped. The exception grouping a
+  batch owes is recorded on that row as well and cleared when done; a
+  process that dies in between leaves it for `Railwatch::Maintenance` to
+  finish on its next tick, so an exception can no longer be stored
+  without ever becoming an issue.
+- A missed scheduled task says why, when Solid Queue is the adapter:
+  the scheduler never enqueued the run, it was enqueued but no worker
+  is running, or it is enqueued and waiting behind a backlog. Read from
+  Solid Queue's own `recurring_executions` and `processes` tables.
+- `rails runner script/x.rb` is a deployed script even when the whole
+  application is checked out under a scratch directory such as `/tmp`;
+  only a scratch path inside the app still counts as interactive.
+- `RollupJob` no longer overwrites a rollup that a batch folded into
+  between its read and its write: a stored count higher than the
+  recomputed one is kept, and the next run picks the group up.
+- `PruneTelemetryJob` takes `checkpoint:`; the embedded clock prunes with
+  a PASSIVE WAL checkpoint so it never blocks the app's own readers.
+- The affected-user count on an issue is recomputed at most once every
+  five minutes per issue (and always for a new one) instead of on every
+  batch that touched the group.
+- The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
+- Embedded install is one command and boots in production. `bin/rails
+  generate railwatch:install --local` now creates and migrates both
+  databases itself (no separate `db:prepare`), fills in the production
+  `database:` paths Rails 8.1's template leaves commented out. The two
+  entries name `adapter: sqlite3` themselves instead of inheriting the
+  app's default, so embedded mode works on a PostgreSQL or MySQL app (the
+  generator adds `gem "sqlite3"` there and asks for a `bundle install`
+  first) and needs no `&default` anchor to exist. The gem
+  depends on `json < 3` for now: Rails 8.1 cannot decode with json 3
+  (rails/rails#58784), which broke this gem's own SQLite migrations on a
+  fresh Ruby 3.4.10, and a dependency is what makes `bundle add
+  railwatch` resolve past it. The engine loads Active Job itself
+  and treats Action Cable as optional, so an app from `rails new
+  --minimal` boots with it.
+- The engine's models never fall back to the host's primary database. Both
+  abstract bases rescue a missing `database.yml` entry so a cloud-transport
+  app still boots and eager-loads them, but using one then raises
+  `Railwatch::DatabaseNotConfigured` instead of inheriting
+  `ActiveRecord::Base`'s connection -- where the unprefixed telemetry
+  tables (`sessions`, `visits`, `people`, `notifications`) are the
+  application's own.
+- The in-process fallback is provisional: a process that found no writer
+  re-checks the socket every 30 seconds instead of writing its own batches
+  for the rest of its life, and a process that expects a writer stops
+  retaining and writes its own after a minute without one, rather than
+  holding batches until the retry cap drops them. A batch abandoned after the retry cap is now
+  reported through `on_unrecoverable` rather than only under
+  `RAILWATCH_DEBUG`, and `railwatch:doctor` no longer calls a configured
+  but absent writer a pass.
+- The generated Puma line is `plugin :railwatch`, unconditional:
+  `bundle exec puma` evaluates `config/puma.rb` before it loads the app,
+  so the old `if defined?(Railwatch)` guard meant a writer was never
+  started there. The plugin itself now decides whether to run after boot.
+- Embedded mode is verified on PostgreSQL and MySQL hosts, not only
+  SQLite ones. The telemetry databases are SQLite files whatever the
+  application runs on, so the install is `generate`, `bundle install`
+  (for the sqlite3 gem the generator adds), then `db:prepare`. On both,
+  the app's own databases keep every table they had and the server gains
+  no Railwatch table at all.
+- Releasing is gated on the thing that silently breaks it. `gem build`
+  globs its file list, so a missing or half-built dashboard produces a
+  gem that installs cleanly and serves a blank page; `rake
+  package:assert_dashboard` refuses to publish one, and the release
+  workflow runs it between building the bundle and building the gem. The
+  publish job also installs the bundle it was already calling `bundle
+  exec` against, which it had never done. Built `.gem` files are no
+  longer tracked in git.
+- The browser beacon is bounded the way a hosted product bounds a public
+  ingest endpoint, since one cannot hold a credential the page does not
+  already give away: an origin allowlist (`beacon_allowed_origins`,
+  same-origin by default, the analogue of Sentry's allowed domains), the
+  per-client rate limit, and a new ceiling for the endpoint as a whole
+  (`beacon_global_rate_limit`, 6,000/minute) so a rotating address cannot
+  multiply past the first. Both limits fail closed on a cache store that
+  cannot count, where the limiter used to fail open.
+- How the dashboard is gated is now something the app states rather than
+  something the gem guesses. `Configuration#dashboard_gate` names it:
+  HTTP Basic, a `base_controller_class`, a `dashboard_user` resolver that
+  can refuse, or `dashboard_open = true` for a dashboard that is public on
+  purpose (a private network, a VPN, a routes constraint the gem cannot
+  see). With Basic off and none of them set the gate is undeclared: the
+  dashboard still serves, because a constraint is a legitimate answer, but
+  the app logs a warning at every boot outside development, the doctor
+  reports it, and live updates are refused. The live channel follows the
+  declared gate, which matters because Action Cable runs on the host's own
+  `/cable` endpoint that no routes constraint around the mount covers.
+- Railwatch no longer pins `json` for the host. The Rails 8.1 and json 3
+  incompatibility (rails/rails#58784) is the application's own, and a
+  gemspec dependency would constrain every bundle for it. The gem detects
+  the pair by asking it to decode rather than by comparing version
+  numbers, so a patched Rails or a backport is judged correctly and the
+  warning goes quiet by itself when Rails ships the fix. The installer
+  offers the pin in the app's Gemfile, the doctor reports it, and the app
+  logs it once at boot.
+- Both database bases also survive an entry whose adapter gem is not in
+  the bundle yet (a `LoadError` rather than `AdapterNotSpecified`), which
+  is the state a PostgreSQL app is in between the installer adding
+  `gem "sqlite3"` and the `bundle install` that follows.
+- The embedded dashboard authenticates the way Mission Control Jobs
+  does: HTTP Basic is on and closed by default, so with no credentials
+  every dashboard page answers 401 (with a note saying what to run), the
+  live channel refuses the subscription, and the doctor reports it. The
+  beacon endpoint and the dashboard's own static assets stay public, as
+  they must be. `bin/rails
+  railwatch:authentication:configure` writes
+  `railwatch.http_basic_auth_user/_password` to the environment's Rails
+  credentials; `RAILWATCH_HTTP_BASIC_AUTH_USER/_PASSWORD` or the
+  initializer do the same. A host with its own admin auth sets
+  `c.http_basic_auth_enabled = false` and either
+  `c.base_controller_class` (the dashboard controllers inherit from it)
+  or a routes constraint around the mount. Before this a production
+  install served every query and log line to anyone who found the URL.
+- The Puma plugin forks the writer in single mode too (the default for a
+  Rails 8 app). It stops the writer from `at_exit`, after Puma's run loop
+  has returned: Puma's SIGTERM trap fires `after_stopped` BEFORE it drains
+  in-flight requests, so stopping there took the writer away from requests
+  that were still running and lost their records. The live-update
+  broadcast after a batch rescues a `LoadError` as well: a host whose
+  production `cable.yml` names redis without the gem (Rails 8.1's
+  non-Docker template) used to take the writer down on every batch.
+- Puma workers under the plugin actually use the writer. The socket
+  transport captured "is a writer expected" when it was built, and
+  `rails server` builds the reporter (app boot) before Puma evaluates
+  `config/puma.rb` (where the plugin sets the flag), so every worker
+  inherited a transport that expected no writer, missed the socket once
+  during the writer's startup, and wrote its own batches in-process for
+  the rest of its life. The flag is now read at delivery time. On the
+  dogfood host this is the difference between a reporter thread at 3.6 ms
+  of CPU per request in each worker and one at 0.2 ms, with the writer
+  process doing the 2.8 ms.
+- The per-record memory estimate on the request thread
+  (`Record.buffered_bytes`, run once for every query, cache event and log
+  line an execution buffers) walks a record in one loop instead of one
+  method call per value: 6.2 to 2.7 us for a query record, about 120 us
+  off a 20-query request. Same numbers for every record shape, including
+  at the depth bound and on a self-referential one.
+
 ## 0.1.4 (2026-09-15)
 
 - `llm_call` records what the call carried and how it was configured, not

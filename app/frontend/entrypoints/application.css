@@ -1,0 +1,244 @@
+@import "tailwindcss";
+
+/* Commit Mono for numbers, identifiers, and labels (SIL OFL). Roboto for UI
+   text, matching the rebulk.com brand system (Apache 2.0); four weights,
+   subset to the Latin range (about 18 KB each) and preloaded from the layout
+   head so they arrive with the HTML rather than after first layout. */
+@font-face {
+  font-family: "CommitMono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/CommitMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "CommitMono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/CommitMono-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../fonts/Roboto-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../fonts/Roboto-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../fonts/Roboto-Bold.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Roboto";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("../fonts/Roboto-Black.woff2") format("woff2");
+}
+/* While Roboto is still in flight the page renders in this face instead: a
+   local sans with its metrics overridden to Roboto's (size-adjust from the
+   average glyph width, ascent and descent from Roboto's hhea table), so line
+   breaks and box heights are the same before and after the swap and nothing
+   moves when the real font lands. */
+@font-face {
+  font-family: "Roboto Fallback";
+  src:
+    local("Liberation Sans"), local("Arial"), local("Helvetica Neue"),
+    local("Helvetica");
+  size-adjust: 96.1%;
+  ascent-override: 96.5%;
+  descent-override: 25.4%;
+  line-gap-override: 0%;
+}
+
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+@plugin "@tailwindcss/forms";
+
+@custom-variant dark (&:is(.dark *));
+
+/* Railwatch palette: the rebulk.com brand system. Navy ink, gold as the sole
+   accent, Roboto for UI text. Light: soft blue-grey page, white panels, navy
+   text. Dark: the navy stack from the marketing site (#020618 page, #0F1729
+   panel, #1E2A45 edge) with gold as primary. Status vocabulary is shared by
+   badges, charts and signals: grey = fine, amber = warning/4xx, rose =
+   error/5xx, green = live. */
+:root {
+  --background: #f5f7fb;
+  --foreground: #0f1729;
+  --card: #ffffff;
+  --card-foreground: #0f1729;
+  --popover: #ffffff;
+  --popover-foreground: #0f1729;
+  --primary: #0f1729;
+  --primary-foreground: #ffffff;
+  --secondary: #e9edf5;
+  --secondary-foreground: #0f1729;
+  --muted: #eef1f7;
+  --muted-foreground: #5e708f;
+  --accent: #eef1f7;
+  --accent-foreground: #0f1729;
+  --destructive: oklch(0.645 0.246 16.439);
+  --destructive-foreground: oklch(0.645 0.246 16.439);
+  --border: #dbe1ec;
+  --input: #dbe1ec;
+  --ring: rgb(253 193 26 / 0.6);
+  --ok: #c9d2e3;
+  --warning: oklch(0.769 0.188 70.08);
+  --danger: oklch(0.645 0.246 16.439);
+  --live: oklch(0.696 0.17 162.48);
+  --chart-1: var(--ok);
+  --chart-2: #0f1729;
+  --chart-3: var(--warning);
+  --chart-4: var(--warning);
+  --chart-5: var(--danger);
+  --radius: 0.5rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #5e708f;
+  --sidebar-primary: #0f1729;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1f7;
+  --sidebar-accent-foreground: #0f1729;
+  --sidebar-border: #dbe1ec;
+  --sidebar-ring: rgb(253 193 26 / 0.6);
+}
+
+.dark {
+  --background: #020618;
+  --foreground: #e6ebf4;
+  --card: #0f1729;
+  --card-foreground: #e6ebf4;
+  --popover: #0f1729;
+  --popover-foreground: #e6ebf4;
+  --primary: #fdc11a;
+  --primary-foreground: #020618;
+  --secondary: #1e2a45;
+  --secondary-foreground: #e6ebf4;
+  --muted: #0a1122;
+  --muted-foreground: #93a6c4;
+  --accent: #1e2a45;
+  --accent-foreground: #ffffff;
+  --destructive-foreground: oklch(0.72 0.2 16.439);
+  --border: #1e2a45;
+  --input: #26355a;
+  --ring: rgb(253 193 26 / 0.5);
+  --ok: #26355a;
+  --warning: oklch(0.666 0.179 58.318);
+  --chart-2: #fdc11a;
+  --sidebar: #0a1122;
+  --sidebar-foreground: #93a6c4;
+  --sidebar-primary: #fdc11a;
+  --sidebar-primary-foreground: #020618;
+  --sidebar-accent: #1e2a45;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #1e2a45;
+  --sidebar-ring: rgb(253 193 26 / 0.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-ok: var(--ok);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-live: var(--live);
+  --font-sans:
+    "Roboto", "Roboto Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "CommitMono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: light dark;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01", "tnum";
+    letter-spacing: -0.02em;
+  }
+  /* Small uppercase mono label used on stat tiles, table heads, and badges. */
+  .label-caps {
+    @apply text-muted-foreground font-mono text-[11px] tracking-wide uppercase;
+  }
+  /* Full-text search hit inside a log message snippet. */
+  .fts-mark {
+    background-color: color-mix(in oklch, var(--warning) 30%, transparent);
+    @apply rounded-[2px] px-0.5 text-inherit;
+  }
+  /* Faint dot grid backdrop behind the app canvas. */
+  .dotted-canvas {
+    background-image: radial-gradient(
+      color-mix(in oklch, var(--foreground) 7%, transparent) 1px,
+      transparent 1px
+    );
+    background-size: 22px 22px;
+  }
+}

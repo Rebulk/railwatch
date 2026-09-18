@@ -54,7 +54,9 @@ begin
   end
   expected_dependencies = {
     "base64" => Gem::Requirement.new("~> 0.2"),
-    "rails" => Gem::Requirement.new(">= 8.1", "< 9")
+    "inertia_rails" => Gem::Requirement.new("~> 3.21"),
+    "rails" => Gem::Requirement.new(">= 8.1", "< 9"),
+    "tdigest" => Gem::Requirement.new("~> 0.2")
   }
   assert!(runtime_dependencies == expected_dependencies, "runtime dependencies changed: #{runtime_dependencies}")
 
@@ -68,18 +70,27 @@ begin
     docs/getting-started.md
     docs/security.md
     lib/generators/railwatch/install/install_generator.rb
-    lib/generators/railwatch/install/templates/initializer.rb
+    lib/generators/railwatch/install/templates/initializer.rb.tt
     lib/railwatch.rb
     lib/railwatch/version.rb
     llms.txt
+    app/controllers/railwatch/dashboard_controller.rb
+    app/views/layouts/railwatch/dashboard.html.erb
+    db/railwatch_migrate/20260916000000_create_railwatch_tables.rb
+    db/railwatch_telemetry_migrate/20260903000001_create_telemetry.rb
+    public/railwatch/manifest.json
+    public/railwatch/icon.svg
   ]
   missing = expected_files - package_spec.files
   assert!(missing.empty?, "package is missing runtime/docs files: #{missing.join(', ')}")
 
-  allowed = %r{\A(?:app/|config/|lib/|docs/|README\.md\z|CHANGELOG\.md\z|MIT-LICENSE\z|llms\.txt\z|AGENTS\.md\z)}
+  allowed = %r{\A(?:app/|config/|db/|lib/|docs/|public/railwatch/|README\.md\z|CHANGELOG\.md\z|MIT-LICENSE\z|llms\.txt\z|AGENTS\.md\z)}
   forbidden = package_spec.files.reject { |path| allowed.match?(path) }
   assert!(forbidden.empty?, "package contains files outside the allowlist: #{forbidden.sort.join(', ')}")
-  explicitly_forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|tmp)/|\A(?:Gemfile\.lock|land\.sh|CLAUDE\.md)\z})
+  explicitly_forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|tmp|node_modules|app/frontend)/|\A(?:Gemfile\.lock|land\.sh|CLAUDE\.md|package\.json|pnpm-lock\.yaml|vite\.config\.ts)\z})
+  # The dashboard ships built, never as source: a host has no Node.
+  entries = package_spec.files.grep(%r{\Apublic/railwatch/assets/.*\.js\z})
+  assert!(entries.any?, "package has no built dashboard bundle; run rake dashboard:build")
   assert!(explicitly_forbidden.empty?, "package contains internal files: #{explicitly_forbidden.sort.join(', ')}")
 
   gem_home = File.join(tmp, "gem-home")

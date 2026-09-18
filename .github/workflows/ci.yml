@@ -18,6 +18,22 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      # public/railwatch is a build artifact, not a checked-in one, and the
+      # embedded dashboard specs serve the real bundle: its HTML shell, its
+      # hashed assets, and the Inertia version taken from its manifest. Build
+      # it here rather than teaching those specs to skip, which would leave
+      # the dashboard untested exactly where it is most likely to break.
+      - name: Build the dashboard bundle
+        run: bundle exec rake dashboard:build
+
       - name: Run specs
         run: bundle exec rspec
 
@@ -36,6 +52,26 @@ jobs:
       - name: RuboCop
         run: bundle exec rubocop
 
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck, lint, format, test
+        run: pnpm check && pnpm lint && pnpm format && pnpm test
+
   package:
     runs-on: ubuntu-latest
     steps:
@@ -48,7 +84,15 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
-      - name: Verify public package and legacy Git consumers
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Verify public package (builds the dashboard bundle first)
         run: bundle exec rake package:verify
 
   # The per-request overhead budget (bench/overhead.rb) and the no-DB-writes

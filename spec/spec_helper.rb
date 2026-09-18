@@ -14,6 +14,15 @@ require "railwatch/spec_helper"
 
 ActiveRecord::Schema.verbose = false
 load File.expand_path("dummy/db/schema.rb", __dir__)
+# The engine's own two databases, for the embedded dashboard specs, built
+# the way a host's db:prepare builds them: from the gem's migrations.
+ActiveRecord::Migration.verbose = false
+%w[railwatch railwatch_telemetry].each do |name|
+  db_config = ActiveRecord::Base.configurations.configs_for(env_name: "test", name: name)
+  ActiveRecord::Tasks::DatabaseTasks.with_temporary_connection(db_config) do |connection|
+    connection.pool.migration_context.migrate
+  end
+end
 
 WebMock.disable_net_connect!
 # WebMock replaces ::Net::HTTP with a subclass whose #request short-circuits
@@ -45,6 +54,10 @@ RSpec.configure do |config|
     end
     stub_request(:get, %r{http://example\.test/}).to_return(status: 200, body: "hi", headers: { "Content-Length" => "2" })
     railwatch_transport
+    # The dummy app has no credentials: dashboard request specs would all
+    # answer 401 under the closed-by-default Basic auth. The examples that
+    # test the gate itself turn it back on.
+    Railwatch.config.http_basic_auth_enabled = false
     Railwatch.config.sample = {
       requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0,
       channels: 1.0, exceptions: 1.0

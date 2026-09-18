@@ -21,6 +21,8 @@ initializer always win over the env var.
 | `server` | `RAILWATCH_SERVER` | `KAMAL_HOST`, else `Socket.gethostname` | Host stamped on every record. Under Kamal the container hostname carries a per-deploy container id, so the Kamal host wins; it is what the post-deploy hook registers as an expected server, which is what silent-host detection compares against. |
 | `environment` | — | resolved lazily from `Rails.env` | Set `c.environment = "staging"` to report under a name other than the actual Rails env. |
 | `ignored_request_paths` | `RAILWATCH_IGNORED_REQUEST_PATHS` (comma-separated) | `/up,/railwatch/beacon` | Exact request paths that bypass Railwatch's request execution entirely. In Ruby configuration, `Regexp` entries are also supported. Setting the env var replaces the defaults; append with `c.ignored_request_paths += ["/healthz"]` to keep them. |
+| `beacon_allowed_origins` | `RAILWATCH_BEACON_ALLOWED_ORIGINS` | `[]` | Extra origins allowed to post to the beacon beyond the app's own, comma-separated: a full origin (`https://app.example.com`) or a bare host. Like Sentry's allowed domains this bounds abuse rather than authenticating, since an endpoint a browser posts to cannot hold a secret. |
+| `beacon_global_rate_limit` | `RAILWATCH_BEACON_GLOBAL_RATE_LIMIT` | `6000` | Beacons accepted per minute across every client, so a rotating address cannot multiply past the per-client limit. 0 disables it. |
 | `beacon_rate_limit` | `RAILWATCH_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /railwatch/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
 `Railwatch.enabled?` delegates to `config.enabled?`, which is `@enabled &&
@@ -857,6 +859,30 @@ in `lib/railwatch.rb`, unless noted:
 `reject_*`, `reject_cache_keys`, `before_ingest`, `on_unrecoverable`,
 `instrument_outgoing`, `flush`, `debug { }`. `pause`/`resume` are the
 ignore block's building blocks, and are nestable.
+
+## Embedded mode
+
+```ruby
+c.transport = :local        # RAILWATCH_TRANSPORT; default "http"
+c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
+c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
+c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
+c.http_basic_auth_enabled = true      # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; on and closed until credentials exist
+c.http_basic_auth_user = "ops"        # RAILWATCH_HTTP_BASIC_AUTH_USER, or credentials railwatch.http_basic_auth_user
+c.http_basic_auth_password = "..."    # RAILWATCH_HTTP_BASIC_AUTH_PASSWORD, or credentials railwatch.http_basic_auth_password
+c.base_controller_class = "AdminController"  # RAILWATCH_BASE_CONTROLLER_CLASS; default ActionController::Base
+c.dashboard_open = false              # RAILWATCH_DASHBOARD_OPEN; public on purpose
+c.dashboard_user = ->(request) { { id:, name:, email: } or nil }
+```
+
+With `transport = :local` the reporter writes each batch into the app's
+own `railwatch_telemetry` database instead of POSTing it, and the engine
+serves the dashboard at its mount. `enabled?` no longer needs a token.
+The others only matter in that mode. The dashboard is behind HTTP Basic
+by default and answers 401 until `bin/rails
+railwatch:authentication:configure` has written credentials; a host with
+its own admin auth turns Basic off and sets `base_controller_class` or a
+routes constraint. Full walkthrough: [Embedded mode](embedded.md).
 
 ## Rake tasks
 

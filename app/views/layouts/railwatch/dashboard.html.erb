@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title inertia><%= content_for(:title) || "Railwatch" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="application-name" content="Railwatch">
+    <meta name="railwatch-mount" content="<%= request.script_name %>">
+    <link rel="icon" href="/railwatch/icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/railwatch/icon.png">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <script nonce="<%= content_security_policy_nonce %>">
+      document.documentElement.classList.toggle(
+        "dark",
+        localStorage.appearance === "dark" ||
+          (!("appearance" in localStorage) && window.matchMedia("(prefers-color-scheme: dark)").matches),
+      );
+    </script>
+    <%= railwatch_font_preloads %>
+    <%= railwatch_asset_tags(nonce: content_security_policy_nonce) %>
+  </head>
+  <body>
+    <%= yield %>
+  </body>
+</html>

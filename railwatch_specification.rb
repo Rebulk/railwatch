@@ -32,14 +32,18 @@ module Railwatch
           # Installed gems carry the runtime and public reference material,
           # while repository-only tests, scripts, and release machinery stay
           # out of customer applications.
-          Dir["{app,config,lib,docs}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
-            .select { |path| File.file?(path) }
+          # app/frontend is the dashboard's source; the gem ships its build
+          # (public/railwatch) so a host needs no Node.
+          Dir["{app,config,db,lib,docs,public}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
+            .select { |path| File.file?(path) && !path.start_with?("app/frontend/") }
         end
 
         spec.add_dependency "rails", ">= 8.1", "< 9"
         # Used for profile stacks and attachments. A bundled gem since Ruby
         # 3.4, so it must be declared rather than assumed from stdlib.
         spec.add_dependency "base64", "~> 0.2"
+        spec.add_dependency "inertia_rails", "~> 3.21"
+        spec.add_dependency "tdigest", "~> 0.2"
       end
     end
   end
