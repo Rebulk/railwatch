@@ -22,6 +22,15 @@ release is `git tag vX.Y.Z && git push --tags`: the workflow builds the
 bundle, verifies the package, and publishes. A host application never sees
 Node; it installs the compiled bundle inside the gem.
 
+### Gemfile.lock
+
+Commit it in the same commit as anything that changes resolution: a gemspec
+dependency, a version bump. Bundler rewrites the lockfile in place before
+running whatever you asked it to run, so your working copy is always correct
+and the committed one is what breaks; CI installs frozen and fails the setup
+step before a single test runs. `spec/railwatch/gemfile_lock_spec.rb` reads
+the committed file for exactly this reason and will tell you first.
+
 ### Releasing
 
 1. `CHANGELOG.md` gets the entry, `lib/railwatch/version.rb` gets the
