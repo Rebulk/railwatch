@@ -31,11 +31,25 @@ classes even though embedded mode calls them directly) and loads it
 itself. Action Cable is optional: with it the dashboard updates live,
 without it (`rails new --minimal`) the pages refresh on navigation.
 
-The two databases are SQLite files whatever your application's own
-database is, so the generated entries name `adapter: sqlite3` rather than
-inheriting your default. On a PostgreSQL or MySQL app the generator adds
-`gem "sqlite3"` for them and asks you to `bundle install` before
-`bin/rails db:prepare`.
+## Your application's own database
+
+Embedded mode does not care what your application runs on. The two
+databases it adds are SQLite files either way, so the generated entries
+name `adapter: sqlite3` themselves rather than inheriting your default
+block, and they need no `&default` anchor to exist.
+
+On a PostgreSQL or MySQL app that means the install is two commands
+rather than one, because SQLite's adapter gem will not be in your bundle:
+
+```sh
+bin/rails generate railwatch:install --local   # adds gem "sqlite3", writes the config
+bundle install
+bin/rails db:prepare                           # creates the two SQLite files
+```
+
+Verified end to end on both. On a PostgreSQL app and on a MySQL app, the
+application's own four databases stay where they were, Railwatch's two are
+files under `storage/`, and neither server gains a single Railwatch table.
 
 What `--local` writes, on top of the usual install:
 

@@ -121,6 +121,20 @@
   `bundle exec puma` evaluates `config/puma.rb` before it loads the app,
   so the old `if defined?(Railwatch)` guard meant a writer was never
   started there. The plugin itself now decides whether to run after boot.
+- Embedded mode is verified on PostgreSQL and MySQL hosts, not only
+  SQLite ones. The telemetry databases are SQLite files whatever the
+  application runs on, so the install is `generate`, `bundle install`
+  (for the sqlite3 gem the generator adds), then `db:prepare`. On both,
+  the app's own databases keep every table they had and the server gains
+  no Railwatch table at all.
+- Releasing is gated on the thing that silently breaks it. `gem build`
+  globs its file list, so a missing or half-built dashboard produces a
+  gem that installs cleanly and serves a blank page; `rake
+  package:assert_dashboard` refuses to publish one, and the release
+  workflow runs it between building the bundle and building the gem. The
+  publish job also installs the bundle it was already calling `bundle
+  exec` against, which it had never done. Built `.gem` files are no
+  longer tracked in git.
 - The browser beacon is bounded the way a hosted product bounds a public
   ingest endpoint, since one cannot hold a credential the page does not
   already give away: an origin allowlist (`beacon_allowed_origins`,

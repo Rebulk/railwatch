@@ -5,3 +5,6 @@ spec/dummy/tmp/
 spec/dummy/config/master.key
 node_modules/
 public/railwatch/
+
+# Built gems. `rake package:build` writes them; releases build from a tag.
+pkg/

@@ -41,10 +41,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      # bundler-cache installs the bundle. Without it `bundle exec` below
+      # raises before it reaches rake, which is how the publish job fails
+      # even when everything else is right.
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
+          bundler-cache: true
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -54,8 +58,13 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
 
+      # The gem ships the compiled dashboard, so it has to exist before
+      # `gem build` reads the file list.
       - name: Build dashboard bundle
         run: bundle exec rake dashboard:build
+
+      - name: Refuse to publish a gem with no dashboard in it
+        run: bundle exec rake package:assert_dashboard
 
       - name: Build gem
         run: gem build railwatch.gemspec --strict

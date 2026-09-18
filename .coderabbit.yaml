@@ -1,0 +1,28 @@
+# CodeRabbit review configuration.
+#
+# The gem carries the dashboard's React source as well as the Ruby engine, so
+# a branch that touches both is large enough that CodeRabbit refuses it
+# outright ("this PR contains N files, which is over the limit of 300") and
+# reviews nothing at all. These filters spend the budget on the code where a
+# review pays: the gem, the engine, the generator and the specs.
+#
+# What is excluded and why:
+#   - app/frontend is the dashboard's source. It has its own gate in CI (the
+#     `dashboard` job runs typecheck, lint, format and vitest), it ships as a
+#     compiled bundle, and it cannot reach a customer's data. Narrow this
+#     back once the dashboard lands and PRs touch a handful of components
+#     rather than all of them.
+#   - components/ui is vendored shadcn/ui, not ours to review.
+#   - public/ is the build output, pkg/ is a built gem, and lockfiles are
+#     resolver output.
+reviews:
+  path_filters:
+    - "!app/frontend/**"
+    - "!public/**"
+    - "!pkg/**"
+    - "!**/*.lock"
+    - "!pnpm-lock.yaml"
+    - "!Gemfile.lock"
+  # Say which files were skipped, so an excluded path is a visible choice
+  # rather than a silent hole in the review.
+  review_details: true
