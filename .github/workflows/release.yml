@@ -163,19 +163,22 @@ jobs:
         run: gem push "${{ steps.build.outputs.gem }}"
 
       # RubyGems indexes asynchronously, so a release is not done when the
-      # push returns. Fail here rather than leave a green run behind a gem
-      # nobody can install.
-      - name: Wait for the release to be installable
+      # push returns. Watch the compact index rather than the API: the API
+      # reported 0.2.2 published while index.rubygems.org still ended at
+      # 0.2.1, and a `bundle add railwatch` in that window resolved to the
+      # older version. The compact index is the file Bundler reads, so it is
+      # the one that decides whether anybody can actually install this.
+      - name: Wait for Bundler to be able to resolve it
         if: steps.published.outputs.skip != 'true'
         run: |
           version="$(ruby -Ilib -rrailwatch/version -e 'print Railwatch::VERSION')"
-          url="https://rubygems.org/api/v2/rubygems/railwatch/versions/${version}.json"
-          for _ in $(seq 1 30); do
-            if [ "$(curl -s -o /dev/null -w '%{http_code}' "$url")" = "200" ]; then
-              echo "railwatch $version is live on RubyGems."
+          for _ in $(seq 1 60); do
+            if curl -s https://index.rubygems.org/info/railwatch | grep -q "^${version} "; then
+              echo "railwatch $version is in the compact index; bundle add resolves to it."
               exit 0
             fi
             sleep 10
           done
-          echo "railwatch $version did not appear on RubyGems within five minutes."
+          echo "railwatch $version was pushed but has not reached the compact index in ten minutes."
+          echo "It is published -- check https://rubygems.org/gems/railwatch/versions/$version"
           exit 1
