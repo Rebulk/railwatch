@@ -54,6 +54,10 @@ RSpec.configure do |config|
     end
     stub_request(:get, %r{http://example\.test/}).to_return(status: 200, body: "hi", headers: { "Content-Length" => "2" })
     railwatch_transport
+    # The dummy app has no credentials: dashboard request specs would all
+    # answer 401 under the closed-by-default Basic auth. The examples that
+    # test the gate itself turn it back on.
+    Railwatch.config.http_basic_auth_enabled = false
     Railwatch.config.sample = {
       requests: 1.0, jobs: 1.0, commands: 1.0, scheduled_tasks: 1.0,
       channels: 1.0, exceptions: 1.0

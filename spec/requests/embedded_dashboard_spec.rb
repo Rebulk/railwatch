@@ -152,53 +152,57 @@ RSpec.describe "embedded dashboard", type: :request do
     Railwatch.config.dashboard_user = nil
   end
 
-  describe "who may see it" do
-    # The dummy app runs in the test environment, where the dashboard is
-    # open; production is simulated by stubbing the env, which is what the
-    # gate reads.
-    def as_production
-      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
-      yield
+  describe "HTTP Basic authentication (Mission Control Jobs' shape)" do
+    def basic(user, password) = { "Authorization" => ActionController::HttpAuthentication::Basic.encode_credentials(user, password) }
+
+    # A `before`, not `around`: spec_helper's global before turns Basic off
+    # for every other example and runs inside an around, so it would undo
+    # this. Per-example config is rebuilt by the suite, so no restore.
+    before do
+      Railwatch.config.http_basic_auth_enabled = true
+      Railwatch.config.http_basic_auth_user = nil
+      Railwatch.config.http_basic_auth_password = nil
     end
 
-    it "is open in a local environment with nothing configured" do
+    it "is closed, not open, when Basic is on and no credentials are configured" do
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.body).to include("railwatch:authentication:configure")
+    end
+
+    it "challenges for and accepts the configured credentials" do
+      Railwatch.config.http_basic_auth_user = "ops"
+      Railwatch.config.http_basic_auth_password = "s3cret"
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:unauthorized)
+      expect(response.headers["WWW-Authenticate"]).to include("Basic")
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers.merge(basic("ops", "wrong"))
+      expect(response).to have_http_status(:unauthorized)
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers.merge(basic("ops", "s3cret"))
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "stands aside when the host turns Basic off to use its own base controller or routes constraint" do
+      Railwatch.config.http_basic_auth_enabled = false
       get "/railwatch/apps/1/envs/1", headers: inertia_headers
       expect(response).to have_http_status(:ok)
     end
 
-    it "answers 403 in production until the host names who is looking or opens it on purpose" do
-      as_production do
-        get "/railwatch/apps/1/envs/1", headers: inertia_headers
-        expect(response).to have_http_status(:forbidden)
-        expect(response.body).to include("c.dashboard_user")
-
-        Railwatch.config.dashboard_open = true
-        get "/railwatch/apps/1/envs/1", headers: inertia_headers
-        expect(response).to have_http_status(:ok)
-      end
-    ensure
-      Railwatch.config.dashboard_open = false
-    end
-
-    it "lets a resolver decide per request: an operator gets in, nil is refused" do
-      Railwatch.config.dashboard_user = ->(request) { request.headers["X-Operator"] && { id: 7, name: "Ada" } }
-      as_production do
-        get "/railwatch/apps/1/envs/1", headers: inertia_headers
-        expect(response).to have_http_status(:forbidden)
-
-        get "/railwatch/apps/1/envs/1", headers: inertia_headers.merge("X-Operator" => "1")
-        expect(response).to have_http_status(:ok)
-        expect(response.parsed_body["props"]["auth"]["user"]).to include("name" => "Ada")
-      end
-    ensure
-      Railwatch.config.dashboard_user = nil
-    end
-
     it "does not gate the beacon, which is the app's own browser client posting timings" do
-      as_production do
-        post "/railwatch/beacon", params: { visits: [] }.to_json, headers: { "CONTENT_TYPE" => "application/json" }
-        expect(response).not_to have_http_status(:forbidden)
-      end
+      post "/railwatch/beacon", params: { visits: [] }.to_json, headers: { "CONTENT_TYPE" => "application/json" }
+      expect(response).not_to have_http_status(:unauthorized)
+    end
+
+    it "applies the same rule to the live channel" do
+      Railwatch.config.http_basic_auth_user = "ops"
+      Railwatch.config.http_basic_auth_password = "s3cret"
+      request = ->(headers) { ActionDispatch::Request.new(Rack::MockRequest.env_for("/cable", headers.transform_keys { |k| "HTTP_#{k.upcase.tr('-', '_')}" })) }
+
+      expect(Railwatch.config.http_basic_auth_ok?(request.call({}))).to be(false)
+      expect(Railwatch.config.http_basic_auth_ok?(request.call(basic("ops", "s3cret")))).to be(true)
     end
   end
 

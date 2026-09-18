@@ -77,34 +77,70 @@ and the MCP server.
 ## Authentication
 
 The dashboard shows every query, log line and exception your app
-produced, so outside development and test it is closed until you say who
-may see it. Until then every dashboard request answers 403 with a note
-saying so, and `railwatch:doctor` reports it. Two ways to open it:
+produced, so it works the way Mission Control Jobs does: **HTTP Basic
+authentication is on and closed by default**. With no credentials
+configured every dashboard request is 401, and `railwatch:doctor` says
+so. Set them with
 
-A resolver in the initializer, which both authorises and names the
-person on comments and saved views. Return the operator, or `nil` for
-"not signed in" (a 403):
-
-```ruby
-c.dashboard_user = ->(request) do
-  user = User.find_by(id: request.session[:user_id])
-  user&.admin? ? { id: user.id, name: user.name, email: user.email } : nil
-end
+```sh
+bin/rails railwatch:authentication:configure
+RAILS_ENV=production bin/rails railwatch:authentication:configure
 ```
 
-Or `c.dashboard_open = true` (`RAILWATCH_DASHBOARD_OPEN`), which serves
-it to anyone who can reach the mount and shows a single "Operator". Use
-that behind something else that already gates the URL: a routes
-constraint around the mount, a Devise `authenticate` block, a VPN.
+which writes them to that environment's Rails credentials:
+
+```yml
+railwatch:
+  http_basic_auth_user: ops
+  http_basic_auth_password: secret
+```
+
+`RAILWATCH_HTTP_BASIC_AUTH_USER` and `RAILWATCH_HTTP_BASIC_AUTH_PASSWORD`,
+or `c.http_basic_auth_user =` / `c.http_basic_auth_password =` in the
+initializer, do the same. The live-update channel checks the same
+credentials (the browser sends them on the WebSocket handshake).
+
+### Your own authentication
+
+Two ways, both from Mission Control's playbook. Either lets an admin of
+your app in with no second password. Turn Basic off when you use one,
+or both gates apply.
+
+A base controller. Every dashboard controller inherits from it, so its
+`before_action` runs first:
+
+```ruby
+c.http_basic_auth_enabled = false
+c.base_controller_class = "AdminController"   # requires an admin, or redirects to sign-in
+```
+
+Your controller's code runs inside the engine, whose route helpers take
+precedence; reach your app's with `main_app.root_path`.
+
+Or a routes constraint, which keeps the engine out of it entirely (for
+example with the sessions Rails' authentication generator creates):
 
 ```ruby
 # config/routes.rb
-authenticate :user, ->(u) { u.admin? } do   # Devise
+constraints ->(request) { Session.find_by(id: request.cookie_jar.signed[:session_id])&.user&.admin? } do
   mount Railwatch::Engine, at: "/railwatch"
 end
 ```
 
-The live-update channel applies the same rule as the pages.
+Requests that fail the constraint never reach the engine.
+
+### Naming the operator
+
+Comments, saved views and issue activity record who did them. Give the
+initializer a resolver and the dashboard shows that person instead of a
+single "Operator":
+
+```ruby
+c.dashboard_user = ->(request) do
+  user = User.find_by(id: request.session[:user_id])
+  user && { id: user.id, name: user.name, email: user.email }
+end
+```
 
 ## The writer process
 
@@ -205,6 +241,8 @@ Railwatch.configure do |c|
   c.issue_prefix = "SHOP"         # RAILWATCH_ISSUE_PREFIX; keys like SHOP-12
   c.repository_url = "https://github.com/you/shop"  # RAILWATCH_REPOSITORY_URL
   c.retention_days = 7            # RAILWATCH_RETENTION_DAYS
+  c.http_basic_auth_enabled = true    # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; credentials from Rails credentials or env
+  c.base_controller_class = "ActionController::Base"  # RAILWATCH_BASE_CONTROLLER_CLASS
   c.dashboard_user = ->(request) { ... }
 end
 ```

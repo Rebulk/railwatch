@@ -98,12 +98,18 @@
   railwatch` resolve past it. The engine loads Active Job itself
   and treats Action Cable as optional, so an app from `rails new
   --minimal` boots with it.
-- The embedded dashboard is closed outside development and test until
-  the host sets `c.dashboard_user` (a resolver that returns the operator
-  or nil) or `c.dashboard_open = true`; every page and the live channel
-  answer 403 otherwise, with a note saying which to set, and the doctor
-  reports it. Before this a production install served every query and
-  log line to anyone who found the URL.
+- The embedded dashboard authenticates the way Mission Control Jobs
+  does: HTTP Basic is on and closed by default, so with no credentials
+  every page and the live channel answer 401 (with a note saying what to
+  run) and the doctor reports it. `bin/rails
+  railwatch:authentication:configure` writes
+  `railwatch.http_basic_auth_user/_password` to the environment's Rails
+  credentials; `RAILWATCH_HTTP_BASIC_AUTH_USER/_PASSWORD` or the
+  initializer do the same. A host with its own admin auth sets
+  `c.http_basic_auth_enabled = false` and either
+  `c.base_controller_class` (the dashboard controllers inherit from it)
+  or a routes constraint around the mount. Before this a production
+  install served every query and log line to anyone who found the URL.
 - The Puma plugin forks the writer in single mode too (the default for a
   Rails 8 app), and flushes the serving process's own reporter before
   stopping the writer at shutdown, so its process and health records no

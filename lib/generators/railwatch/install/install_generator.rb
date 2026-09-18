@@ -209,12 +209,11 @@ module Railwatch
           say <<~STEPS, :green
 
             Next steps
-              1. Restart the app and open /railwatch.
-              2. Before production: name who may see it. The dashboard shows
-                 every query, log line and exception, so outside development
-                 and test it answers 403 until config/initializers/railwatch.rb
-                 sets c.dashboard_user (who is signed in; docs/embedded.md,
-                 Authentication) or c.dashboard_open = true.
+              1. Set the dashboard's HTTP Basic credentials (it is closed until
+                 you do):  bin/rails railwatch:authentication:configure
+                 Using your own admin auth instead? See docs/embedded.md,
+                 Authentication (base_controller_class or a routes constraint).
+              2. Restart the app and open /railwatch.
               3. Nothing else to run. Both databases were created just now and
                  `bin/rails db:prepare` (which a deploy already runs) migrates
                  them after every gem update. With `plugin :railwatch` in

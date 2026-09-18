@@ -162,19 +162,15 @@ namespace :railwatch do
                      end)
         end
       end
-      # The dashboard refuses every request outside development and test
-      # until the host says who may see it; a deploy that forgot gets a 403,
-      # not a public page, and this is where that shows up before it does.
-      resolver = config.dashboard_user
-      check.call(resolver || config.dashboard_open || Rails.env.local?, "dashboard access",
-                 if resolver
-                   "c.dashboard_user names the operator (the dashboard answers only when it returns one)"
-                 elsif config.dashboard_open
-                   "c.dashboard_open = true: anyone who can reach the mount sees it; keep a routes constraint or network rule in front"
-                 elsif Rails.env.local?
-                   "open in #{Rails.env} only; set c.dashboard_user (or c.dashboard_open) before production, or the dashboard answers 403 there"
+      # HTTP Basic is on and closed until credentials exist; a deploy that
+      # forgot gets a 401, not a public page, and this says so first.
+      check.call(!config.http_basic_auth_enabled || config.http_basic_auth_configured?, "dashboard access",
+                 if !config.http_basic_auth_enabled
+                   "HTTP Basic off; the dashboard is gated by #{config.base_controller_class == 'ActionController::Base' ? 'your routes constraint around the mount (make sure there is one)' : "c.base_controller_class = #{config.base_controller_class}"}"
+                 elsif config.http_basic_auth_configured?
+                   "HTTP Basic, user #{config.http_basic_auth_user}"
                  else
-                   "closed: the dashboard answers 403 in #{Rails.env} until c.dashboard_user or c.dashboard_open is set (config/initializers/railwatch.rb)"
+                   "closed: HTTP Basic is on with no credentials, every dashboard request is 401. Run `bin/rails railwatch:authentication:configure`"
                  end)
       recurring = Rails.root.join("config/recurring.yml")
       leftover = recurring.exist? && recurring.read.include?("Railwatch::")
@@ -365,6 +361,15 @@ namespace :railwatch do
       (triage_issue, slow_route, daily_summary), and resources -- including
       Railwatch's own docs at railwatch://docs/<name>. See docs/ai-and-mcp.md.
     TEXT
+  end
+
+  # The same shape as `mission_control:jobs:authentication:configure`: asks
+  # for a user and password and writes them to the current environment's
+  # credentials under `railwatch:`, which the engine reads at boot.
+  #   RAILS_ENV=production bin/rails railwatch:authentication:configure
+  desc "Configure HTTP Basic authentication for the embedded dashboard (writes Rails credentials)"
+  task "authentication:configure" => :environment do
+    Railwatch::Authentication.configure
   end
 
   desc "Send deploy metadata to Railwatch: rake railwatch:deploy[ref,name,url]"

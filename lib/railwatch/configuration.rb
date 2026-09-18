@@ -61,7 +61,8 @@ module Railwatch
     ].freeze
 
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
-                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :dashboard_open, :writer_socket,
+                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
+                  :http_basic_auth_enabled, :http_basic_auth_user, :http_basic_auth_password, :base_controller_class,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -95,12 +96,23 @@ module Railwatch
       @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
       @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
       @dashboard_user = nil
-      # Whether the embedded dashboard answers when no dashboard_user resolver
-      # names who is looking. Off outside development and test: the dashboard
-      # shows every query, log line and exception the app produced, and the
-      # generator cannot know the host's auth, so an install that forgot to
-      # wire it gets a 403 in production rather than a public page.
-      @dashboard_open = env_bool("RAILWATCH_DASHBOARD_OPEN", false)
+      # Dashboard access, the way Mission Control Jobs does it: HTTP Basic
+      # authentication is on and CLOSED by default. With no user and password
+      # configured every dashboard request is 401, so an install that forgot
+      # to set anything up is never a public page. Credentials come from
+      # Rails credentials (railwatch.http_basic_auth_user/_password, written
+      # by `bin/rails railwatch:authentication:configure`), from these env
+      # vars, or by assignment here. A host with its own admin auth turns
+      # Basic off and names a base controller, or wraps the mount in a
+      # routes constraint.
+      @http_basic_auth_enabled = env_bool("RAILWATCH_HTTP_BASIC_AUTH_ENABLED", true)
+      @http_basic_auth_user = ENV["RAILWATCH_HTTP_BASIC_AUTH_USER"]
+      @http_basic_auth_password = ENV["RAILWATCH_HTTP_BASIC_AUTH_PASSWORD"]
+      # The dashboard controllers inherit from this class, so a host's own
+      # before_actions (require an admin, redirect to sign-in) run in front of
+      # every page. Default is the engine's own base, which authenticates
+      # nothing itself beyond HTTP Basic above.
+      @base_controller_class = ENV.fetch("RAILWATCH_BASE_CONTROLLER_CLASS", "ActionController::Base")
       # Embedded mode's writer process (lib/railwatch/writer.rb): the Unix
       # socket the Puma workers hand their batches to. Relative paths are
       # under Rails.root. nil disables the writer and every process writes
@@ -277,29 +289,33 @@ module Railwatch
     # and returning a User, {id:, name:, email:} or nil. Authentication and
     # authorisation stay the host's job: put the mount behind its own
     # constraint. This only names the person for comments and saved views.
-    # Whether this request may see the dashboard at all. With a resolver, the
-    # host decides: a truthy return is a person, nil is "not signed in". With
-    # none, only a local environment or an explicit dashboard_open lets it
-    # through. Authorisation proper (which signed-in users are operators)
-    # belongs in the host's resolver or a routes constraint around the mount.
-    def dashboard_allowed?(request)
-      return !resolve_dashboard_user_raw(request).nil? if dashboard_user
-      return true if dashboard_open
+    # Both halves present. Read late (not at boot) so credentials set from an
+    # initializer, an env var or the configure task all count.
+    def http_basic_auth_configured?
+      http_basic_auth_user.to_s.strip != "" && http_basic_auth_password.to_s.strip != ""
+    end
 
-      defined?(Rails) && Rails.respond_to?(:env) && Rails.env.local?
+    # Whether the request carries the configured HTTP Basic credentials.
+    # False when Basic is on and nothing is configured (closed), true when
+    # Basic is off (the host's base controller or routes constraint is the
+    # gate then). Shared by the dashboard controller and the live channel.
+    def http_basic_auth_ok?(request)
+      return true unless http_basic_auth_enabled
+      return false unless http_basic_auth_configured?
+
+      ActionController::HttpAuthentication::Basic.authenticate(request) do |user, password|
+        ActiveSupport::SecurityUtils.secure_compare(user, http_basic_auth_user.to_s) &
+          ActiveSupport::SecurityUtils.secure_compare(password, http_basic_auth_password.to_s)
+      end == true
     end
 
     def resolve_dashboard_user(request)
-      resolved = resolve_dashboard_user_raw(request)
+      resolved = dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
       case resolved
       when User then resolved
       when Hash then User.new(id: resolved[:id] || User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
       else User.default
       end
-    end
-
-    def resolve_dashboard_user_raw(request)
-      dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
     end
 
     def ingest_url_allowed?

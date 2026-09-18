@@ -63,6 +63,16 @@ module Railwatch
       Railwatch::Console.silence!
     end
 
+    # Same source Mission Control Jobs reads: railwatch.http_basic_auth_user
+    # and _password in Rails credentials, which `bin/rails
+    # railwatch:authentication:configure` writes. An initializer or env var
+    # that already set them wins.
+    initializer "railwatch.http_basic_auth", after: :load_config_initializers do |app|
+      config = Railwatch.config
+      config.http_basic_auth_user ||= app.credentials.dig(:railwatch, :http_basic_auth_user)
+      config.http_basic_auth_password ||= app.credentials.dig(:railwatch, :http_basic_auth_password)
+    end
+
     initializer "railwatch.transport_security", after: :load_config_initializers do
       next if Railwatch.config.local? || Railwatch.config.ingest_url_allowed?
 

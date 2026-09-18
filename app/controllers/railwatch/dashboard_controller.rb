@@ -4,7 +4,12 @@ module Railwatch
   # Base for every dashboard page: the prebuilt Inertia bundle, the shared
   # props its layouts read, and per-controller Inertia config so a host that
   # also uses Inertia keeps its own.
-  class DashboardController < ActionController::Base
+  #
+  # Inherits from Railwatch.config.base_controller_class (default
+  # ActionController::Base) so a host can put its own admin gate in front of
+  # every page the way Mission Control Jobs allows: point it at a controller
+  # whose before_action requires an admin, and turn HTTP Basic off.
+  class DashboardController < Railwatch.config.base_controller_class.constantize
     include Railwatch::AssetsHelper
     helper Railwatch::AssetsHelper
     include Railwatch::EnvironmentScoped
@@ -20,10 +25,10 @@ module Railwatch
       render plain: exception.message, status: :unprocessable_content
     end
 
-    # The host's resolver, or dashboard_open, or a local environment; anything
-    # else is refused before a byte of telemetry is read. See
-    # Configuration#dashboard_allowed?.
-    before_action :require_dashboard_access
+    # HTTP Basic, on and closed by default (Configuration#http_basic_auth_*).
+    # Runs before anything reads telemetry; a host that authenticates in its
+    # base controller or a routes constraint turns it off.
+    before_action :authenticate_by_http_basic
     before_action { Viewer.user = Railwatch.config.resolve_dashboard_user(request) }
 
     inertia_share auth: -> { { user: Viewer.user.as_json, session: { id: "embedded", recently_authenticated: true } } },
@@ -39,13 +44,24 @@ module Railwatch
 
     private
 
-    def require_dashboard_access
-      return if Railwatch.config.dashboard_allowed?(request)
+    def authenticate_by_http_basic
+      config = Railwatch.config
+      return unless config.http_basic_auth_enabled
 
-      render plain: "Railwatch: the dashboard is closed. In production, set c.dashboard_user in " \
-                    "config/initializers/railwatch.rb to name who is signed in (docs/embedded.md, Authentication), " \
-                    "or c.dashboard_open = true to open it to anyone who can reach this URL.",
-             status: :forbidden
+      if config.http_basic_auth_configured?
+        http_basic_authenticate_or_request_with(name: config.http_basic_auth_user, password: config.http_basic_auth_password,
+                                                realm: "Railwatch")
+      else
+        # Closed, not open: same as Mission Control with no credentials. The
+        # body says what to do, since a bare 401 with no challenge looks like
+        # a broken install rather than an unconfigured one.
+        render plain: "Railwatch: HTTP Basic authentication is on and no credentials are configured, so the " \
+                      "dashboard is closed. Run `bin/rails railwatch:authentication:configure` (writes " \
+                      "railwatch.http_basic_auth_user/_password to Rails credentials), or set " \
+                      "RAILWATCH_HTTP_BASIC_AUTH_USER and _PASSWORD, or turn Basic off " \
+                      "(c.http_basic_auth_enabled = false) once your own auth gates the mount. See docs/embedded.md.",
+               status: :unauthorized
+      end
     end
   end
 end
