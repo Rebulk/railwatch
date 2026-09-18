@@ -3,6 +3,31 @@
 require "spec_helper"
 
 RSpec.describe Railwatch do
+  describe Railwatch::JsonCompat do
+    before { described_class.reset! }
+    after { described_class.reset! }
+
+    # Detected by asking the pair to decode, not by comparing version
+    # numbers, so the check is right about a patched Rails or a backport and
+    # goes quiet by itself when the host upgrades.
+    it "is quiet on a pair that can decode" do
+      expect(described_class).not_to be_broken
+    end
+
+    it "reports the pair that raises ArgumentError, and says what to do about it" do
+      allow(ActiveSupport::JSON).to receive(:decode).and_raise(ArgumentError, "wrong number of arguments (given 2, expected 1)")
+
+      expect(described_class).to be_broken
+      expect(described_class.advice).to include("rails/rails#58784", %(gem "json", "< 3"))
+    end
+
+    it "does not mistake an unrelated failure for the incompatibility" do
+      allow(ActiveSupport::JSON).to receive(:decode).and_raise(JSON::ParserError, "nope")
+
+      expect(described_class).not_to be_broken
+    end
+  end
+
   describe Railwatch::Record do
     # The weigher was flattened for speed (scalars are measured inline in the
     # container loops). These pin the semantics that flattening could have

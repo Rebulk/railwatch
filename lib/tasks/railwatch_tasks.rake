@@ -169,14 +169,23 @@ namespace :railwatch do
       end
       # HTTP Basic is on and closed until credentials exist; a deploy that
       # forgot gets a 401, not a public page, and this says so first.
-      check.call(!config.http_basic_auth_enabled || config.http_basic_auth_configured?, "dashboard access",
-                 if !config.http_basic_auth_enabled
-                   "HTTP Basic off; the dashboard is gated by #{config.base_controller_class == 'ActionController::Base' ? 'your routes constraint around the mount (make sure there is one)' : "c.base_controller_class = #{config.base_controller_class}"}"
-                 elsif config.http_basic_auth_configured?
-                   "HTTP Basic, user #{config.http_basic_auth_user}"
+      gate = config.dashboard_gate
+      check.call(gate != :undeclared && !(gate == :basic && !config.http_basic_auth_configured?), "dashboard access",
+                 case gate
+                 when :basic
+                   config.http_basic_auth_configured? ? "HTTP Basic, user #{config.http_basic_auth_user}" :
+                     "closed: HTTP Basic is on with no credentials, so every dashboard request is 401. " \
+                     "Run `bin/rails railwatch:authentication:configure`"
+                 when :controller then "your own: c.base_controller_class = #{config.base_controller_class}"
+                 when :resolver then "your own: c.dashboard_user decides, and live updates follow it"
+                 when :open then "deliberately open: anyone who can reach the mount can read it (c.dashboard_open)"
                  else
-                   "closed: HTTP Basic is on with no credentials, every dashboard request is 401. Run `bin/rails railwatch:authentication:configure`"
+                   "undeclared: HTTP Basic is off and no base_controller_class, dashboard_user or dashboard_open " \
+                   "is set. If a routes constraint gates the mount, say so with `c.dashboard_open = true` " \
+                   "(it also enables live updates); otherwise the dashboard is public"
                  end)
+      check.call(!Railwatch::JsonCompat.broken?, "json compatibility",
+                 Railwatch::JsonCompat.broken? ? Railwatch::JsonCompat.advice : "json #{Railwatch::JsonCompat.json_version} decodes on Rails #{Rails.version}")
       recurring = Rails.root.join("config/recurring.yml")
       leftover = recurring.exist? && recurring.read.include?("Railwatch::")
       check.call(!leftover, "recurring.yml",

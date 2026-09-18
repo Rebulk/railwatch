@@ -191,6 +191,55 @@ RSpec.describe "embedded dashboard", type: :request do
       expect(response).to have_http_status(:ok)
     end
 
+    it "names the gate in force, so the doctor and the boot warning can say which it is" do
+      config = Railwatch.config
+      expect(config.dashboard_gate).to eq(:basic)
+
+      config.http_basic_auth_enabled = false
+      expect(config.dashboard_gate).to eq(:undeclared)
+
+      config.dashboard_open = true
+      expect(config.dashboard_gate).to eq(:open)
+
+      config.dashboard_user = ->(_request) { { id: 1, name: "Ada" } }
+      expect(config.dashboard_gate).to eq(:resolver)
+
+      config.base_controller_class = "ActionController::API"
+      expect(config.dashboard_gate).to eq(:controller)
+    ensure
+      config.dashboard_open = false
+      config.dashboard_user = nil
+      config.base_controller_class = Railwatch::Configuration::DEFAULT_BASE_CONTROLLER
+    end
+
+    # Action Cable runs on the host's own /cable endpoint, which a routes
+    # constraint around the engine's mount does not cover, so an undeclared
+    # gate has to refuse rather than assume something is in front of it.
+    it "lets the declared gate decide a live-update subscription" do
+      config = Railwatch.config
+      request = ->(headers = {}) { ActionDispatch::Request.new(Rack::MockRequest.env_for("/cable", headers)) }
+      creds = { "HTTP_AUTHORIZATION" => ActionController::HttpAuthentication::Basic.encode_credentials("ops", "s3cret") }
+
+      config.http_basic_auth_user = "ops"
+      config.http_basic_auth_password = "s3cret"
+      expect(config.dashboard_channel_allowed?(request.call)).to be(false)
+      expect(config.dashboard_channel_allowed?(request.call(creds))).to be(true)
+
+      config.http_basic_auth_enabled = false
+      expect(config.dashboard_channel_allowed?(request.call)).to be(false)
+
+      config.dashboard_open = true
+      expect(config.dashboard_channel_allowed?(request.call)).to be(true)
+
+      config.dashboard_open = false
+      config.dashboard_user = ->(req) { req.headers["X-Operator"] && { id: 1, name: "Ada" } }
+      expect(config.dashboard_channel_allowed?(request.call)).to be(false)
+      expect(config.dashboard_channel_allowed?(request.call("HTTP_X_OPERATOR" => "1"))).to be(true)
+    ensure
+      config.dashboard_open = false
+      config.dashboard_user = nil
+    end
+
     it "does not gate the beacon, which is the app's own browser client posting timings" do
       post "/railwatch/beacon", params: { visits: [] }.to_json, headers: { "CONTENT_TYPE" => "application/json" }
       expect(response).not_to have_http_status(:unauthorized)

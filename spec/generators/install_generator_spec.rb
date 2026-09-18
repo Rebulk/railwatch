@@ -590,6 +590,29 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
     end
 
+    it "offers the json pin in the app's Gemfile when Rails and json cannot decode together" do
+      allow(Railwatch::JsonCompat).to receive(:broken?).and_return(true)
+      write_file("config/database.yml", flat_database_yml)
+      write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
+
+      output = Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      expect(read("Gemfile")).to include(%(gem "json", "< 3"), "rails/rails#58784")
+      expect(output).to include("bundle install")
+      # The databases are not created behind a bundle that is about to change.
+      expect(output).not_to include("Both databases were created")
+    end
+
+    it "adds the sqlite3 gem when the app has not got one, since the two databases are SQLite files" do
+      allow(Gem).to receive(:loaded_specs).and_return({})
+      write_file("config/database.yml", flat_database_yml)
+      write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
+
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      expect(read("Gemfile")).to include(%(gem "sqlite3"))
+    end
+
     it "copies no schema or migration files: the engine migrates both databases from the gem" do
       write_file("config/database.yml", flat_database_yml)
       Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }

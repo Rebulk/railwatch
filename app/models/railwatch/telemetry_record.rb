@@ -12,8 +12,9 @@ module Railwatch
     self.abstract_class = true
     begin
       connects_to database: { writing: :railwatch_telemetry, reading: :railwatch_telemetry }
-    rescue ActiveRecord::AdapterNotSpecified
-      # No `railwatch_telemetry` entry in this environment's database.yml. A cloud-transport
+    rescue ActiveRecord::AdapterNotSpecified, LoadError
+      # No `railwatch_telemetry` entry in this environment's database.yml, or an entry
+      # whose adapter gem is not in the bundle yet (LoadError). A cloud-transport
       # app has none and still eager-loads this class in production, and so
       # does the --local installer's own boot, before it has written the
       # entry -- so loading must not raise. Using it must, though: without

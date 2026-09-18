@@ -110,10 +110,7 @@ credentials (the browser sends them on the WebSocket handshake).
 
 Two ways, both from Mission Control's playbook. Either lets an admin of
 your app in with no second password. Turn Basic off when you use one,
-or both gates apply. Note that neither covers Action Cable: with Basic
-off, whoever may open your app's `/cable` connection may subscribe to
-the dashboard's live-update channel, which carries ingest counts and
-timestamps but no telemetry records.
+or both gates apply.
 
 A base controller. Every dashboard controller inherits from it, so its
 `before_action` runs first:
@@ -136,7 +133,42 @@ constraints ->(request) { Session.find_by(id: request.cookie_jar.signed[:session
 end
 ```
 
-Requests that fail the constraint never reach the engine.
+Requests that fail the constraint never reach the engine. A constraint is
+invisible to the gem, though, so say that the engine's own gate is off on
+purpose:
+
+```ruby
+c.http_basic_auth_enabled = false
+c.dashboard_open = true   # "something in front of the mount gates this"
+```
+
+### Deliberately public
+
+A dashboard on a private network or behind a VPN can be open, and saying
+so is a setting rather than an omission:
+
+```ruby
+c.http_basic_auth_enabled = false
+c.dashboard_open = true
+```
+
+With Basic off and none of `base_controller_class`, `dashboard_user` or
+`dashboard_open` set, the gem cannot tell a deliberate choice from a
+forgotten one. It serves the dashboard (a routes constraint it cannot see
+is a legitimate answer) but logs a warning at every boot outside
+development, `railwatch:doctor` reports the gate as undeclared, and live
+updates are refused. Declaring any of the three settles it.
+
+### Live updates and `/cable`
+
+Action Cable runs on your application's own `/cable` endpoint, not under
+the engine's mount, so a routes constraint around `/railwatch` does not
+cover it and a base controller cannot reach it. The live-update channel
+therefore follows what you declared: HTTP Basic credentials are checked
+on the WebSocket handshake, a `dashboard_user` resolver is consulted,
+`dashboard_open` and `base_controller_class` are taken at their word, and
+an undeclared gate is refused. The channel carries an ingest ping (a
+timestamp and per-type counts) and never telemetry records.
 
 ### Naming the operator
 
@@ -263,6 +295,7 @@ Railwatch.configure do |c|
   c.retention_days = 7            # RAILWATCH_RETENTION_DAYS
   c.http_basic_auth_enabled = true    # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; credentials from Rails credentials or env
   c.base_controller_class = "ActionController::Base"  # RAILWATCH_BASE_CONTROLLER_CLASS
+  c.dashboard_open = false            # RAILWATCH_DASHBOARD_OPEN; "yes, public, on purpose"
   c.dashboard_user = ->(request) { ... }
 end
 ```

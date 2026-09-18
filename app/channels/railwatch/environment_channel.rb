@@ -7,16 +7,18 @@ module Railwatch
   # Authorization header on the WebSocket handshake, so the channel checks
   # the same credentials as the pages.
   #
-  # With Basic off this check passes and the host's own
-  # ApplicationCable::Connection is the only gate: a routes constraint around
-  # the engine's mount does NOT cover the app's separate /cable endpoint, and
-  # base_controller_class applies to HTTP controllers only. What a subscriber
-  # can see here is the ingest ping (a timestamp and per-type counts), never
-  # telemetry records, but an app that gates /railwatch and leaves /cable open
-  # should know that is where the line falls.
+  # With Basic off, Configuration#dashboard_channel_allowed? asks whichever
+  # gate the host declared: a dashboard_user resolver can refuse this
+  # request, a named base controller or an explicit dashboard_open is taken
+  # at its word, and an undeclared gate refuses. That last case matters
+  # because Action Cable runs on the host's own /cable endpoint: a routes
+  # constraint around the engine's mount does not cover it and a base
+  # controller cannot reach it, so "something in front of /railwatch" is not
+  # evidence about this. What a subscriber would see is the ingest ping (a
+  # timestamp and per-type counts), never telemetry records.
   class EnvironmentChannel < ActionCable::Channel::Base
     def subscribed
-      if params[:id].to_i == Environment::ID && Railwatch.config.http_basic_auth_ok?(connection.request)
+      if params[:id].to_i == Environment::ID && Railwatch.config.dashboard_channel_allowed?(connection.request)
         stream_from "environment_#{Environment::ID}"
       else
         reject

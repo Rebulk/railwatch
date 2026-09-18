@@ -39,13 +39,6 @@ module Railwatch
         end
 
         spec.add_dependency "rails", ">= 8.1", "< 9"
-        # Rails 8.1 cannot decode with json 3 (ActiveSupport::JSON.decode
-        # passes options positionally, rails/rails#58784): signed cookies and
-        # every JSON column break, including this gem's own telemetry
-        # migrations on SQLite. Ruby 3.4.10 ships json 3.0.2 as a default gem,
-        # so a fresh app resolves to it unless a dependency says otherwise.
-        # Drop this once Rails ships the fix.
-        spec.add_dependency "json", "< 3"
         # Used for profile stacks and attachments. A bundled gem since Ruby
         # 3.4, so it must be declared rather than assumed from stdlib.
         spec.add_dependency "base64", "~> 0.2"

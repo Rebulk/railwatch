@@ -73,6 +73,27 @@ module Railwatch
       config.http_basic_auth_password ||= app.credentials.dig(:railwatch, :http_basic_auth_password)
     end
 
+    # Two things worth one line in the log at boot, because both are
+    # invisible until something is already wrong: a Rails/json pair that
+    # cannot decode, and an embedded dashboard with nothing declared in
+    # front of it.
+    initializer "railwatch.warnings", after: :load_config_initializers do
+      config.after_initialize do
+        next unless Railwatch.enabled?
+
+        Rails.logger.warn("[railwatch] #{Railwatch::JsonCompat.advice}") if Railwatch::JsonCompat.broken?
+
+        if Railwatch.config.local? && Railwatch.config.dashboard_gate == :undeclared && !Rails.env.local?
+          Rails.logger.warn(
+            "[railwatch] the dashboard at the engine's mount has no gate this gem can see: HTTP Basic is off and " \
+            "no base_controller_class, dashboard_user or dashboard_open is set. If a routes constraint or your " \
+            "network already gates it, set `c.dashboard_open = true` to say so (it also enables live updates); " \
+            "otherwise anyone who can reach the URL can read every query, log line and exception this app records."
+          )
+        end
+      end
+    end
+
     initializer "railwatch.transport_security", after: :load_config_initializers do
       next if Railwatch.config.local? || Railwatch.config.ingest_url_allowed?
 

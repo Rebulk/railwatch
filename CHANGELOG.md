@@ -121,9 +121,37 @@
   `bundle exec puma` evaluates `config/puma.rb` before it loads the app,
   so the old `if defined?(Railwatch)` guard meant a writer was never
   started there. The plugin itself now decides whether to run after boot.
-- The beacon's rate limiter fails closed. A cache store that cannot count
-  (`NullStore`, a cache that is down) used to leave an unauthenticated,
-  unlimited write endpoint.
+- The browser beacon is bounded the way a hosted product bounds a public
+  ingest endpoint, since one cannot hold a credential the page does not
+  already give away: an origin allowlist (`beacon_allowed_origins`,
+  same-origin by default, the analogue of Sentry's allowed domains), the
+  per-client rate limit, and a new ceiling for the endpoint as a whole
+  (`beacon_global_rate_limit`, 6,000/minute) so a rotating address cannot
+  multiply past the first. Both limits fail closed on a cache store that
+  cannot count, where the limiter used to fail open.
+- How the dashboard is gated is now something the app states rather than
+  something the gem guesses. `Configuration#dashboard_gate` names it:
+  HTTP Basic, a `base_controller_class`, a `dashboard_user` resolver that
+  can refuse, or `dashboard_open = true` for a dashboard that is public on
+  purpose (a private network, a VPN, a routes constraint the gem cannot
+  see). With Basic off and none of them set the gate is undeclared: the
+  dashboard still serves, because a constraint is a legitimate answer, but
+  the app logs a warning at every boot outside development, the doctor
+  reports it, and live updates are refused. The live channel follows the
+  declared gate, which matters because Action Cable runs on the host's own
+  `/cable` endpoint that no routes constraint around the mount covers.
+- Railwatch no longer pins `json` for the host. The Rails 8.1 and json 3
+  incompatibility (rails/rails#58784) is the application's own, and a
+  gemspec dependency would constrain every bundle for it. The gem detects
+  the pair by asking it to decode rather than by comparing version
+  numbers, so a patched Rails or a backport is judged correctly and the
+  warning goes quiet by itself when Rails ships the fix. The installer
+  offers the pin in the app's Gemfile, the doctor reports it, and the app
+  logs it once at boot.
+- Both database bases also survive an entry whose adapter gem is not in
+  the bundle yet (a `LoadError` rather than `AdapterNotSpecified`), which
+  is the state a PostgreSQL app is in between the installer adding
+  `gem "sqlite3"` and the `bundle install` that follows.
 - The embedded dashboard authenticates the way Mission Control Jobs
   does: HTTP Basic is on and closed by default, so with no credentials
   every dashboard page answers 401 (with a note saying what to run), the

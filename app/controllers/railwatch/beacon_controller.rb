@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "uri"
+
 module Railwatch
   # Receives Inertia visit timings and JavaScript errors from the browser
   # client (app/frontend/lib/railwatch.ts). Mounted at /railwatch/beacon.
@@ -22,7 +24,7 @@ module Railwatch
 
     RATE_LIMIT_WINDOW = 60 # seconds
 
-    before_action :limit_payload, :throttle, if: -> { Railwatch.config.beacon_enabled }
+    before_action :limit_payload, :verify_origin, :throttle, if: -> { Railwatch.config.beacon_enabled }
 
     def create
       return head :no_content unless Railwatch.config.beacon_enabled
@@ -65,12 +67,50 @@ module Railwatch
     # The beacon takes no credential and keeps every browser error it is
     # sent, so a client that is not the page -- a script, a bored visitor
     # with curl -- could otherwise fill the app's quota with junk issues.
-    # Same shape as Rails' rate_limit (a counter per client IP in the app's
-    # cache store), read from config at request time so an initializer can
-    # raise or disable it. A store that cannot count (NullStore) fails open:
-    # the beacon keeps working, just unthrottled.
+    # Two ceilings, both counters in the app's cache store in the shape of
+    # Rails' own rate_limit: one per client IP, and one for the endpoint as a
+    # whole so a rotating address cannot multiply its way past the first.
+    # Read from config per request, so an initializer can raise or remove
+    # either one.
+    # Same idea as Sentry's allowed domains: a public ingest endpoint cannot
+    # authenticate its caller (the credential would be in the page), so it
+    # refuses anything that says it came from somewhere else. Not a security
+    # boundary -- an Origin header is trivially forged outside a browser --
+    # but it stops another site's page from spending this app's quota.
+    # Missing Origin and Referer pass, which is how Rails' own forgery origin
+    # check behaves.
+    def verify_origin
+      origin = request.origin || referer_origin
+      return if origin.nil? || origin == request.base_url
+      return if Railwatch.config.beacon_allowed_origins.any? { |allowed| origin_matches?(origin, allowed) }
+
+      Railwatch.debug { "refused a beacon from #{origin} (this app is #{request.base_url})" }
+      head :forbidden
+    end
+
+    def referer_origin
+      referer = request.referer.presence or return nil
+      uri = URI.parse(referer)
+      return nil unless uri.scheme && uri.host
+
+      port = ":#{uri.port}" if uri.port && uri.port != uri.default_port
+      "#{uri.scheme}://#{uri.host}#{port}"
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    # An entry is either a full origin ("https://app.example.com") or a bare
+    # host, which matches either scheme.
+    def origin_matches?(origin, allowed)
+      return true if origin == allowed
+
+      allowed.include?("://") ? false : [ "https://#{allowed}", "http://#{allowed}" ].include?(origin)
+    end
+
     def throttle
       limit = Railwatch.config.beacon_rate_limit.to_i
+      global = Railwatch.config.beacon_global_rate_limit.to_i
+      return refuse_beacon if global.positive? && over?("railwatch:beacon:all", global)
       return unless limit.positive?
 
       # A store that cannot count (NullStore, a cache that is down, one whose
@@ -78,13 +118,24 @@ module Railwatch
       # than serving an unauthenticated, unlimited write endpoint: the
       # browser client retries on the next flush, and an app that genuinely
       # wants no limit sets beacon_rate_limit to 0.
-      count = cache_store.increment("railwatch:beacon:#{request.remote_ip}", 1, expires_in: RATE_LIMIT_WINDOW)
+      refuse_beacon if over?("railwatch:beacon:#{request.remote_ip}", limit)
+    end
+
+    # True when this key has passed its ceiling for the window, and also when
+    # the store cannot count at all: a store that returns nil (NullStore, a
+    # cache that is down, one without increment) would otherwise leave an
+    # unauthenticated endpoint with no ceiling on it. An app that genuinely
+    # wants no limit sets the limit to 0, or turns the beacon off.
+    def over?(key, limit)
+      count = cache_store.increment(key, 1, expires_in: RATE_LIMIT_WINDOW)
       if count.nil?
         Railwatch.debug { "beacon rate limiting is unavailable (#{cache_store.class}); refusing the beacon" }
-        return head :too_many_requests
+        return true
       end
-      return unless count > limit
+      count > limit
+    end
 
+    def refuse_beacon
       response.set_header("Retry-After", RATE_LIMIT_WINDOW.to_s)
       head :too_many_requests
     end

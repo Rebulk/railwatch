@@ -46,6 +46,43 @@ module Railwatch
         template "initializer.rb", "config/initializers/railwatch.rb"
       end
 
+      # Not a gemspec dependency: the breakage is the host application's
+      # either way (its own sessions are failing), so this offers the pin in
+      # the app's Gemfile, where the app can drop it the day Rails ships the
+      # fix, rather than constraining every bundle that installs this gem.
+      def pin_json_when_it_cannot_decode
+        return unless Railwatch::JsonCompat.broken?
+        return say("#{Railwatch::JsonCompat.advice} (no Gemfile here to add it to)", :yellow) unless File.exist?("Gemfile")
+
+        contents = File.read("Gemfile")
+        return say_status(:identical, "Gemfile (json pin)", :blue) if contents.match?(/^\s*gem ["']json["']/)
+
+        append_to_file "Gemfile", "#{contents.end_with?("\n") ? "" : "\n"}\n" \
+                                  "# #{Railwatch::JsonCompat::ISSUE}: Rails cannot decode with json 3 yet. Remove when it can.\n" \
+                                  "#{Railwatch::JsonCompat::PIN}\n"
+        @needs_bundle = true
+        say "#{Railwatch::JsonCompat.advice} Added the pin to your Gemfile; run `bundle install`, then " \
+            "`bin/rails db:prepare`.", :yellow
+      end
+
+      # Embedded mode stores telemetry in SQLite files whatever the app's own
+      # database is, so an app on PostgreSQL or MySQL needs the adapter gem
+      # added before those files can be created.
+      def ensure_sqlite3_gem
+        return unless options[:local]
+        return if Gem.loaded_specs.key?("sqlite3")
+        return say("--local needs the sqlite3 gem for its two databases; add `gem \"sqlite3\"` and re-run.", :yellow) unless File.exist?("Gemfile")
+
+        contents = File.read("Gemfile")
+        unless contents.match?(/^\s*gem ["']sqlite3["']/)
+          append_to_file "Gemfile", %(#{contents.end_with?("\n") ? "" : "\n"}\n# Railwatch (embedded) keeps its telemetry in two SQLite files of its own.\ngem "sqlite3"\n)
+        end
+        @needs_bundle = true
+        say "Added `gem \"sqlite3\"` to the Gemfile: Railwatch's two databases are SQLite files whatever this app's " \
+            "own database is. Run `bundle install`, then `bin/rails db:prepare` to create them.", :yellow
+      end
+
+
       # Two databases of its own, never the app's primary: `railwatch` for
       # what people author (issues, comments, saved views, thresholds) and
       # `railwatch_telemetry` for what the app reports, which is written
@@ -177,23 +214,6 @@ module Railwatch
         return say_status(:identical, "config/deploy.yml", :blue) if updated == deploy
 
         create_file "config/deploy.yml", updated, force: true
-      end
-
-      # Embedded mode stores telemetry in SQLite files whatever the app's own
-      # database is, so an app on PostgreSQL or MySQL needs the adapter gem
-      # added before those files can be created.
-      def ensure_sqlite3_gem
-        return unless options[:local]
-        return if Gem.loaded_specs.key?("sqlite3")
-        return say("--local needs the sqlite3 gem for its two databases; add `gem \"sqlite3\"` and re-run.", :yellow) unless File.exist?("Gemfile")
-
-        contents = File.read("Gemfile")
-        unless contents.match?(/^\s*gem ["']sqlite3["']/)
-          append_to_file "Gemfile", %(#{contents.end_with?("\n") ? "" : "\n"}\n# Railwatch (embedded) keeps its telemetry in two SQLite files of its own.\ngem "sqlite3"\n)
-        end
-        @needs_bundle = true
-        say "Added `gem \"sqlite3\"` to the Gemfile: Railwatch's two databases are SQLite files whatever this app's " \
-            "own database is. Run `bundle install`, then `bin/rails db:prepare` to create them.", :yellow
       end
 
       # The two databases exist and are migrated when the generator returns:
