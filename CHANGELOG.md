@@ -166,6 +166,13 @@
   the bundle yet (a `LoadError` rather than `AdapterNotSpecified`), which
   is the state a PostgreSQL app is in between the installer adding
   `gem "sqlite3"` and the `bundle install` that follows.
+- Host user ids are opaque. The columns behind comments, issue activity,
+  saved views and issue assignment were integers, which assumed every
+  application numbers its users: an app with UUID primary keys could not
+  write a comment at all, and one with ids past the signed range could
+  not either. They are strings now, a `dashboard_user` resolver may
+  return whatever shape the app already uses, and rows written as numbers
+  before the change still match the same person after it.
 - The embedded dashboard authenticates the way Mission Control Jobs
   does: HTTP Basic is on and closed by default, so with no credentials
   every dashboard page answers 401 (with a note saying what to run), the

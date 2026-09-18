@@ -22,7 +22,7 @@ module Railwatch
     end
 
     def assignee=(user)
-      self.assignee_id = user&.id
+      self.assignee_id = user&.id&.to_s
     end
     belongs_to :merged_into, class_name: "Issue", optional: true
     has_many :merged_issues, class_name: "Issue", foreign_key: :merged_into_id, inverse_of: :merged_into, dependent: :nullify

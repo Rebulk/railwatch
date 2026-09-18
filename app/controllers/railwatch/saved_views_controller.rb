@@ -37,7 +37,7 @@ module Railwatch
     # dashboard_user resolver returns one identity for everybody is unaffected
     # either way: one owner, one editor.
     def editable?(view)
-      view.viewer_id == Viewer.user.id
+      view.viewer_id.to_s == Viewer.user.id.to_s
     end
 
     def fallback = application_environment_overview_path(application, environment)
