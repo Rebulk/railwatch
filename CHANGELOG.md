@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-18)
 
 - Embedded mode: `bin/rails generate railwatch:install --local` keeps
   every record in two SQLite databases the app owns (`railwatch` for
