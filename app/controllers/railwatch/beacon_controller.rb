@@ -73,8 +73,17 @@ module Railwatch
       limit = Railwatch.config.beacon_rate_limit.to_i
       return unless limit.positive?
 
+      # A store that cannot count (NullStore, a cache that is down, one whose
+      # increment is unsupported) returns nil. Refuse the beacon then rather
+      # than serving an unauthenticated, unlimited write endpoint: the
+      # browser client retries on the next flush, and an app that genuinely
+      # wants no limit sets beacon_rate_limit to 0.
       count = cache_store.increment("railwatch:beacon:#{request.remote_ip}", 1, expires_in: RATE_LIMIT_WINDOW)
-      return unless count && count > limit
+      if count.nil?
+        Railwatch.debug { "beacon rate limiting is unavailable (#{cache_store.class}); refusing the beacon" }
+        return head :too_many_requests
+      end
+      return unless count > limit
 
       response.set_header("Retry-After", RATE_LIMIT_WINDOW.to_s)
       head :too_many_requests

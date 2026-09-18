@@ -71,11 +71,16 @@ RSpec.describe "beacon rate limit", type: :request do
     expect(railwatch_records(:visit).size).to eq(3)
   end
 
-  it "fails open on a cache store that cannot count" do
+  # Fails CLOSED, deliberately. The beacon is unauthenticated by design (any
+  # browser on the app posts to it), so a store that cannot count would
+  # otherwise leave an unlimited public write endpoint. An app that wants no
+  # limit says so with beacon_rate_limit = 0, which is checked above.
+  it "refuses the beacon on a cache store that cannot count, rather than serving an unlimited public endpoint" do
     Railwatch.config.beacon_rate_limit = 1
     allow_any_instance_of(Railwatch::BeaconController).to receive(:cache_store).and_return(ActiveSupport::Cache::NullStore.new)
 
-    3.times { post_beacon }
-    expect(response).to have_http_status(:no_content)
+    post_beacon
+    expect(response).to have_http_status(:too_many_requests)
+    expect(railwatch_records(:visit)).to be_empty
   end
 end

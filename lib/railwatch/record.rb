@@ -74,7 +74,11 @@ module Railwatch
     end
 
     def hash_bytes(hash, limit, depth)
-      return limit + 1 if depth > MAX_SIZING_DEPTH
+      # Children are weighed inline below, so the bound is checked for them
+      # here: a container whose contents would sit past MAX_SIZING_DEPTH is
+      # over the limit by definition, which is what a per-value depth check
+      # produced before the contents were inlined.
+      return limit + 1 if depth > MAX_SIZING_DEPTH || (depth == MAX_SIZING_DEPTH && !hash.empty?)
 
       bytes = 80 + (hash.size * 40)
       hash.each_pair do |key, value|
@@ -91,7 +95,7 @@ module Railwatch
     end
 
     def array_bytes(array, limit, depth)
-      return limit + 1 if depth > MAX_SIZING_DEPTH
+      return limit + 1 if depth > MAX_SIZING_DEPTH || (depth == MAX_SIZING_DEPTH && !array.empty?)
 
       bytes = 40 + (array.size * 8)
       array.each do |value|

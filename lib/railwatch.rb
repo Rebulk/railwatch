@@ -576,15 +576,11 @@ module Railwatch
     File.expand_path("../db/#{database}_migrate", __dir__)
   end
 
-  # Whether the host's database.yml names one of the engine's databases for
-  # the current environment. Read from the raw configuration rather than the
-  # connection handler, so it is answerable while the app is still booting.
-  def self.database_configured?(name)
-    return false unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
-
-    !ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name.to_s).nil?
-  rescue StandardError
-    false
-  end
+  # Raised when the engine's models are used in an app whose database.yml
+  # has no entry for them. They must never fall back to the host's primary
+  # connection: the telemetry tables are unprefixed (`sessions`, `visits`,
+  # `people`, `notifications`, `logs`), so a query there would read, and a
+  # write would corrupt, the application's own tables.
+  class DatabaseNotConfigured < StandardError; end
 end
 require "railwatch/engine" if defined?(Rails::Engine)

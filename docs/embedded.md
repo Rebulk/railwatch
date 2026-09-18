@@ -31,6 +31,12 @@ classes even though embedded mode calls them directly) and loads it
 itself. Action Cable is optional: with it the dashboard updates live,
 without it (`rails new --minimal`) the pages refresh on navigation.
 
+The two databases are SQLite files whatever your application's own
+database is, so the generated entries name `adapter: sqlite3` rather than
+inheriting your default. On a PostgreSQL or MySQL app the generator adds
+`gem "sqlite3"` for them and asks you to `bundle install` before
+`bin/rails db:prepare`.
+
 What `--local` writes, on top of the usual install:
 
 - `config/initializers/railwatch.rb` with `c.transport = :local` and the
@@ -104,7 +110,10 @@ credentials (the browser sends them on the WebSocket handshake).
 
 Two ways, both from Mission Control's playbook. Either lets an admin of
 your app in with no second password. Turn Basic off when you use one,
-or both gates apply.
+or both gates apply. Note that neither covers Action Cable: with Basic
+off, whoever may open your app's `/cable` connection may subscribe to
+the dashboard's live-update channel, which carries ingest counts and
+timestamps but no telemetry records.
 
 A base controller. Every dashboard controller inherits from it, so its
 `before_action` runs first:
@@ -186,10 +195,21 @@ answering is a writer that is starting or restarting, and they retain
 batches and retry for as long as it takes. A process with no plugin
 (`bin/rails runner`, a Solid Queue worker, a `rails server` without it,
 the test suite) expects none, says so once under `RAILWATCH_DEBUG`, and
-writes its own batches in-process for the rest of its life. Nothing is
-lost either way; what changes is which process pays for the write.
-A Puma phased restart stops the writer and starts a fresh one once the
-new workers are up.
+writes its batches in-process instead. That fallback is provisional: the
+socket is tried again every 30 seconds, so a process that started before
+the writer did hands the work back as soon as one is listening. What
+changes is which process pays for the write, not whether the write
+happens.
+
+Retention while a writer is away is bounded, not infinite. A writer that
+is restarting is back in seconds; one that is missing for a minute (an
+unwritable socket directory, a fork that keeps failing) is treated as
+absent and the worker writes its own batches again, still re-checking, so
+the records are kept rather than retained to the reporter's retry cap. A
+batch that does exhaust that ladder is counted as dropped and reported
+through `Railwatch.on_unrecoverable`, so loss is never silent. A Puma
+phased restart stops the writer and starts a fresh one once the new
+workers are up.
 
 ## Maintenance
 

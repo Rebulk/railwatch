@@ -129,6 +129,21 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect(telemetry { Railwatch::Telemetry::Execution.count }).to eq(0)
     end
 
+    it "writes batches itself rather than dropping them when an expected writer never answers" do
+      # A writer that is restarting comes back in seconds. One that can never
+      # bind (an unwritable socket directory, a fork that keeps failing) would
+      # otherwise retain until the reporter's retry cap and lose the batch.
+      stub_const("Railwatch::Transport::Socket::WRITER_GRACE", 0)
+      expecting = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: true)
+      records = records_for("/widgets")
+
+      result = expecting.deliver(records, batch_id: SecureRandom.uuid)
+
+      expect(result.ok).to be(true)
+      expect(expecting.fallback?).to be(true)
+      expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
+    end
+
     it "writes in-process from the first miss when no writer is expected (a runner, a Solid Queue worker)" do
       alone = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: false)
       records = records_for("/widgets")
@@ -154,6 +169,26 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect(telemetry { Railwatch::Telemetry::Execution.count }).to eq(0)
     ensure
       Railwatch::Writer.instance_variable_set(:@expected, false)
+    end
+
+    it "takes the work back when a writer turns up later, instead of writing in-process for ever" do
+      # A process that missed the writer once (bare `puma`, whose plugin
+      # cannot mark one expected before the app loads; a worker forked before
+      # the writer bound) must not be stuck on in-process writes for life.
+      stub_const("Railwatch::Transport::Socket::FALLBACK_RECHECK", 0)
+      alone = Railwatch::Transport::Socket.new(Railwatch.config, path: socket_path, expected: false)
+      records = records_for("/widgets")
+
+      expect(alone.deliver(records, batch_id: SecureRandom.uuid).ok).to be(true)
+      expect(alone.fallback?).to be(true)
+      written_in_process = telemetry { Railwatch::Telemetry::IngestBatch.count }
+
+      with_writer do
+        expect(alone.deliver(records, batch_id: SecureRandom.uuid).ok).to be(true)
+      end
+
+      expect(alone.fallback?).to be(false)
+      expect(telemetry { Railwatch::Telemetry::IngestBatch.count }).to eq(written_in_process + 1)
     end
 
     it "treats a stale socket inode with no writer behind it as no writer, not as a permanent retry" do
@@ -307,6 +342,36 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect { described_class.fork_writer! { nil } }.to raise_error(Errno::EAGAIN)
       expect(described_class.running?).to be(false)
       expect(described_class.running?).to be(false)
+    end
+  end
+
+  describe "the engine's own databases" do
+    # The abstract bases rescue a missing database.yml entry so a
+    # cloud-transport app (which has neither) still boots and eager-loads
+    # them. What they must never do is fall through to the host's PRIMARY
+    # connection: the telemetry tables are unprefixed, so `sessions`,
+    # `visits`, `people` and `notifications` would be the application's own.
+    it "binds each base to its own database, never to the host's primary" do
+      expect(Railwatch::TelemetryRecord.connection_db_config.name).to eq("railwatch_telemetry")
+      expect(Railwatch::ApplicationRecord.connection_db_config.name).to eq("railwatch")
+      expect(ActiveRecord::Base.connection_db_config.name).to eq("primary")
+    end
+
+    it "refuses to answer at all when its database is not configured" do
+      # Active Record refuses connects_to on an anonymous class, so the probe
+      # is named first; the body is what both engine bases run.
+      stub_const("RailwatchUnconfiguredProbe", Class.new(ActiveRecord::Base))
+      RailwatchUnconfiguredProbe.class_eval do
+        self.abstract_class = true
+        begin
+          connects_to database: { writing: :railwatch_nope, reading: :railwatch_nope }
+        rescue ActiveRecord::AdapterNotSpecified
+          def self.connection_pool = raise(Railwatch::DatabaseNotConfigured, "not configured")
+        end
+      end
+
+      expect { RailwatchUnconfiguredProbe.connection_pool }.to raise_error(Railwatch::DatabaseNotConfigured)
+      expect { RailwatchUnconfiguredProbe.count }.to raise_error(Railwatch::DatabaseNotConfigured)
     end
   end
 

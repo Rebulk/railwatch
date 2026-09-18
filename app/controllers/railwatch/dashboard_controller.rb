@@ -53,8 +53,10 @@ module Railwatch
                                                 realm: "Railwatch")
       else
         # Closed, not open: same as Mission Control with no credentials. The
-        # body says what to do, since a bare 401 with no challenge looks like
-        # a broken install rather than an unconfigured one.
+        # challenge header is still sent so a client or a monitor sees the
+        # scheme, and the body says what to do, since a bare 401 looks like a
+        # broken install rather than an unconfigured one.
+        response.set_header("WWW-Authenticate", %(Basic realm="Railwatch"))
         render plain: "Railwatch: HTTP Basic authentication is on and no credentials are configured, so the " \
                       "dashboard is closed. Run `bin/rails railwatch:authentication:configure` (writes " \
                       "railwatch.http_basic_auth_user/_password to Rails credentials), or set " \

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "yaml"
+
 module Railwatch
   # `bin/rails railwatch:authentication:configure`: stores the embedded
   # dashboard's HTTP Basic credentials in the current environment's Rails
@@ -29,7 +31,18 @@ module Railwatch
         return false
       end
       password = SecureRandom.base58(48)
-      credentials.write("#{credentials.read.to_s.chomp}\n\n#{entry(username, password)}")
+      # Merge, never append. A second top-level `railwatch:` mapping would
+      # win in Psych and silently hide whatever the first one held, and a
+      # username with YAML syntax in it would reshape the file; round-tripping
+      # through the parser and to_yaml quotes it correctly.
+      merged = (YAML.safe_load(credentials.read.to_s, permitted_classes: [ Symbol ], aliases: true) || {})
+      unless merged.is_a?(Hash)
+        out.puts "#{credentials.content_path} does not contain a YAML mapping; edit it by hand."
+        return false
+      end
+      merged["railwatch"] = (merged["railwatch"].is_a?(Hash) ? merged["railwatch"] : {})
+        .merge("http_basic_auth_user" => username, "http_basic_auth_password" => password)
+      credentials.write(merged.to_yaml)
 
       out.puts <<~DONE
         Stored in #{credentials.content_path.relative_path_from(Rails.root)} under `railwatch:`.
@@ -49,8 +62,10 @@ module Railwatch
       false
     end
 
+    # Both halves, so a file holding only one of them is repaired rather than
+    # refused (which would leave the dashboard closed with no way forward).
     def configured?
-      %i[http_basic_auth_user http_basic_auth_password].any? { |key| credentials.dig(:railwatch, key).present? }
+      %i[http_basic_auth_user http_basic_auth_password].all? { |key| credentials.dig(:railwatch, key).present? }
     end
 
     # The file Rails.application.credentials reads for this environment:
@@ -63,14 +78,6 @@ module Railwatch
 
     def env_flag
       Rails.root.join("config/credentials/#{Rails.env}.yml.enc").exist? ? " --environment #{Rails.env}" : ""
-    end
-
-    def entry(username, password)
-      <<~YAML
-        railwatch:
-          http_basic_auth_user: #{username}
-          http_basic_auth_password: #{password}
-      YAML
     end
   end
 end

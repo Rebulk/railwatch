@@ -91,17 +91,45 @@
 - Embedded install is one command and boots in production. `bin/rails
   generate railwatch:install --local` now creates and migrates both
   databases itself (no separate `db:prepare`), fills in the production
-  `database:` paths Rails 8.1's template leaves commented out. The gem
+  `database:` paths Rails 8.1's template leaves commented out. The two
+  entries name `adapter: sqlite3` themselves instead of inheriting the
+  app's default, so embedded mode works on a PostgreSQL or MySQL app (the
+  generator adds `gem "sqlite3"` there and asks for a `bundle install`
+  first) and needs no `&default` anchor to exist. The gem
   depends on `json < 3` for now: Rails 8.1 cannot decode with json 3
   (rails/rails#58784), which broke this gem's own SQLite migrations on a
   fresh Ruby 3.4.10, and a dependency is what makes `bundle add
   railwatch` resolve past it. The engine loads Active Job itself
   and treats Action Cable as optional, so an app from `rails new
   --minimal` boots with it.
+- The engine's models never fall back to the host's primary database. Both
+  abstract bases rescue a missing `database.yml` entry so a cloud-transport
+  app still boots and eager-loads them, but using one then raises
+  `Railwatch::DatabaseNotConfigured` instead of inheriting
+  `ActiveRecord::Base`'s connection -- where the unprefixed telemetry
+  tables (`sessions`, `visits`, `people`, `notifications`) are the
+  application's own.
+- The in-process fallback is provisional: a process that found no writer
+  re-checks the socket every 30 seconds instead of writing its own batches
+  for the rest of its life, and a process that expects a writer stops
+  retaining and writes its own after a minute without one, rather than
+  holding batches until the retry cap drops them. A batch abandoned after the retry cap is now
+  reported through `on_unrecoverable` rather than only under
+  `RAILWATCH_DEBUG`, and `railwatch:doctor` no longer calls a configured
+  but absent writer a pass.
+- The generated Puma line is `plugin :railwatch`, unconditional:
+  `bundle exec puma` evaluates `config/puma.rb` before it loads the app,
+  so the old `if defined?(Railwatch)` guard meant a writer was never
+  started there. The plugin itself now decides whether to run after boot.
+- The beacon's rate limiter fails closed. A cache store that cannot count
+  (`NullStore`, a cache that is down) used to leave an unauthenticated,
+  unlimited write endpoint.
 - The embedded dashboard authenticates the way Mission Control Jobs
   does: HTTP Basic is on and closed by default, so with no credentials
-  every page and the live channel answer 401 (with a note saying what to
-  run) and the doctor reports it. `bin/rails
+  every dashboard page answers 401 (with a note saying what to run), the
+  live channel refuses the subscription, and the doctor reports it. The
+  beacon endpoint and the dashboard's own static assets stay public, as
+  they must be. `bin/rails
   railwatch:authentication:configure` writes
   `railwatch.http_basic_auth_user/_password` to the environment's Rails
   credentials; `RAILWATCH_HTTP_BASIC_AUTH_USER/_PASSWORD` or the
@@ -111,9 +139,10 @@
   or a routes constraint around the mount. Before this a production
   install served every query and log line to anyone who found the URL.
 - The Puma plugin forks the writer in single mode too (the default for a
-  Rails 8 app), and flushes the serving process's own reporter before
-  stopping the writer at shutdown, so its process and health records no
-  longer time out against a socket that is already gone. The live-update
+  Rails 8 app). It stops the writer from `at_exit`, after Puma's run loop
+  has returned: Puma's SIGTERM trap fires `after_stopped` BEFORE it drains
+  in-flight requests, so stopping there took the writer away from requests
+  that were still running and lost their records. The live-update
   broadcast after a batch rescues a `LoadError` as well: a host whose
   production `cable.yml` names redis without the gem (Rails 8.1's
   non-Docker template) used to take the writer down on every batch.
@@ -131,7 +160,8 @@
   (`Record.buffered_bytes`, run once for every query, cache event and log
   line an execution buffers) walks a record in one loop instead of one
   method call per value: 6.2 to 2.7 us for a query record, about 120 us
-  off a 20-query request. Same numbers, same depth bound.
+  off a 20-query request. Same numbers for every record shape, including
+  at the depth bound and on a self-referential one.
 
 ## 0.1.4 (2026-09-15)
 

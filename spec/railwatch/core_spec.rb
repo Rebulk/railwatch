@@ -3,6 +3,50 @@
 require "spec_helper"
 
 RSpec.describe Railwatch do
+  describe Railwatch::Record do
+    # The weigher was flattened for speed (scalars are measured inline in the
+    # container loops). These pin the semantics that flattening could have
+    # changed: the depth bound has to apply to a container's CONTENTS, not
+    # only to the container, or a deeply nested leaf is suddenly weighed.
+    describe ".buffered_bytes" do
+      it "treats anything past the depth bound as over the limit, leaves included" do
+        # A leaf sits one level below its container, so MAX_SIZING_DEPTH
+        # containers still weigh their contents and one more does not.
+        bound = Railwatch::Record::MAX_SIZING_DEPTH
+        at_bound = bound.times.inject("x") { |acc, _| [ acc ] }
+        past_bound = (bound + 1).times.inject("x") { |acc, _| [ acc ] }
+
+        expect(described_class.buffered_bytes(at_bound, limit: 10_000)).to be < 10_000
+        expect(described_class.buffered_bytes(past_bound, limit: 10_000)).to eq(10_001)
+        expect(described_class.buffered_bytes((bound + 1).times.inject("x") { |acc, _| { k: acc } }, limit: 10_000)).to eq(10_001)
+      end
+
+      it "terminates on a self-referential record instead of recursing forever" do
+        cycle = {}
+        cycle[:self] = cycle
+        looped = []
+        looped << looped
+
+        expect(described_class.buffered_bytes(cycle, limit: 10_000)).to eq(10_001)
+        expect(described_class.buffered_bytes(looped, limit: 10_000)).to eq(10_001)
+      end
+
+      it "charges a string key its own bytes and a symbol key a flat 16" do
+        symbols = { a: "x", b: 1, c: nil }
+        strings = { "a" => "x", "b" => 1, "c" => nil }
+        per_key = 40 + 1 - 16
+
+        expect(described_class.buffered_bytes(strings, limit: 1 << 20))
+          .to eq(described_class.buffered_bytes(symbols, limit: 1 << 20) + (3 * per_key))
+      end
+
+      it "stops counting once the limit is passed" do
+        big = { a: "x" * 5_000, b: "y" * 5_000 }
+        expect(described_class.buffered_bytes(big, limit: 100)).to eq(101)
+      end
+    end
+  end
+
   describe Railwatch::SqlNormalizer do
     it "collapses literals, binds, and IN lists so identical shapes group together" do
       a = described_class.normalize("SELECT * FROM users WHERE id = 1 AND name = 'a' AND x IN (1, 2, 3)")

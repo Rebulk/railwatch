@@ -136,13 +136,18 @@ namespace :railwatch do
         listening = Railwatch::Writer.listening?(socket_path)
         puma_rb = Rails.root.join("config/puma.rb")
         plugged = puma_rb.exist? && puma_rb.read.include?("plugin :railwatch")
-        check.call(listening || plugged, "writer process",
+        # Not listening is only fine when the app is not running: this task
+        # is its own process and cannot tell, so it says which case it is
+        # looking at instead of calling a missing writer a pass.
+        check.call(listening, "writer process",
                    if listening
                      "listening at #{socket_path}"
                    elsif plugged
-                     "config/puma.rb has `plugin :railwatch`; the writer starts with Puma (not running now)"
+                     "not listening at #{socket_path} right now. Expected if the app is stopped; if it is serving, " \
+                     "the writer died or `plugin :railwatch` never activated (check the Puma log)"
                    else
-                     "not configured: add `plugin :railwatch` to config/puma.rb so batches are written outside the web workers"
+                     "not configured: add `plugin :railwatch` to config/puma.rb so batches are written outside the " \
+                     "processes serving requests"
                    end)
         # A socket that answers is a process that is alive; the ledger is
         # what says it is doing its job. Nothing written in a while with the

@@ -546,6 +546,50 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(read("config/database.yml")).to include("# Warning: test is erased.")
     end
 
+    it "writes SQLite entries that do not inherit a PostgreSQL app's adapter" do
+      write_file("config/database.yml", <<~YAML)
+        default: &default
+          adapter: postgresql
+          encoding: unicode
+          pool: 5
+
+        development:
+          <<: *default
+          database: shop_development
+
+        test:
+          <<: *default
+          database: shop_test
+
+        production:
+          primary:
+            <<: *default
+            database: shop_production
+      YAML
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
+      %w[development test production].each do |env|
+        expect(yml[env]["railwatch"]["adapter"]).to eq("sqlite3")
+        expect(yml[env]["railwatch_telemetry"]["adapter"]).to eq("sqlite3")
+        expect(yml[env]["railwatch_telemetry"]["database"]).to eq("storage/#{env}_railwatch_telemetry.sqlite3")
+      end
+      expect(yml["development"]["primary"]["adapter"]).to eq("postgresql")
+    end
+
+    it "writes usable entries into a database.yml that has no &default anchor" do
+      write_file("config/database.yml", <<~YAML)
+        development:
+          adapter: sqlite3
+          database: storage/development.sqlite3
+      YAML
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
+      expect(yml["development"]["railwatch"]["adapter"]).to eq("sqlite3")
+      expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
+    end
+
     it "copies no schema or migration files: the engine migrates both databases from the gem" do
       write_file("config/database.yml", flat_database_yml)
       Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
@@ -564,7 +608,10 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       updated = read("config/puma.rb")
       expect(updated).to start_with(puma)
       expect(updated.scan("plugin :railwatch").size).to eq(1)
-      expect(updated).to end_with("plugin :railwatch if defined?(Railwatch)\n")
+      # Unconditional: `bundle exec puma` evaluates config/puma.rb before it
+      # loads the app, so a `if defined?(Railwatch)` guard would be false
+      # there and the writer would never start.
+      expect(updated).to end_with("plugin :railwatch\n")
     end
 
     it "leaves config/puma.rb alone without --local" do

@@ -32,6 +32,8 @@ module Railwatch
     # backoff ladder, which is the right pressure to apply.
     MAX_PENDING = 64
     PARENT_POLL = 2
+    # How long a shutdown waits for a batch that is still being written.
+    SHUTDOWN_DRAIN = 5
     # A batch write that has run this long is not slow, it is stuck: a
     # SQLite lock that never clears, a t-digest on a pathological input, a
     # connection pool that lost a connection. The supervisor cannot tell a
@@ -222,8 +224,12 @@ module Railwatch
         sock&.close
       end
     ensure
+      # Bounded: a batch still running five seconds after the listener closed
+      # does not hold the shutdown open. Its transaction rolls back when the
+      # process exits and the client retries it by batch id against the next
+      # writer, so the batch is not lost -- it is just not finished here.
       THREADS.times { queue&.push(nil) }
-      workers&.each { |t| t.join(5) }
+      workers&.each { |t| t.join(SHUTDOWN_DRAIN) }
     end
 
     # Length-prefixed gzip JSON, read under the wedge deadline, inflated in

@@ -12,6 +12,11 @@ require "puma/plugin"
 # ForkTracker resetting every Railwatch thread in the child, exactly as it
 # does for a Puma cluster worker. A no-op when Railwatch is off or the
 # transport is not :local, so it is safe to leave in place.
+#
+# Nothing in `start` may touch Railwatch: `bundle exec puma` fires plugin
+# starts BEFORE it loads the Rack app, so the constant may not exist yet.
+# Every decision that needs the app is made from the background supervisor,
+# which waits for after_booted.
 Puma::Plugin.create do
   attr_reader :log_writer, :writer_pid
 
@@ -23,37 +28,48 @@ Puma::Plugin.create do
     @launcher = launcher
     @shutting_down = false
     @booted = false
+    @warned = false
 
-    return unless active?
-
-    # Cluster workers fork from this process after start and inherit this
-    # flag; in single mode this is the serving process itself. Either way the
-    # reporter retains batches while the writer is starting rather than
-    # writing them in-process (Transport::Socket).
-    ::Railwatch::Writer.expected!
+    # When the app is already loaded (`bin/rails server` loads it before
+    # handing over to Puma), mark a writer expected now: cluster workers fork
+    # from this process after start and inherit the flag, so they retain
+    # batches while the writer is starting instead of writing them in-process.
+    # Under bare `puma` this is false and the workers find the writer on
+    # their transport's next re-check instead (Transport::Socket).
+    ::Railwatch::Writer.expected! if active?
 
     # in_background blocks are collected at plugin start and started by the
-    # cluster once, so this has to be registered here, not from after_booted
-    # (by then the cluster has already fired them and a late block never
-    # runs). It waits for boot itself.
+    # runner once, so this has to be registered here, not from after_booted
+    # (by then they have already been fired and a late block never runs). It
+    # waits for boot itself.
     in_background { supervise }
 
-    launcher.events.after_booted { @booted = true }
+    launcher.events.after_booted { booted! }
     # A phased restart fires before_restart and then, once the new workers
     # are up, after_booted again. The writer is stopped for the restart and
     # the supervisor, which is still running, respawns it when @booted flips
     # back. Only a real stop latches shutdown.
     launcher.events.before_restart { restart_writer }
-    launcher.events.after_stopped { shutdown_writer }
+    # after_stopped only latches. It is NOT where the writer is stopped:
+    # Puma's SIGTERM trap fires it BEFORE `stop_blocked` drains in-flight
+    # requests, so stopping here would take the writer away from requests
+    # that are still running. at_exit runs after the whole run loop.
+    launcher.events.after_stopped { @shutting_down = true }
+    at_exit { shutdown_writer if Process.pid == @puma_pid }
   end
 
   private
 
-  # Puma evaluates config/puma.rb, and so this plugin's start, before the
-  # app is loaded. `defined?(Railwatch)` is true as soon as the gem's
-  # entrypoint has been required (Bundler.require), which is the normal
-  # `rails server` path; a bare `puma` on an app that has not required it yet
-  # sees the constant but not the API and must not raise out of Puma's boot.
+  def booted!
+    @booted = true
+    ::Railwatch::Writer.expected! if active?
+  end
+
+  # Whether this process should run a writer. Answered fresh each time, and
+  # safe before the app is loaded: `defined?(Railwatch)` is true as soon as
+  # the gem's entrypoint has been required (Bundler.require), but a bare
+  # `puma` on an app that has not required it yet sees neither, and must not
+  # raise out of Puma's boot.
   def active?
     return false unless defined?(::Railwatch) && ::Railwatch.respond_to?(:enabled?)
     return false unless ::Railwatch.enabled? && ::Railwatch.config.local?
@@ -62,9 +78,12 @@ Puma::Plugin.create do
     return false if path.nil?
     return true if ::Railwatch::Writer.usable_path?(path)
 
-    log "Railwatch writer not started: socket path #{path} is #{path.bytesize} bytes, over the " \
-        "#{::Railwatch::Writer::MAX_SOCKET_PATH}-byte limit; set RAILWATCH_WRITER_SOCKET to a shorter path. " \
-        "Batches are written in-process meanwhile."
+    unless @warned
+      @warned = true
+      log "Railwatch writer not started: socket path #{path} is #{path.bytesize} bytes, over the " \
+          "#{::Railwatch::Writer::MAX_SOCKET_PATH}-byte limit; set RAILWATCH_WRITER_SOCKET to a shorter path. " \
+          "Batches are written in-process meanwhile."
+    end
     false
   end
 
@@ -85,7 +104,7 @@ Puma::Plugin.create do
     loop do
       sleep POLL
       break if @shutting_down
-      next unless @booted
+      next unless @booted && active?
       next if writer_alive?
 
       log "Railwatch writer (pid #{@writer_pid}) is gone; starting" if @writer_pid
@@ -111,10 +130,6 @@ Puma::Plugin.create do
     end
   end
 
-  # The writer is a child of this process; a stop that returns without a
-  # wait would leave a zombie for the cluster to reap, and TERM to a writer
-  # mid-batch is answered by its own trap, which finishes the batch first.
-
   # For a restart: stop the writer and mark the cluster as not booted, so the
   # supervisor spawns a fresh one once after_booted fires again.
   def restart_writer
@@ -122,20 +137,22 @@ Puma::Plugin.create do
     stop_writer
   end
 
-  # after_stopped fires once the workers are gone (cluster) or the server
-  # has stopped accepting (single), so their batches are already through.
-  # This process's own reporter (its process and health records) is flushed
-  # before the writer goes, not by the at_exit that runs after it. Puma
-  # fires this from inside its SIGTERM trap, where a Mutex cannot be taken,
-  # so the flush runs on a thread and is waited for.
+  # Runs from at_exit, after Puma's run loop has returned and every request
+  # has been served, in both single and cluster mode. Flushes this process's
+  # own reporter (its process and health records, and in single mode the
+  # requests' records) while the writer is still listening, then stops it.
   def shutdown_writer
     @shutting_down = true
-    if ::Railwatch.enabled? && ::Railwatch.config.local?
-      Thread.new { ::Railwatch.reporter.shutdown }.join(::Railwatch.config.shutdown_timeout + 1)
+    if defined?(::Railwatch) && ::Railwatch.respond_to?(:enabled?) && ::Railwatch.enabled? && ::Railwatch.config.local?
+      ::Railwatch.reporter.shutdown
     end
     stop_writer
+  rescue StandardError => e
+    log "Railwatch writer shutdown failed (#{e.class}: #{e.message})"
   end
 
+  # TERM closes the writer's listener and it drains what it is holding; the
+  # wait also reaps it, so a cluster master never leaves a zombie behind.
   def stop_writer
     return unless @writer_pid
 

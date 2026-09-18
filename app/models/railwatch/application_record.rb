@@ -9,10 +9,24 @@ module Railwatch
   # primary.
   class ApplicationRecord < ActiveRecord::Base
     self.abstract_class = true
-    # Only when the host's database.yml has the entry: a production boot
-    # eager-loads this class, and a host on the cloud transport (or one
-    # running the --local installer, which boots before it has written the
-    # entry) would otherwise fail on a database it never uses.
-    connects_to database: { writing: :railwatch, reading: :railwatch } if Railwatch.database_configured?(:railwatch)
+    begin
+      connects_to database: { writing: :railwatch, reading: :railwatch }
+    rescue ActiveRecord::AdapterNotSpecified
+      # No `railwatch` entry in this environment's database.yml. A cloud-transport
+      # app has none and still eager-loads this class in production, and so
+      # does the --local installer's own boot, before it has written the
+      # entry -- so loading must not raise. Using it must, though: without
+      # connects_to this class would inherit ActiveRecord::Base's PRIMARY
+      # connection, and its tables are unprefixed, so a query would read and
+      # a write would corrupt the host application's own tables. Every route
+      # into the connection goes through connection_pool, so refusing here
+      # fails closed for reads and writes alike.
+      def self.connection_pool
+        raise Railwatch::DatabaseNotConfigured,
+              "the `railwatch` database (issues, comments, saved views and deploys) is not configured for the " \
+              "#{Rails.env} environment; run `bin/rails generate railwatch:install --local` " \
+              "or add it to config/database.yml (docs/embedded.md)"
+      end
+    end
   end
 end
