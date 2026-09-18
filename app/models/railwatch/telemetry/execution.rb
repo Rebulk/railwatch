@@ -51,7 +51,7 @@ module Railwatch
 
       # All children merged and ordered for the waterfall timeline.
       def timeline
-        CHILDREN.flat_map { |name, klass| klass.timeline_scope(execution_id).map { |r| r.timeline_entry(name) } }
+        CHILDREN.flat_map { |name, klass| klass.timeline_scope(execution_id).map { |r| r.timeline_entry(name, occurred_at) } }
                 .sort_by { |e| e[:offset] }
       end
 

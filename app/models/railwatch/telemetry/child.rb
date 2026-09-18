@@ -28,8 +28,12 @@ module Railwatch
         respond_to?(:duration) && duration ? duration / 1000.0 : nil
       end
 
-      def timeline_entry(type)
-        parent_start = execution&.occurred_at
+      # parent_start is passed in by Execution#timeline, which already holds
+      # the parent. Resolving it here instead cost one query per child row,
+      # so a waterfall of a few hundred logs and queries was a few hundred
+      # lookups of the same execution.
+      def timeline_entry(type, parent_start = nil)
+        parent_start ||= execution&.occurred_at
         {
           type: type.to_s.singularize,
           id: id,
