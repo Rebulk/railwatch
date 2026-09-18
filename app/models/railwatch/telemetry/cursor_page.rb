@@ -48,8 +48,13 @@ module Railwatch
       # scanning the whole occurred_at window and sorting it, even with fresh
       # statistics, so it never picks it on its own. Forced only for the one
       # (model, order) pair the index exists for.
+      # INDEXED BY is SQLite's own syntax, and telemetry is a SQLite database
+      # in both the platform and an embedded install. Ask anyway, so pointing
+      # this at anything else degrades to the planner's own choice rather
+      # than a syntax error on every page load.
       def force_slowest_index?
-        order_name == :slowest && scope.klass == Telemetry::Query
+        order_name == :slowest && scope.klass == Telemetry::Query &&
+          scope.klass.connection.adapter_name.match?(/sqlite/i)
       end
 
       def apply_cursor(relation)

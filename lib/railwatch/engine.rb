@@ -24,9 +24,9 @@ module Railwatch
 
     # The dashboard bundle is built into the gem at release time; serve it
     # from here so a host app needs no asset pipeline integration at all.
+    # Where it goes in the stack is DashboardAssets.install!'s decision.
     initializer "railwatch.dashboard_assets" do |app|
-      app.middleware.insert_before ActionDispatch::Static, Railwatch::DashboardAssets,
-        root: root.join("public/railwatch").to_s
+      Railwatch::DashboardAssets.install!(app, root: root.join("public/railwatch").to_s)
     end
 
     # Action Cable is optional: live dashboard updates need it, nothing else

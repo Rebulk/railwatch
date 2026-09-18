@@ -245,11 +245,19 @@ module Railwatch
       JSON.parse(inflate_bounded(body))
     end
 
+    INFLATE_CHUNK = 64 << 10
+
     def inflate_bounded(body)
       out = +""
       inflater = Zlib::Inflate.new(Zlib::MAX_WBITS + 32)
-      body.each_char.each_slice(65_536) do |slice|
-        out << inflater.inflate(slice.join)
+      # byteslice, not each_char: the body is gzip, so "characters" are a
+      # fiction its encoding may not even support, and walking a 64 MB
+      # request one character at a time to rebuild 64 KiB strings costs more
+      # than the inflate it is feeding.
+      offset = 0
+      while offset < body.bytesize
+        out << inflater.inflate(body.byteslice(offset, INFLATE_CHUNK))
+        offset += INFLATE_CHUNK
         raise IOError, "request inflates past #{MAX_INFLATED_BYTES} bytes" if out.bytesize > MAX_INFLATED_BYTES
       end
       out << inflater.finish

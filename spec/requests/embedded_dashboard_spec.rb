@@ -152,6 +152,35 @@ RSpec.describe "embedded dashboard", type: :request do
     Railwatch.config.dashboard_user = nil
   end
 
+  # An app that serves static files from nginx, a CDN or Thruster sets
+  # public_file_server.enabled = false, and then ActionDispatch::Static is not
+  # in the stack at all. Inserting relative to a middleware that is not there
+  # raises, which would take the host application down at boot rather than
+  # merely losing the dashboard's assets.
+  it "mounts its asset middleware whether or not the host serves static files itself" do
+    stack = Rails.application.middleware
+    expect(stack.map(&:klass)).to include(Railwatch::DashboardAssets)
+
+    stack_class = Class.new do
+      def initialize = @operations = []
+      attr_reader :operations
+      def insert_before(*args, **kwargs) = @operations << [ :insert_before, args, kwargs ]
+      def insert(*args, **kwargs) = @operations << [ :insert, args, kwargs ]
+    end
+    app_with = double(config: double(public_file_server: double(enabled: true)), middleware: stack_class.new)
+    app_without = double(config: double(public_file_server: double(enabled: false)), middleware: stack_class.new)
+
+    expect { Railwatch::DashboardAssets.install!(app_with, root: "/tmp/rw") }.not_to raise_error
+    expect { Railwatch::DashboardAssets.install!(app_without, root: "/tmp/rw") }.not_to raise_error
+
+    expect(app_with.middleware.operations.first[0]).to eq(:insert_before)
+    expect(app_with.middleware.operations.first[1]).to eq([ ActionDispatch::Static, Railwatch::DashboardAssets ])
+    # No ActionDispatch::Static to anchor to: the front of the stack instead.
+    expect(app_without.middleware.operations.first[0]).to eq(:insert)
+    expect(app_without.middleware.operations.first[1]).to eq([ 0, Railwatch::DashboardAssets ])
+    expect(app_without.middleware.operations.first[2]).to eq({ root: "/tmp/rw" })
+  end
+
   describe "HTTP Basic authentication (Mission Control Jobs' shape)" do
     def basic(user, password) = { "Authorization" => ActionController::HttpAuthentication::Basic.encode_credentials(user, password) }
 

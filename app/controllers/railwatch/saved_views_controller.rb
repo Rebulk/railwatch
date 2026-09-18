@@ -30,10 +30,14 @@ module Railwatch
 
     private
 
-    # Its owner can change a view; an account admin can too, so a shared view
-    # does not outlive the person who made it.
+    # Its owner can change a view, and only its owner. The platform also lets
+    # an account admin, so a shared view does not outlive the person who made
+    # it; embedded mode has no account and no admin, and `|| true` here let
+    # every dashboard user edit and delete everyone else's views. An app whose
+    # dashboard_user resolver returns one identity for everybody is unaffected
+    # either way: one owner, one editor.
     def editable?(view)
-      view.viewer_id == Viewer.user.id || true
+      view.viewer_id == Viewer.user.id
     end
 
     def fallback = application_environment_overview_path(application, environment)
