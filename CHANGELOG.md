@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1 (2026-09-18)
+
+- No change to the gem itself. This release exists to run the automated
+  publish path end to end: 0.2.0 went out from a laptop, and this one is
+  pushed by `release.yml` on a tag, authenticated by GitHub OIDC rather
+  than an API key stored anywhere.
+- Releases are now cut without a stored RubyGems credential (trusted
+  publishing). `gh workflow run release.yml` answers "would a tag publish
+  right now?" in a few seconds, without building or publishing anything.
+- `spec/railwatch/gemfile_lock_spec.rb` checks the *committed*
+  `Gemfile.lock` against the gemspec, because `bundle exec` repairs the
+  working copy before the suite starts while CI installs frozen and fails
+  first. A stale lockfile now fails locally, where it is one commit to fix.
+
 ## 0.2.0 (2026-09-18)
 
 - Embedded mode: `bin/rails generate railwatch:install --local` keeps
