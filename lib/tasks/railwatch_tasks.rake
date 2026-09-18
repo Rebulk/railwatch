@@ -162,6 +162,20 @@ namespace :railwatch do
                      end)
         end
       end
+      # The dashboard refuses every request outside development and test
+      # until the host says who may see it; a deploy that forgot gets a 403,
+      # not a public page, and this is where that shows up before it does.
+      resolver = config.dashboard_user
+      check.call(resolver || config.dashboard_open || Rails.env.local?, "dashboard access",
+                 if resolver
+                   "c.dashboard_user names the operator (the dashboard answers only when it returns one)"
+                 elsif config.dashboard_open
+                   "c.dashboard_open = true: anyone who can reach the mount sees it; keep a routes constraint or network rule in front"
+                 elsif Rails.env.local?
+                   "open in #{Rails.env} only; set c.dashboard_user (or c.dashboard_open) before production, or the dashboard answers 403 there"
+                 else
+                   "closed: the dashboard answers 403 in #{Rails.env} until c.dashboard_user or c.dashboard_open is set (config/initializers/railwatch.rb)"
+                 end)
       recurring = Rails.root.join("config/recurring.yml")
       leftover = recurring.exist? && recurring.read.include?("Railwatch::")
       check.call(!leftover, "recurring.yml",

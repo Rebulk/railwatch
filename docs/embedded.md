@@ -19,11 +19,17 @@ one setting.
 ```sh
 bundle add railwatch
 bin/rails generate railwatch:install --local
-bin/rails db:prepare
 ```
 
 Restart the app and open `/railwatch`. Then `bin/rails railwatch:doctor`
-checks the wiring.
+checks the wiring. The generator creates and migrates both databases
+itself; `bin/rails db:prepare`, which a deploy already runs, migrates
+them after every gem update.
+
+The engine needs Active Job (its grouping and scan jobs are Active Job
+classes even though embedded mode calls them directly) and loads it
+itself. Action Cable is optional: with it the dashboard updates live,
+without it (`rails new --minimal`) the pages refresh on navigation.
 
 What `--local` writes, on top of the usual install:
 
@@ -70,8 +76,26 @@ and the MCP server.
 
 ## Authentication
 
-The engine does not authenticate. Put the mount behind whatever your app
-already uses:
+The dashboard shows every query, log line and exception your app
+produced, so outside development and test it is closed until you say who
+may see it. Until then every dashboard request answers 403 with a note
+saying so, and `railwatch:doctor` reports it. Two ways to open it:
+
+A resolver in the initializer, which both authorises and names the
+person on comments and saved views. Return the operator, or `nil` for
+"not signed in" (a 403):
+
+```ruby
+c.dashboard_user = ->(request) do
+  user = User.find_by(id: request.session[:user_id])
+  user&.admin? ? { id: user.id, name: user.name, email: user.email } : nil
+end
+```
+
+Or `c.dashboard_open = true` (`RAILWATCH_DASHBOARD_OPEN`), which serves
+it to anyone who can reach the mount and shows a single "Operator". Use
+that behind something else that already gates the URL: a routes
+constraint around the mount, a Devise `authenticate` block, a VPN.
 
 ```ruby
 # config/routes.rb
@@ -80,17 +104,7 @@ authenticate :user, ->(u) { u.admin? } do   # Devise
 end
 ```
 
-or a `constraints` block that reads your session. To name the person on
-comments and saved views, give the initializer a resolver:
-
-```ruby
-c.dashboard_user = ->(request) do
-  user = User.find_by(id: request.session[:user_id])
-  user && { id: user.id, name: user.name, email: user.email }
-end
-```
-
-Without one, the dashboard shows a single "Operator".
+The live-update channel applies the same rule as the pages.
 
 ## The writer process
 
@@ -108,9 +122,9 @@ socket's directory is created mode 0700 and the socket 0600, so only
 the app's own user can reach it; keep it that way if you move it. Linux
 caps the whole path at 108 bytes, so an app checked out deep in the
 filesystem should point this at a directory of its own under
-`/run/user/$UID` or `/tmp` (not a bare file in `/tmp`). Cluster mode
-only: in single mode Puma's request threads are already running when
-the plugin would fork, so a single-mode server writes its own batches. The
+`/run/user/$UID` or `/tmp` (not a bare file in `/tmp`). Single and
+cluster mode alike: a default Rails 8 app runs Puma with no workers, and
+its batches come off its request threads just the same. The
 writer maps the records, writes both databases, folds the rollups,
 groups exceptions into issues and runs the maintenance clock below. It
 is the only process that ever holds the telemetry database's write lock,

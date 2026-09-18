@@ -3,6 +3,11 @@
 # The dashboard controllers are Inertia controllers; a host that does not use
 # Inertia itself never requires the gem, so the engine does.
 require "inertia_rails"
+# The engine's jobs (grouping, rollups, scans) are Active Job classes even
+# though embedded mode calls their perform directly, so a host built with
+# `rails new --minimal` (no Active Job) still needs the framework loaded.
+# Part of the rails gem this one depends on, so nothing new is pulled in.
+require "active_job/railtie"
 
 module Railwatch
   # isolate_namespace would give every model a railwatch_ prefix. Only the
@@ -24,10 +29,20 @@ module Railwatch
         root: root.join("public/railwatch").to_s
     end
 
+    # Action Cable is optional: live dashboard updates need it, nothing else
+    # does. A host without it (`rails new --minimal`, --skip-action-cable)
+    # must not eager-load the engine's channel, which inherits from a class
+    # that does not exist there.
+    initializer "railwatch.channels", before: :setup_main_autoloader do
+      Rails.autoloaders.main.ignore(root.join("app/channels")) unless defined?(::ActionCable)
+    end
+
     # The dashboard bundle subscribes to "EnvironmentChannel" by name; Action
     # Cable constantizes that, so the engine's channel needs the bare name.
     # Only defined when the host has not got one of its own.
     initializer "railwatch.live_channel" do
+      next unless defined?(::ActionCable)
+
       # Action Cable constantizes the subscription's channel name at
       # subscribe time; the alias only has to exist by then, and it must
       # not clobber a host channel of the same name.

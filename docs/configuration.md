@@ -866,12 +866,15 @@ c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
 c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
 c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
 c.dashboard_user = ->(request) { { id:, name:, email: } or nil }
+c.dashboard_open = false    # RAILWATCH_DASHBOARD_OPEN
 ```
 
 With `transport = :local` the reporter writes each batch into the app's
 own `railwatch_telemetry` database instead of POSTing it, and the engine
 serves the dashboard at its mount. `enabled?` no longer needs a token.
-The other four only matter in that mode. Full walkthrough:
+The other five only matter in that mode. Outside development and test
+the dashboard answers 403 until `dashboard_user` returns an operator for
+the request or `dashboard_open` is true. Full walkthrough:
 [Embedded mode](embedded.md).
 
 ## Rake tasks

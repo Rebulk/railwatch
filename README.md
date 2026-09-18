@@ -21,7 +21,6 @@ Or keep everything inside your app, with the full dashboard at
 ```sh
 bundle add railwatch
 bin/rails generate railwatch:install --local
-bin/rails db:prepare
 ```
 
 Getting the token, the generator's flags, and deploying with Kamal,

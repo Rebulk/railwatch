@@ -152,6 +152,56 @@ RSpec.describe "embedded dashboard", type: :request do
     Railwatch.config.dashboard_user = nil
   end
 
+  describe "who may see it" do
+    # The dummy app runs in the test environment, where the dashboard is
+    # open; production is simulated by stubbing the env, which is what the
+    # gate reads.
+    def as_production
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+      yield
+    end
+
+    it "is open in a local environment with nothing configured" do
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:ok)
+    end
+
+    it "answers 403 in production until the host names who is looking or opens it on purpose" do
+      as_production do
+        get "/railwatch/apps/1/envs/1", headers: inertia_headers
+        expect(response).to have_http_status(:forbidden)
+        expect(response.body).to include("c.dashboard_user")
+
+        Railwatch.config.dashboard_open = true
+        get "/railwatch/apps/1/envs/1", headers: inertia_headers
+        expect(response).to have_http_status(:ok)
+      end
+    ensure
+      Railwatch.config.dashboard_open = false
+    end
+
+    it "lets a resolver decide per request: an operator gets in, nil is refused" do
+      Railwatch.config.dashboard_user = ->(request) { request.headers["X-Operator"] && { id: 7, name: "Ada" } }
+      as_production do
+        get "/railwatch/apps/1/envs/1", headers: inertia_headers
+        expect(response).to have_http_status(:forbidden)
+
+        get "/railwatch/apps/1/envs/1", headers: inertia_headers.merge("X-Operator" => "1")
+        expect(response).to have_http_status(:ok)
+        expect(response.parsed_body["props"]["auth"]["user"]).to include("name" => "Ada")
+      end
+    ensure
+      Railwatch.config.dashboard_user = nil
+    end
+
+    it "does not gate the beacon, which is the app's own browser client posting timings" do
+      as_production do
+        post "/railwatch/beacon", params: { visits: [] }.to_json, headers: { "CONTENT_TYPE" => "application/json" }
+        expect(response).not_to have_http_status(:forbidden)
+      end
+    end
+  end
+
   it "refuses a stale bundle version with the Inertia 409 so the browser reloads" do
     get "/railwatch/apps/1/envs/1", headers: inertia_headers.merge("X-Inertia-Version" => "stale")
     expect(response).to have_http_status(:conflict)

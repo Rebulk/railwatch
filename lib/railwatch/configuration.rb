@@ -61,7 +61,7 @@ module Railwatch
     ].freeze
 
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
-                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
+                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :dashboard_open, :writer_socket,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -95,6 +95,12 @@ module Railwatch
       @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
       @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
       @dashboard_user = nil
+      # Whether the embedded dashboard answers when no dashboard_user resolver
+      # names who is looking. Off outside development and test: the dashboard
+      # shows every query, log line and exception the app produced, and the
+      # generator cannot know the host's auth, so an install that forgot to
+      # wire it gets a 403 in production rather than a public page.
+      @dashboard_open = env_bool("RAILWATCH_DASHBOARD_OPEN", false)
       # Embedded mode's writer process (lib/railwatch/writer.rb): the Unix
       # socket the Puma workers hand their batches to. Relative paths are
       # under Rails.root. nil disables the writer and every process writes
@@ -271,13 +277,29 @@ module Railwatch
     # and returning a User, {id:, name:, email:} or nil. Authentication and
     # authorisation stay the host's job: put the mount behind its own
     # constraint. This only names the person for comments and saved views.
+    # Whether this request may see the dashboard at all. With a resolver, the
+    # host decides: a truthy return is a person, nil is "not signed in". With
+    # none, only a local environment or an explicit dashboard_open lets it
+    # through. Authorisation proper (which signed-in users are operators)
+    # belongs in the host's resolver or a routes constraint around the mount.
+    def dashboard_allowed?(request)
+      return !resolve_dashboard_user_raw(request).nil? if dashboard_user
+      return true if dashboard_open
+
+      defined?(Rails) && Rails.respond_to?(:env) && Rails.env.local?
+    end
+
     def resolve_dashboard_user(request)
-      resolved = dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
+      resolved = resolve_dashboard_user_raw(request)
       case resolved
       when User then resolved
       when Hash then User.new(id: resolved[:id] || User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
       else User.default
       end
+    end
+
+    def resolve_dashboard_user_raw(request)
+      dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
     end
 
     def ingest_url_allowed?

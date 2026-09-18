@@ -88,6 +88,29 @@
   five minutes per issue (and always for a new one) instead of on every
   batch that touched the group.
 - The gem now depends on `inertia_rails` and `tdigest` for the dashboard.
+- Embedded install is one command and boots in production. `bin/rails
+  generate railwatch:install --local` now creates and migrates both
+  databases itself (no separate `db:prepare`), fills in the production
+  `database:` paths Rails 8.1's template leaves commented out. The gem
+  depends on `json < 3` for now: Rails 8.1 cannot decode with json 3
+  (rails/rails#58784), which broke this gem's own SQLite migrations on a
+  fresh Ruby 3.4.10, and a dependency is what makes `bundle add
+  railwatch` resolve past it. The engine loads Active Job itself
+  and treats Action Cable as optional, so an app from `rails new
+  --minimal` boots with it.
+- The embedded dashboard is closed outside development and test until
+  the host sets `c.dashboard_user` (a resolver that returns the operator
+  or nil) or `c.dashboard_open = true`; every page and the live channel
+  answer 403 otherwise, with a note saying which to set, and the doctor
+  reports it. Before this a production install served every query and
+  log line to anyone who found the URL.
+- The Puma plugin forks the writer in single mode too (the default for a
+  Rails 8 app), and flushes the serving process's own reporter before
+  stopping the writer at shutdown, so its process and health records no
+  longer time out against a socket that is already gone. The live-update
+  broadcast after a batch rescues a `LoadError` as well: a host whose
+  production `cable.yml` names redis without the gem (Rails 8.1's
+  non-Docker template) used to take the writer down on every batch.
 - Puma workers under the plugin actually use the writer. The socket
   transport captured "is a writer expected" when it was built, and
   `rails server` builds the reporter (app boot) before Puma evaluates

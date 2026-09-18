@@ -12,7 +12,16 @@ Railwatch.configure do |c|
   # c.issue_prefix = "APP"                          # RAILWATCH_ISSUE_PREFIX; issue keys like APP-12
   # c.repository_url = "https://github.com/you/app" # RAILWATCH_REPOSITORY_URL; source links from stack traces
   # c.retention_days = 7                            # RAILWATCH_RETENTION_DAYS; PruneTelemetryJob keeps this much
-  # c.dashboard_user = ->(request) { { id: 1, name: "Cole", email: "cole@example.com" } }
+  # Who may see the dashboard. It shows every query, log line and exception,
+  # so outside development and test it answers 403 until one of these is set:
+  # a resolver returning the signed-in operator (or nil for "not signed in"),
+  # or dashboard_open to serve it to anyone who can reach the URL (behind a
+  # routes constraint or a VPN, say). Adapt the resolver to your auth:
+  # c.dashboard_user = ->(request) do
+  #   user = User.find_by(id: request.session[:user_id])
+  #   user&.admin? ? { id: user.id, name: user.name, email: user.email } : nil
+  # end
+  # c.dashboard_open = false                        # RAILWATCH_DASHBOARD_OPEN
 <% else -%>
   # c.token = ENV["RAILWATCH_TOKEN"]                    # RAILWATCH_TOKEN (required)
 <% end -%>

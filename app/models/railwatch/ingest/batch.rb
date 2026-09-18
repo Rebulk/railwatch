@@ -284,14 +284,20 @@ module Railwatch
       end
 
       def broadcast_live
+        return unless defined?(::ActionCable)
+
         now = Time.current
         last = LAST_BROADCAST_AT[@environment.id]
         return if last && now - last < THROTTLE_WINDOW
 
         LAST_BROADCAST_AT[@environment.id] = now
         ActionCable.server.broadcast("environment_#{@environment.id}", { event: "ingested", at: now.iso8601, counts: @counts })
-      rescue StandardError => e
+      rescue StandardError, LoadError => e
         # A live refresh ping is not worth failing a written batch over.
+        # LoadError too: a host whose production cable adapter is redis with
+        # no redis gem raises Gem::LoadError from inside the broadcast, and
+        # in the writer that took the whole process down with it (Puma
+        # restarted it, every batch retried, every retry did it again).
         Rails.error.report(e, handled: true, context: { ingest_broadcast: @environment.slug })
       end
     end

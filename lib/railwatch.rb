@@ -574,5 +574,16 @@ module Railwatch
   def self.migrations_path(database)
     File.expand_path("../db/#{database}_migrate", __dir__)
   end
+
+  # Whether the host's database.yml names one of the engine's databases for
+  # the current environment. Read from the raw configuration rather than the
+  # connection handler, so it is answerable while the app is still booting.
+  def self.database_configured?(name)
+    return false unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
+
+    !ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name.to_s).nil?
+  rescue StandardError
+    false
+  end
 end
 require "railwatch/engine" if defined?(Rails::Engine)

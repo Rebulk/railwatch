@@ -20,6 +20,10 @@ module Railwatch
       render plain: exception.message, status: :unprocessable_content
     end
 
+    # The host's resolver, or dashboard_open, or a local environment; anything
+    # else is refused before a byte of telemetry is read. See
+    # Configuration#dashboard_allowed?.
+    before_action :require_dashboard_access
     before_action { Viewer.user = Railwatch.config.resolve_dashboard_user(request) }
 
     inertia_share auth: -> { { user: Viewer.user.as_json, session: { id: "embedded", recently_authenticated: true } } },
@@ -32,5 +36,16 @@ module Railwatch
                   flash: -> { { alert: flash.alert, warning: flash[:warning], notice: flash.notice } },
                   google_oauth: false,
                   embedded: true
+
+    private
+
+    def require_dashboard_access
+      return if Railwatch.config.dashboard_allowed?(request)
+
+      render plain: "Railwatch: the dashboard is closed. In production, set c.dashboard_user in " \
+                    "config/initializers/railwatch.rb to name who is signed in (docs/embedded.md, Authentication), " \
+                    "or c.dashboard_open = true to open it to anyone who can reach this URL.",
+             status: :forbidden
+    end
   end
 end

@@ -10,7 +10,11 @@ module Railwatch
   # Environment#with_telemetry so the code path matches the platform's.
   class TelemetryRecord < ActiveRecord::Base
     self.abstract_class = true
-    connects_to database: { writing: :railwatch_telemetry, reading: :railwatch_telemetry }
+    # Only when the host's database.yml has the entry: a production boot
+    # eager-loads this class, and a host on the cloud transport (or one
+    # running the --local installer, which boots before it has written the
+    # entry) would otherwise fail on a database it never uses.
+    connects_to database: { writing: :railwatch_telemetry, reading: :railwatch_telemetry } if Railwatch.database_configured?(:railwatch_telemetry)
 
     # Records arrive as the gem's wire hashes; this is the shared envelope.
     def self.envelope_columns(t)

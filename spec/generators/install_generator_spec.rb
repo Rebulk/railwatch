@@ -587,7 +587,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       output = Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
 
       expect(read("config/recurring.yml")).to eq(recurring)
-      expect(output).to include("No job worker needed")
+      expect(output).to include("No job worker")
     end
 
     it "changes nothing on a second run" do

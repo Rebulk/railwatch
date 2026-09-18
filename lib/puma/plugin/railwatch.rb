@@ -3,16 +3,15 @@
 require "puma/plugin"
 
 # `plugin :railwatch` in config/puma.rb. In embedded mode, forks one
-# Railwatch::Writer from the Puma master once it has booted, restarts it if
+# Railwatch::Writer from the Puma process once it has booted, restarts it if
 # it dies, and stops it with Puma. Same shape as Solid Queue's
-# `solid_queue_mode :fork`. A no-op when Railwatch is off or the transport
-# is not :local, so it is safe to leave in place.
-#
-# Cluster mode only, on purpose. In single mode Puma's request threads are
-# already running when after_booted fires, and forking a whole Rails process
-# from a multithreaded parent inherits whatever locks those threads hold at
-# that instant. A single-mode server writes its own batches, which is the
-# path it always had.
+# `solid_queue_mode :fork`, in both cluster and single mode: a default Rails
+# 8 app runs Puma in single mode (no WEB_CONCURRENCY), and that app's
+# batches belong off its request threads just as much. The fork happens
+# from the plugin's background thread with the app loaded and Rails'
+# ForkTracker resetting every Railwatch thread in the child, exactly as it
+# does for a Puma cluster worker. A no-op when Railwatch is off or the
+# transport is not :local, so it is safe to leave in place.
 Puma::Plugin.create do
   attr_reader :log_writer, :writer_pid
 
@@ -26,14 +25,11 @@ Puma::Plugin.create do
     @booted = false
 
     return unless active?
-    unless launcher.options[:workers].to_i.positive?
-      log "Railwatch writer not started: Puma is in single mode (set workers > 0). Batches are written in-process."
-      return
-    end
 
-    # The workers fork from this process after start; they inherit this flag
-    # and so retain batches while the writer is starting rather than writing
-    # them in-process (Transport::Socket).
+    # Cluster workers fork from this process after start and inherit this
+    # flag; in single mode this is the serving process itself. Either way the
+    # reporter retains batches while the writer is starting rather than
+    # writing them in-process (Transport::Socket).
     ::Railwatch::Writer.expected!
 
     # in_background blocks are collected at plugin start and started by the
@@ -115,6 +111,10 @@ Puma::Plugin.create do
     end
   end
 
+  # The writer is a child of this process; a stop that returns without a
+  # wait would leave a zombie for the cluster to reap, and TERM to a writer
+  # mid-batch is answered by its own trap, which finishes the batch first.
+
   # For a restart: stop the writer and mark the cluster as not booted, so the
   # supervisor spawns a fresh one once after_booted fires again.
   def restart_writer
@@ -122,8 +122,17 @@ Puma::Plugin.create do
     stop_writer
   end
 
+  # after_stopped fires once the workers are gone (cluster) or the server
+  # has stopped accepting (single), so their batches are already through.
+  # This process's own reporter (its process and health records) is flushed
+  # before the writer goes, not by the at_exit that runs after it. Puma
+  # fires this from inside its SIGTERM trap, where a Mutex cannot be taken,
+  # so the flush runs on a thread and is waited for.
   def shutdown_writer
     @shutting_down = true
+    if ::Railwatch.enabled? && ::Railwatch.config.local?
+      Thread.new { ::Railwatch.reporter.shutdown }.join(::Railwatch.config.shutdown_timeout + 1)
+    end
     stop_writer
   end
 

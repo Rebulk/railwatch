@@ -179,22 +179,48 @@ module Railwatch
         create_file "config/deploy.yml", updated, force: true
       end
 
+      # The two databases exist and are migrated when the generator returns:
+      # config/database.yml was just rewritten, so this re-reads it and runs
+      # the same prepare a deploy runs, for both databases only. The host's
+      # own databases are not touched, and a schema file is never written.
+      def prepare_local_databases
+        return unless options[:local]
+        return unless File.exist?("config/database.yml")
+        return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
+
+        say "\nbin/rails db:prepare (railwatch, railwatch_telemetry)", :green
+        require "active_record"
+        ActiveRecord::Base.configurations = Rails.application.config.database_configuration
+        %w[railwatch railwatch_telemetry].each do |name|
+          db_config = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
+          next say("  #{name}: not in config/database.yml for #{Rails.env}", :yellow) unless db_config
+
+          ActiveRecord::Tasks::DatabaseTasks.with_temporary_pool_for_each(env: Rails.env, name: name) do
+            ActiveRecord::Tasks::DatabaseTasks.migrate
+          end
+          say_status :prepared, "#{name} (#{db_config.database})", :green
+        end
+      rescue StandardError => e
+        say "Could not prepare the Railwatch databases here (#{e.class}: #{e.message}). Run `bin/rails db:prepare` yourself.", :yellow
+      end
+
       def show_next_steps
         if options[:local]
           say <<~STEPS, :green
 
             Next steps
-              1. Create the two databases:  bin/rails db:prepare
-                 (after a future `bundle update railwatch`, the same command
-                 migrates them)
-              2. Restart the app and open /railwatch. Put the mount behind your
-                 own authentication (a routes constraint or a controller check).
-              3. Verify the install:  bin/rails railwatch:doctor
-              4. Nothing else to run. With `plugin :railwatch` in config/puma.rb
-                 (added if the file exists) Puma forks one Railwatch writer
-                 process that writes every batch and runs the maintenance
-                 clock, so no web worker ever holds the telemetry database.
-                 No job worker needed.
+              1. Restart the app and open /railwatch.
+              2. Before production: name who may see it. The dashboard shows
+                 every query, log line and exception, so outside development
+                 and test it answers 403 until config/initializers/railwatch.rb
+                 sets c.dashboard_user (who is signed in; docs/embedded.md,
+                 Authentication) or c.dashboard_open = true.
+              3. Nothing else to run. Both databases were created just now and
+                 `bin/rails db:prepare` (which a deploy already runs) migrates
+                 them after every gem update. With `plugin :railwatch` in
+                 config/puma.rb Puma forks one Railwatch writer process that
+                 writes every batch and runs the maintenance clock, so no web
+                 process ever holds the telemetry database. No job worker.
           STEPS
           return
         end
@@ -222,9 +248,9 @@ module Railwatch
       # note below says so rather than letting a ✗ look like a broken install.
       def run_doctor
         return unless options[:doctor]
-        # The local install's databases do not exist until db:prepare, and this
-        # process read its configuration before the initializer was written;
-        # the doctor would only report both. The next steps say when to run it.
+        # This process read its configuration before the initializer was
+        # written, so in local mode the doctor would report an http transport
+        # with no token. The databases it would check were prepared above.
         return if options[:local]
         return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
@@ -286,6 +312,14 @@ module Railwatch
       # deploy_yml_with_secret: the comments are most of the file.
       def self.database_yml_with_railwatch(contents)
         lines = contents.lines
+        # Rails 8.1's non-Docker template leaves every production `database:`
+        # commented out ("path/to/persistent/storage/..."), so db:prepare
+        # cannot run in production at all until the host fills them in. The
+        # storage/ paths are what the Docker template writes and what
+        # config/deploy.yml mounts; use them.
+        lines = lines.map do |line|
+          line.sub(%r{\A(\s+)# database: path/to/persistent/storage/(\S+)$}, '\1database: storage/\2')
+        end
         %w[development test production].each do |env|
           start = lines.index { |line| line.match?(/\A#{env}:\s*(#.*)?$/) }
           next unless start

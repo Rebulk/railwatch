@@ -88,6 +88,18 @@ RSpec.describe Railwatch::Writer, type: :request do
       expect(Railwatch::FollowupReceipt.where(batch_id: id).count).to eq(1)
     end
 
+    it "commits the batch even when the live-update broadcast cannot load its cable adapter (redis configured, gem absent)" do
+      records = records_for("/widgets")
+      allow(ActionCable.server).to receive(:broadcast).and_raise(Gem::LoadError, "redis is not part of the bundle")
+
+      with_writer do
+        result = transport.deliver(records, batch_id: SecureRandom.uuid)
+        expect(result.ok).to be(true)
+        expect(result.accepted).to eq(records.size)
+      end
+      expect(telemetry { Railwatch::Telemetry::Execution.where(kind: "request").count }).to eq(1)
+    end
+
     it "answers a failed write with a retryable error and no exception record of its own" do
       records = records_for("/widgets")
       allow(Railwatch::Ingest::Writer).to receive(:new).and_raise(ActiveRecord::StatementInvalid, "database is locked")
