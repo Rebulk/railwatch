@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 (2026-09-18)
+
+- README: describe embedded mode. The gem has had two destinations since
+  0.2.0, and the front page still read as though Railwatch Cloud were the
+  only one.
+
 ## 0.2.1 (2026-09-18)
 
 - No change to the gem itself. This release exists to run the automated
