@@ -35,7 +35,34 @@ class WidenHostUserIds < ActiveRecord::Migration[8.1]
     end
   end
 
+  # Reversible only while every stored id still looks like a number. Once a
+  # host with UUIDs (or emails, or anything else) has written one, there is
+  # no integer to go back to: the column would either refuse the value or
+  # quietly coerce it to something that is no longer that person. Say so and
+  # stop, rather than losing the identity on the way down. These tables are
+  # authored content, a few thousand rows at most, so reading them is cheap.
+  INTEGERISH = /\A-?\d+\z/
+  MAX_REPORTED = 3
+
   def down
+    blocking = COLUMNS.filter_map do |table, column|
+      next unless connection.table_exists?(table)
+
+      values = connection.select_values(
+        "SELECT DISTINCT #{connection.quote_column_name(column)} FROM #{connection.quote_table_name(table)} " \
+        "WHERE #{connection.quote_column_name(column)} IS NOT NULL"
+      )
+      offenders = values.reject { |value| INTEGERISH.match?(value.to_s) }
+      "#{table}.#{column} (#{offenders.first(MAX_REPORTED).join(', ')}#{"..." if offenders.size > MAX_REPORTED})" if offenders.any?
+    end
+
+    if blocking.any?
+      raise ActiveRecord::IrreversibleMigration,
+            "cannot narrow host user ids back to integers: #{blocking.join('; ')}. " \
+            "Those ids came from this application's own dashboard_user resolver and have no integer form; " \
+            "rolling back would discard them."
+    end
+
     COLUMNS.each do |table, column|
       null = column == :viewer_id && table == :railwatch_saved_views ? false : true
       change_column table, column, :integer, null: null
