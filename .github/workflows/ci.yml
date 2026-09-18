@@ -18,6 +18,22 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      # public/railwatch is a build artifact, not a checked-in one, and the
+      # embedded dashboard specs serve the real bundle: its HTML shell, its
+      # hashed assets, and the Inertia version taken from its manifest. Build
+      # it here rather than teaching those specs to skip, which would leave
+      # the dashboard untested exactly where it is most likely to break.
+      - name: Build the dashboard bundle
+        run: bundle exec rake dashboard:build
+
       - name: Run specs
         run: bundle exec rspec
 
