@@ -2,10 +2,14 @@
 
 First-class monitoring for Rails. One gem instruments requests, jobs,
 scheduled tasks, commands, queries, exceptions, cache, mail, broadcasts,
-outgoing HTTP, storage, views, and logs, links them into one trace per
-execution, and ships them to Railwatch Cloud for about half a millisecond
-per request plus tens of microseconds per query, with zero writes to your
-database.
+outgoing HTTP, storage, views, and logs, and links them into one trace
+per execution, for about half a millisecond per request plus tens of
+microseconds per query, with zero writes to your database.
+
+Send that to Railwatch Cloud, or keep all of it inside the app:
+[embedded mode](docs/embedded.md) serves the same dashboard at
+`/railwatch` out of two SQLite files your app owns, with no token, no
+Node, no Redis and no job worker.
 
 ## Install
 
@@ -66,6 +70,28 @@ hot path to a query budget:
 expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
 expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 ```
+
+## Embedded mode
+
+`--local` keeps everything inside the application. Telemetry goes to two
+SQLite files it owns -- `railwatch` for issues, comments and saved views,
+`railwatch_telemetry` for what the app reports -- and the dashboard is
+served at `/railwatch` from a bundle shipped inside the gem. Nothing
+leaves the machine, and there is nothing else to run.
+
+Puma forks a single writer process (`plugin :railwatch`, which the
+installer adds) that owns both files. The web workers hand it batches
+over a Unix socket instead of writing SQLite on their own threads, and it
+runs the maintenance clock too, so exception grouping, rollups, retention
+and threshold scans happen without a queue.
+
+That dashboard reads every query, log line and exception the app
+produced, so it is closed by default the way Mission Control Jobs is:
+HTTP Basic is on with no credentials, and every request is 401 until you
+set them with `bin/rails railwatch:authentication:configure`. Apps that
+would rather use their own session hand it a `dashboard_user` resolver
+instead. [Embedded mode](docs/embedded.md) covers all of it, including
+upgrades and what it costs to store.
 
 ## Documentation
 
