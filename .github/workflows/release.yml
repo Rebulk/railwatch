@@ -25,10 +25,17 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
 
+      # public/railwatch is a build artifact, so a fresh checkout has no
+      # manifest and the embedded dashboard specs fail on it. ci.yml learned
+      # this; this workflow had the same gap, which is what turned the
+      # v0.2.0.pre1 tag red before it ever reached the publish step.
+      - name: Build the dashboard bundle
+        run: bundle exec rake dashboard:build
+
       - name: Run specs
         run: bundle exec rspec
 
-      - name: Verify package (builds the dashboard bundle first)
+      - name: Verify package
         run: bundle exec rake package:verify
 
   publish:
@@ -69,5 +76,20 @@ jobs:
       - name: Build gem
         run: gem build railwatch.gemspec --strict
 
+      # A tag re-pushed, or a version already published by hand, is not a
+      # failure: the thing the tag asked for is already true. Skip rather
+      # than fail, so a red run always means something is actually wrong.
+      - name: Is this version already on RubyGems?
+        id: published
+        run: |
+          version="$(ruby -Ilib -rrailwatch/version -e 'print Railwatch::VERSION')"
+          if gem list -r railwatch --all --prerelease --exact | grep -qF "$version"; then
+            echo "Version $version is already published; nothing to push."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish gem with RubyGems Trusted Publishing
+        if: steps.published.outputs.skip != 'true'
         uses: rubygems/release-gem@v1
