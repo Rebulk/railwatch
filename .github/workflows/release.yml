@@ -35,8 +35,12 @@ jobs:
       - name: Run specs
         run: bundle exec rspec
 
+      # The script, not `rake package:verify`: that task depends on
+      # dashboard:build, which would repeat the pnpm install and vite build
+      # just done above. The CI package job still uses the rake task, where
+      # nothing has built the bundle yet.
       - name: Verify package
-        run: bundle exec rake package:verify
+        run: bundle exec ruby script/verify_package
 
   publish:
     needs: test
@@ -79,16 +83,23 @@ jobs:
       # A tag re-pushed, or a version already published by hand, is not a
       # failure: the thing the tag asked for is already true. Skip rather
       # than fail, so a red run always means something is actually wrong.
+      # Asks for the one version, rather than grepping the list of all of
+      # them: "0.2.0" is a substring of "0.2.0.pre1", so a substring match
+      # would skip the 0.2.0 release as already done and say nothing.
       - name: Is this version already on RubyGems?
         id: published
         run: |
           version="$(ruby -Ilib -rrailwatch/version -e 'print Railwatch::VERSION')"
-          if gem list -r railwatch --all --prerelease --exact | grep -qF "$version"; then
-            echo "Version $version is already published; nothing to push."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+          url="https://rubygems.org/api/v2/rubygems/railwatch/versions/${version}.json"
+          code="$(curl -s -o /dev/null -w '%{http_code}' "$url")"
+          case "$code" in
+            200) echo "Version $version is already published; nothing to push."
+                 echo "skip=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "Version $version is not published yet."
+                 echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "RubyGems answered $code for $url; publishing rather than guessing."
+                 echo "skip=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Publish gem with RubyGems Trusted Publishing
         if: steps.published.outputs.skip != 'true'
