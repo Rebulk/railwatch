@@ -11,7 +11,7 @@ module Railwatch
     end
 
     def user=(u)
-      self.viewer_id = u&.id
+      self.viewer_id = u&.id&.to_s
     end
 
     validates :body, presence: true

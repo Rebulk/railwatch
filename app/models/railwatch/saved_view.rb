@@ -33,14 +33,14 @@ module Railwatch
     end
 
     def user=(u)
-      self.viewer_id = u&.id
+      self.viewer_id = u&.id&.to_s
     end
 
     validates :name, presence: true, length: { maximum: 80 }
     validates :page, inclusion: { in: PAGES }
 
     scope :pinned, -> { where(pinned: true) }
-    scope :visible_to, ->(user) { where(shared: true).or(where(viewer_id: user.id)) }
+    scope :visible_to, ->(user) { where(shared: true).or(where(viewer_id: user.id.to_s)) }
 
     # The props every environment page shares, ready for the sidebar and the
     # Views menu: one entry per view this user is allowed to see.

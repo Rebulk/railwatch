@@ -34,7 +34,10 @@ module Railwatch
       def plan = "embedded"
       def retention_days = Railwatch.config.retention_days
       def auto_resolve_after_days = 14
-      def users = [ User.default ]
+      # Whoever the host's resolver named for this request, not the anonymous
+      # placeholder: an embedded install has no member list, so the account's
+      # one "member" is the person looking at it.
+      def users = [ User.current || User.default ]
       def members = users
       def memberships = NONE
       def integrations = NONE

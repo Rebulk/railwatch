@@ -184,7 +184,7 @@ on the WebSocket handshake, a `dashboard_user` resolver is consulted,
 an undeclared gate is refused. The channel carries an ingest ping (a
 timestamp and per-type counts) and never telemetry records.
 
-### Naming the operator
+### Naming the operator, and what an id may be
 
 Comments, saved views and issue activity record who did them. Give the
 initializer a resolver and the dashboard shows that person instead of a
@@ -196,6 +196,16 @@ c.dashboard_user = ->(request) do
   user && { id: user.id, name: user.name, email: user.email }
 end
 ```
+
+The `id` may be anything your application already uses: an integer, a
+UUID, a ULID, an email. It is stored as an opaque string and handed back
+to you; nothing joins on it and nothing parses it, because the engine has
+no user table to check it against. Comments, saved views, issue activity
+and assignment all key off whatever you return, so a person keeps their
+own views and their name on their own comments however you identify them.
+
+Returning `nil` refuses the request, which is what makes this an
+authorisation rule as well as a label.
 
 ## The writer process
 
