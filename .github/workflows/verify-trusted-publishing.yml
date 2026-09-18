@@ -1,0 +1,53 @@
+# Answers "is trusted publishing actually set up?" without cutting a release.
+#
+# The release workflow only exercises this when a tag is pushed, and by then
+# it is too late to find out the answer is no: that is how v0.1.2 through
+# v0.2.0 all went red at the last step. This runs the same OIDC exchange
+# `rubygems/release-gem` performs, then proves the token it got back is
+# accepted, and pushes nothing.
+#
+# Run it from the Actions tab, or `gh workflow run verify-trusted-publishing.yml`.
+name: Verify trusted publishing
+
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Without this the job cannot identify itself to RubyGems at all.
+      id-token: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+
+      # The step that fails with "No trusted publisher configured for this
+      # workflow" when the RubyGems side is missing or does not match this
+      # repository, this workflow filename, and this environment (none).
+      - name: Exchange the GitHub OIDC token for a RubyGems one
+        uses: rubygems/configure-rubygems-credentials@dc5a8d8553e6ee01fc26761a49e99e733d17954a # v2.1.0
+
+      # Getting a token is not the same as the token working, so spend it on
+      # a read that requires authentication and changes nothing.
+      - name: Prove the token is accepted
+        run: |
+          if [ -z "${GEM_HOST_API_KEY:-}" ]; then
+            echo "The exchange completed but produced no token."
+            exit 1
+          fi
+          code="$(curl -s -o profile.json -w '%{http_code}' \
+            -H "Authorization: ${GEM_HOST_API_KEY}" https://rubygems.org/api/v1/profile/me.json)"
+          if [ "$code" != "200" ]; then
+            echo "RubyGems rejected the exchanged token (HTTP $code)."
+            exit 1
+          fi
+          echo "Trusted publishing is configured. Authenticated as:"
+          ruby -rjson -e 'puts "  " + JSON.parse(File.read("profile.json")).fetch("handle", "(unknown)")'
+          echo "A tag will publish without a stored API key."
