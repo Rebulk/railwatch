@@ -112,6 +112,15 @@ module Railwatch
       end
     end
 
+    # A rake process starts its command execution before this point -- the
+    # top-level task is invoked before its `:environment` prerequisite boots
+    # Rails -- so a reporter can already exist, built from a config that had
+    # not yet been told the app is embedded. This is the first moment the
+    # app's own configuration is final.
+    initializer "railwatch.adopt_final_config", after: :load_config_initializers do
+      Railwatch.adopt_final_config!
+    end
+
     initializer "railwatch.transport_security", after: :load_config_initializers do
       next if Railwatch.config.local? || Railwatch.config.ingest_url_allowed?
 

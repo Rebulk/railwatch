@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.2 (2026-09-19)
+
+- Fix an embedded install's rake tasks reporting over HTTP instead of into
+  the app's own database. A rake process invokes its top-level task -- where
+  the command patch starts the execution, and sampling it builds the
+  reporter -- before that task's `:environment` prerequisite boots Rails and
+  runs `config/initializers`. A token in the environment is enough for
+  Railwatch to be enabled that early, so the reporter chose HTTP from a
+  config that had not yet been told the app is embedded, and kept it.
+  Every rake task's telemetry then went to the receiver instead of the
+  local database, skipping the export queue and the replay receipt it
+  earns. Affects embedded and hybrid installs with a token configured;
+  cloud-only installs were never affected, and neither was an embedded
+  install with no token.
+- The reporter now re-decides what it derived from a not-yet-final config
+  once `config/initializers` has run: its transport, and its buffer size
+  while that buffer is still empty.
+- Add a subprocess regression that reproduces rake's ordering and fails if
+  an embedded app's rake task reports over HTTP.
+
 ## 0.3.1 (2026-09-19)
 
 - Fix production boot for cloud-only installs with no Railwatch databases.
