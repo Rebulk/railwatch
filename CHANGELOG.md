@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.1 (2026-09-19)
+
+- Fix production boot for cloud-only installs with no Railwatch databases.
+  Versions 0.2.0 through 0.3.0 eagerly loaded embedded models even when
+  reporting over HTTP. Hosts using `activerecord-tenanted` (or disabling
+  `active_record.check_schema_cache_dump_version`) then failed with
+  `Railwatch::DatabaseNotConfigured` when Rails inspected their connection
+  pools. Hosts without Solid Queue also failed while loading embedded jobs.
+  HTTP installs now leave embedded models, jobs and dashboard controllers
+  out of eager loading; the browser beacon and HTTP reporting still work.
+  `transport = :local` keeps its existing eager loading and database guards.
+- Add production subprocess regressions with only a primary database,
+  checking boot, health, browser beacons and HTTP exception delivery without
+  loading `TelemetryRecord` or any embedded database model.
+
 ## 0.3.0 (2026-09-19)
 
 - An embedded install can now also mirror its telemetry to Railwatch Cloud,
