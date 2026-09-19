@@ -82,6 +82,9 @@ module Railwatch
           @environment.count_events!(accepted)
         end
         enqueue_followups
+        # After the transaction: the sender must never find a delivery that
+        # has not committed yet.
+        Export::Sender.wake! if @queued
         broadcast_live
         Result.new(accepted: accepted, rejected: @rejections.size, rejections: @rejections)
       end
@@ -125,6 +128,7 @@ module Railwatch
         return {} unless @export
 
         admission = @export.enqueue!(@selections, now: @received_at)
+        @queued = admission.disposition == "queued"
         { export_disposition: admission.disposition, export_record_count: admission.record_count }
       end
 

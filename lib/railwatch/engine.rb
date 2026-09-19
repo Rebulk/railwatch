@@ -216,6 +216,17 @@ module Railwatch
       at_exit { Railwatch::Maintenance.stop! }
     end
 
+    # Draining the export queue. Same shape and ordering as the others:
+    # stopped before the reporter's final flush, so its last claim is
+    # released rather than left to expire. Sender.start! is a no-op unless
+    # export is configured and usable.
+    initializer "railwatch.export" do
+      next unless Railwatch.enabled?
+
+      Railwatch::Export::Sender.start!
+      at_exit { Railwatch::Export::Sender.stop! }
+    end
+
     # lib/tasks/railwatch_tasks.rake is picked up by Rails::Engine's default
     # lib/tasks convention; the rake_tasks block above only installs the
     # Rake::Task patch.
