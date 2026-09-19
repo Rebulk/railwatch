@@ -95,6 +95,19 @@ namespace :railwatch do
       # the two databases the engine writes to and the jobs that derive
       # rollups and issues from them.
       check.call(true, "transport", "local (telemetry stays in this app; dashboard at the engine mount)")
+      # Mirroring is opt-in, so silence means "not asked for". Asked for and
+      # not working is the case worth failing on: the operator believes their
+      # telemetry is leaving the box and it is not.
+      if config.export_enabled
+        problem = config.export_problem
+        check.call(problem.nil?, "export", problem || "mirroring to #{config.resolved_export_url}", fatal: true)
+        if problem.nil?
+          status = Railwatch::Export::Outbox.new(config, Railwatch::Environment.current)
+                                            .then { |outbox| Railwatch::Environment.current.with_telemetry { outbox.status } }
+          check.call(status[:state] == "ready", "export destination",
+                     status[:state] == "ready" ? "#{status[:queued_deliveries]} queued (#{status[:queued_bytes]} bytes), producer #{status[:producer_id]}" : "#{status[:state]}: #{status[:reason]} (bin/rails railwatch:export:rebind to clear)")
+        end
+      end
       %w[railwatch railwatch_telemetry].each do |name|
         configured = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
         check.call(!configured.nil?, "#{name} database",
@@ -282,6 +295,29 @@ namespace :railwatch do
 
     abort "\nrailwatch:doctor failed: #{blockers.join(', ')}" if blockers.any?
     puts "\nRailwatch is wired up."
+  end
+
+  namespace :export do
+    desc "Show what the export queue is holding and whether it can send"
+    task status: :environment do
+      env = Railwatch::Environment.current
+      status = env.with_telemetry { Railwatch::Export::Outbox.new(Railwatch.config, env).status }
+      status.each { |key, value| puts "#{key}: #{value}" }
+    end
+
+    desc "Clear a credential block, abandoning work admitted under the old token"
+    task rebind: :environment do
+      env = Railwatch::Environment.current
+      discarded = env.with_telemetry { Railwatch::Export::Outbox.new(Railwatch.config, env).rebind! }
+      puts discarded ? "rebound; #{discarded} queued deliveries abandoned" : "export is not configured"
+    end
+
+    desc "Abandon everything queued for export without contacting the receiver"
+    task discard: :environment do
+      env = Railwatch::Environment.current
+      count = env.with_telemetry { Railwatch::Export::Outbox.new(Railwatch.config, env).discard_all! }
+      puts "#{count} queued deliveries abandoned"
+    end
   end
 
   desc "Print where to create an ingest token for this app's Railwatch platform"
