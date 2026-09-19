@@ -57,6 +57,24 @@ module Railwatch
       app.middleware.insert_before 0, Railwatch::Middleware::Request
     end
 
+    # HTTP installs have no embedded databases or job backend. Loading their
+    # models still registers them with Active Record, whose schema-cache boot
+    # hook asks every descendant for its connection_pool (e.g. with
+    # activerecord-tenanted). Decide after the host's initializer selects the
+    # transport. Keep autoloading available for the local installer and tools;
+    # only local installs should eagerly load the embedded models and jobs.
+    # Dashboard controllers also reference model constants in their class
+    # bodies. The beacon is the only controller a cloud install needs.
+    initializer "railwatch.embedded_eager_loading", after: :load_config_initializers, before: :setup_main_autoloader do
+      next if Railwatch.config.local?
+
+      Rails.autoloaders.main.do_not_eager_load(root.join("app/models"))
+      Rails.autoloaders.main.do_not_eager_load(root.join("app/jobs"))
+      root.glob("app/controllers/railwatch/*.rb").each do |path|
+        Rails.autoloaders.main.do_not_eager_load(path) unless path.basename.to_s == "beacon_controller.rb"
+      end
+    end
+
     # Before anything subscribes or starts a thread, and after the app's own
     # initializer has had its say about config: a console captures nothing.
     initializer "railwatch.console", after: :load_config_initializers, before: "railwatch.subscribe" do
