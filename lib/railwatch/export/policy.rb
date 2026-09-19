@@ -43,15 +43,22 @@ module Railwatch
         # `records` is the batch as it arrived, before mapping: mapping is
         # lossy and drops records this receiver may accept, so mirroring what
         # we stored would not be mirroring what we were sent.
+        # The receiver refuses a request carrying more than this, whole. A
+        # delivery it will always reject is not worth storing: leave the
+        # excess out here, where it is counted as dropped, rather than
+        # discovering it after a round trip that destroys the lot.
+        MAX_RECORDS = 20_000
+
         def prepare(records:, encoder:, source_batch_id:, metadata: {})
           return [] if records.empty?
 
-          encoded = encoder.encode(records)
+          over_count = [ records.size - MAX_RECORDS, 0 ].max
+          encoded = encoder.encode(records.first(MAX_RECORDS))
           # Records the encoder left out are lost to the receiver as surely as
           # ones the client dropped, and the existing HTTP path reports them
           # together. Adding, not replacing: a batch that dropped 7 and
           # overflowed 2 lost 9.
-          dropped = metadata.fetch("dropped", 0).to_i + encoded.over_cap
+          dropped = metadata.fetch("dropped", 0).to_i + encoded.over_cap + over_count
           dropped_bytes = metadata.fetch("dropped_bytes", 0).to_i + encoded.over_cap_bytes
           wire = metadata.merge("policy" => VERSION, "version" => Railwatch::VERSION,
                                 "dropped" => dropped, "dropped_bytes" => dropped_bytes)

@@ -42,8 +42,18 @@ module Railwatch
         bind!(url: url, token: token, now: now, retried: true)
       end
 
+      # A pause the receiver asked for ends when it said it would. Only a
+      # credential problem needs a person: everything else is a delay, and a
+      # delay that never ends is an outage we caused ourselves.
+      # Needs a person before anything can move again: a credential that was
+      # changed, or a destination taken out of service. Queueing into one
+      # just fills it with work that rebind! will throw away.
+      def blocked? = %w[unauthorized inactive].include?(state)
+
       def sendable?(now: Time.current)
-        state == "ready" && (retry_at.nil? || retry_at <= now)
+        return false unless %w[ready deferred].include?(state)
+
+        retry_at.nil? || retry_at <= now
       end
 
       def bump!(counter, by = 1)

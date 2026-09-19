@@ -21,8 +21,10 @@ module Railwatch
     class Outbox
       # A claim handed to a sender: the bytes and the right to finish, with no
       # open database connection attached.
+      # Carries the destination it is FOR. A sender reconfigured between the
+      # claim and the send must not post these bytes somewhere else.
       Claim = Struct.new(:id, :delivery_id, :body, :record_count, :metadata, :token, :generation,
-                         keyword_init: true)
+                         :url, :token_digest, :producer_id, keyword_init: true)
 
       Admission = Struct.new(:disposition, :record_count, keyword_init: true)
 
@@ -38,6 +40,13 @@ module Railwatch
         destination = binding_row
         return Admission.new(disposition: "blocked_config", record_count: 0) unless destination
         return shed(destination, 0, "empty") if selections.empty?
+        # A deferred destination still queues -- waiting is what the queue is
+        # for. A blocked one does not: those deliveries could only ever be
+        # discarded, and they would take capacity from telemetry that can
+        # still be sent once somebody fixes it.
+        if destination.blocked?
+          return shed(destination, selections.sum { |s| s.record_count.to_i }, "blocked_destination")
+        end
 
         admitted = 0
         # A selection with no body is the policy telling us everything it was
@@ -69,6 +78,70 @@ module Railwatch
           oldest_queued_at: destination.export_deliveries.live.oldest_first.pick(:enqueued_at),
           sendable: destination.sendable?(now: now), counters: destination.counters
         }
+      end
+
+      # Takes the lease and the oldest delivery that is due, or returns nil.
+      # One in flight at a time: a queue draining an outage should do it in
+      # order, not open a connection per row.
+      def claim!(owner:, now: Time.current)
+        destination = binding_row
+        return nil unless destination&.sendable?(now: now)
+
+        Telemetry::ExportDelivery.transaction do
+          generation = Lease.acquire(destination.id, owner: owner, now: now) or next nil
+
+          reclaim_abandoned(destination, now)
+          # Not merely due: still worth sending. Expiry is swept every few
+          # minutes, and a restart after a long outage must not post work from
+          # before the receiver would still recognise it.
+          delivery = destination.export_deliveries.due(now).where(expires_at: now..)
+                                .oldest_first.lock.first or next nil
+
+          token = SecureRandom.uuid
+          delivery.update!(state: "sending", claim_token: token, claim_generation: generation,
+                           claim_expires_at: now + Lease::TTL, attempts: delivery.attempts + 1)
+          Claim.new(id: delivery.id, delivery_id: delivery.delivery_id, body: delivery.body,
+                    record_count: delivery.record_count, metadata: delivery.wire_metadata,
+                    token: token, generation: generation, url: destination.url,
+                    token_digest: destination.credential_sha256, producer_id: destination.producer_id)
+        end
+      end
+
+      # Given up voluntarily, so the next process does not wait out the TTL.
+      # Only ever our own: the generation check means a lease we already lost
+      # is not ours to release.
+      def release_lease!(owner:, now: Time.current)
+        destination = binding_row or return false
+        return false unless destination.lease_owner == owner
+        return false if destination.export_deliveries.exists?(state: "sending")
+
+        Lease.release(destination.id, owner: owner, generation: destination.lease_generation, now: now)
+      end
+
+      def renew!(claim, owner:, now: Time.current)
+        destination = binding_row or return false
+        return false unless Lease.renew(destination.id, owner: owner, generation: claim.generation, now: now)
+
+        Telemetry::ExportDelivery.where(id: claim.id, claim_token: claim.token)
+          .update_all([ "claim_expires_at = ?, updated_at = ?", now + Lease::TTL, now ]) == 1
+      end
+
+      # Records what the receiver said. Returns false when this claim is no
+      # longer the one allowed to speak for the delivery -- a stale holder
+      # whose request landed anyway must not overwrite the new holder's work.
+      def finish!(claim, outcome, now: Time.current)
+        Telemetry::ExportDelivery.transaction do
+          delivery = Telemetry::ExportDelivery.lock.find_by(id: claim.id)
+          next false unless delivery&.held_by?(claim.token, claim.generation)
+
+          case outcome.disposition
+          when :stored, :acked
+            clear_pause(delivery.export_destination_id, now)
+            finish(claim.id, "acked", now: now, status: outcome.status, ack: outcome.ack)
+          when :rejected then finish(claim.id, "rejected", now: now, status: outcome.status, reason: outcome.reason)
+          else defer(delivery, outcome, now)
+          end
+        end
       end
 
       # Terminalises whatever has run out of time. A delivery already on the
@@ -135,6 +208,64 @@ module Railwatch
       end
 
       private
+
+      # A holder that vanished leaves its delivery claimed. Once the claim has
+      # expired the row goes back in the queue; the fence stops the vanished
+      # holder from finishing it later.
+      def reclaim_abandoned(destination, now)
+        destination.export_deliveries.where(state: "sending")
+          .where(claim_expires_at: ...now)
+          .update_all([ "state = 'pending', claim_token = NULL, claim_generation = NULL, claim_expires_at = NULL, updated_at = ?", now ])
+      end
+
+      # Not stored, and worth trying again. The delay is ours unless the
+      # receiver named a later one -- we never come back sooner than it asked.
+      def defer(delivery, outcome, now)
+        wait = backoff(delivery.attempts)
+        at = [ now + wait, outcome.retry_after_at ].compact.max
+        delivery.update!(state: "pending", claim_token: nil, claim_generation: nil, claim_expires_at: nil,
+                         next_attempt_at: at, last_status: outcome.status, last_reason: outcome.reason)
+        pause_destination(delivery.export_destination_id, outcome, at, now)
+        true
+      end
+
+      # Only for answers that are about the destination rather than this
+      # delivery. A refused token, an exhausted quota, an explicit "slow
+      # down" -- those apply to everything queued. A 500 or a timeout is one
+      # delivery having a bad time, and pausing the queue for it would turn a
+      # blip into an outage.
+      # 503 is deliberately absent. A receiver briefly unavailable is this
+      # delivery's bad luck; pausing the queue for it would hold up every
+      # other delivery behind one unlucky request. 429 and 402 are the
+      # receiver telling us something about itself.
+      DESTINATION_WIDE = { 401 => "unauthorized", 403 => "unauthorized",
+                           402 => "deferred", 429 => "deferred" }.freeze
+
+      # It is taking deliveries again, so stop saying it is not. A credential
+      # block is left alone: that one is not ours to decide has passed.
+      def clear_pause(destination_id, now)
+        Telemetry::ExportDestination.where(id: destination_id, state: "deferred")
+          .update_all([ "state = 'ready', reason = NULL, retry_at = NULL, updated_at = ?", now ])
+      end
+
+      def pause_destination(destination_id, outcome, at, now)
+        state = DESTINATION_WIDE[outcome.status] or return
+
+        Telemetry::ExportDestination.where(id: destination_id).update_all([
+          "state = ?, reason = ?, retry_at = ?, updated_at = ?",
+          state, (outcome.reason || state).to_s[0, 64], at, now
+        ])
+      end
+
+      BACKOFF_CEILING = 60
+
+      # Exponential with jitter, so a fleet that lost the receiver together
+      # does not come back in lockstep. There is no attempt limit: expiry is
+      # the limit, and it is measured in time rather than tries.
+      def backoff(attempts)
+        ceiling = [ 2**[ attempts - 1, 6 ].min, BACKOFF_CEILING ].min
+        ceiling * (0.5 + (SecureRandom.random_number / 2))
+      end
 
       def admit(destination, selection, now)
         # Before the capacity test, not after: work we already hold is not

@@ -96,4 +96,36 @@ RSpec.describe "export, switched off" do
     config.export_url = nil
     config.export_token = nil
   end
+  it "needs exactly one new setting to also send to the cloud" do
+    config = Railwatch.config
+    token = config.token
+    url = config.ingest_url
+    config.token = "rw_existing_token"
+    config.ingest_url = "https://railwatch.test"
+
+    # An embedded install that already has a token and an ingest URL -- which
+    # is every install that ever pointed at the cloud -- turns mirroring on
+    # with one flag. Nothing else to configure, nothing else to understand.
+    config.export_enabled = true
+
+    expect(config.export?).to be(true)
+    expect(config.resolved_export_url).to eq("https://railwatch.test/ingest")
+    expect(config.resolved_export_token).to eq("rw_existing_token")
+  ensure
+    config.export_enabled = false
+    config.token = token
+    config.ingest_url = url
+  end
+  it "reports a relative ingest url as a problem rather than raising out of the doctor" do
+    config = Railwatch.config
+    url = config.ingest_url
+    config.ingest_url = "receiver.test:8080"
+    config.export_enabled = true
+
+    expect { config.export_problem }.not_to raise_error
+    expect(config.export?).to be(false)
+  ensure
+    config.ingest_url = url
+    config.export_enabled = false
+  end
 end
