@@ -68,8 +68,10 @@ module Railwatch
 
         @stopping = true
         @mutex.synchronize { @wakeup.signal }
-        @thread.join(Railwatch.config.shutdown_timeout)
-        @thread = nil
+        # Only forget the thread if it actually stopped. Dropping the handle
+        # on a thread still inside a request would let a later start! run a
+        # second loop under the same owner, both claiming rows.
+        @thread = nil if @thread.join(Railwatch.config.shutdown_timeout)
       end
 
       # Something was queued; look now rather than at the next tick.
@@ -83,6 +85,19 @@ module Railwatch
           sent = drain_one
           wait(IDLE) unless sent || @stopping
         end
+        release_lease
+      end
+
+      # Hand the lease back rather than making the next process wait out its
+      # TTL for a holder that has politely finished.
+      def release_lease
+        Railwatch.ignore do
+          environment = Environment.current
+          outbox = Outbox.new(Railwatch.config, environment)
+          environment.with_telemetry { outbox.release_lease!(owner: @owner) }
+        end
+      rescue StandardError => e
+        Railwatch.debug { "export sender: releasing lease failed: #{e.class}" }
       end
 
       def wait(seconds)
@@ -96,7 +111,7 @@ module Railwatch
           outbox = Outbox.new(Railwatch.config, environment)
           claim = environment.with_telemetry { outbox.claim!(owner: @owner) } or return false
 
-          outcome = client.send(claim, producer_id: environment.with_telemetry { outbox.binding_row&.producer_id })
+          outcome = client.deliver(claim, producer_id: environment.with_telemetry { outbox.binding_row&.producer_id })
           environment.with_telemetry { outbox.finish!(claim, outcome) }
           true
         end

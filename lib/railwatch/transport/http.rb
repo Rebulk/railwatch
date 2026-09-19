@@ -21,7 +21,7 @@ module Railwatch
       # back. They are carried rather than discarded so a caller with durable
       # storage can wait instead of guessing.
       Result = Struct.new(:ok, :status, :accepted, :rejected, :rejections, :error, :retryable_error,
-                          :reason, :retry_after_at, :disposition, keyword_init: true) do
+                          :reason, :retry_after_at, :disposition, :ack_disposition, keyword_init: true) do
         def retryable?
           # A permanent failure says so outright: without this, its absent
           # status would read as "no response yet", which is retryable.
@@ -246,7 +246,8 @@ module Railwatch
         Result.new(ok: true, status: response.code.to_i, accepted: accepted, rejected: rejected,
                    rejections: Array(rejections).first(10), reason: reason,
                    retry_after_at: retry_after_at(response),
-                   disposition: reason ? :deferred : :stored)
+                   disposition: reason ? :deferred : :stored,
+                   ack_disposition: data["disposition"].is_a?(String) ? data["disposition"][0, 32] : nil)
       rescue JSON::ParserError
         # The parser's message quotes the document, which may be a proxy page
         # echoing the request. Say what happened, not what it contained.
@@ -257,8 +258,10 @@ module Railwatch
       # the submitted records. Keep the batch for Reporter retry instead of
       # silently treating it as delivered.
       def invalid_acknowledgement(response, detail)
+        # Keep the delay even though we could not read the rest: a receiver
+        # asking for room still means it, whatever state its body was in.
         Result.new(ok: false, status: response.code.to_i, error: "invalid ingest acknowledgement: #{detail}",
-                   retryable_error: true)
+                   retryable_error: true, retry_after_at: retry_after_at(response))
       end
 
       def apply_status_policy(result)

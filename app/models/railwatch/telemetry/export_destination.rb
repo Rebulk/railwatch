@@ -42,8 +42,13 @@ module Railwatch
         bind!(url: url, token: token, now: now, retried: true)
       end
 
+      # A pause the receiver asked for ends when it said it would. Only a
+      # credential problem needs a person: everything else is a delay, and a
+      # delay that never ends is an outage we caused ourselves.
       def sendable?(now: Time.current)
-        state == "ready" && (retry_at.nil? || retry_at <= now)
+        return false unless %w[ready deferred].include?(state)
+
+        retry_at.nil? || retry_at <= now
       end
 
       def bump!(counter, by = 1)

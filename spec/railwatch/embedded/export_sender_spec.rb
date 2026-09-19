@@ -6,13 +6,14 @@ RSpec.describe Railwatch::Export::Sender do
   around do |example|
     config = Railwatch.config
     previous = { transport: config.transport, enabled: config.export_enabled, url: config.export_url,
-                 token: config.export_token }
+                 token: config.export_token, token_value: config.token }
     config.transport = :local
     config.export_enabled = true
     config.export_url = "https://receiver.test/ingest"
     config.export_token = "rw_token"
     example.run
   ensure
+    config.token = previous[:token_value]
     config.transport = previous[:transport]
     config.export_enabled = previous[:enabled]
     config.export_url = previous[:url]
@@ -178,6 +179,108 @@ RSpec.describe Railwatch::Export::Sender do
     end
   end
 
+  describe "what it refuses to throw away" do
+    it "keeps the bytes when WE declined to send, rather than treating it as a rejection" do
+      ingest
+      held = claim
+      # A latched credential failure means the delivery was never offered to
+      # anyone. Freeing its body would destroy telemetry nobody refused.
+      refused = Railwatch::Transport::Http::Result.new(ok: false, error: "unauthorized, flushing stopped",
+                                                        status: 401, disposition: :permanent)
+      finish(held, Railwatch::Export::Client.new(Railwatch.config).__send__(:interpret, refused))
+
+      expect(delivery.state).to eq("pending")
+      expect(delivery.body).not_to be_nil
+    end
+
+    it "does not believe counts that add up when the receiver named something else" do
+      ingest
+      stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"queued_for_review","accepted":1,"rejected":0}')
+
+      held = claim
+      finish(held, client.deliver(held, producer_id: destination.producer_id))
+
+      expect(delivery.state).to eq("pending")
+      expect(delivery.body).not_to be_nil
+    end
+  end
+
+  describe "pauses that end" do
+    it "comes back by itself once the receiver's delay has passed" do
+      ingest
+      held = claim
+      finish(held, outcome(:deferred, status: 429, reason: "rate", retry_after_at: Time.now + 60))
+      expect(claim).to be_nil
+
+      later = Time.now + 120
+      expect(environment.with_telemetry { outbox.claim!(owner: "o", now: later) }).not_to be_nil
+    end
+
+    it "does not pause the whole destination because one delivery got a 503" do
+      ingest
+      ingest
+      first = claim
+      finish(first, outcome(:deferred, status: 503, reason: "busy"))
+
+      expect(destination.state).to eq("ready")
+      expect(claim).not_to be_nil
+    end
+
+    it "stops saying it is paused once something gets through" do
+      ingest
+      ingest
+      finish(claim, outcome(:deferred, status: 429, reason: "rate", retry_after_at: Time.now - 1))
+      expect(destination.state).to eq("deferred")
+
+      # Past the short backoff the failure earned, so there is something to
+      # claim; the point is what a success then does to the pause.
+      later = Time.now + 120
+      held = environment.with_telemetry { outbox.claim!(owner: "o", now: later) }
+      environment.with_telemetry { outbox.finish!(held, outcome(:stored), now: later) }
+      expect(destination.state).to eq("ready")
+      expect(destination.retry_at).to be_nil
+    end
+
+    it "keeps a credential block until a person clears it" do
+      ingest
+      finish(claim, outcome(:deferred, status: 401, reason: "unauthorized"))
+
+      expect(environment.with_telemetry { outbox.claim!(owner: "o", now: Time.now + 86_400) }).to be_nil
+    end
+  end
+
+  describe "credentials" do
+    it "authenticates with the export token, not whatever the cloud transport uses" do
+      Railwatch.config.token = "ordinary_cloud_token"
+      Railwatch.config.export_token = "export_only_token"
+      ingest
+      stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
+
+      held = claim
+      Railwatch::Export::Client.new(Railwatch.config).deliver(held, producer_id: destination.producer_id)
+
+      expect(a_request(:post, "https://receiver.test/ingest")
+        .with(headers: { "Authorization" => "Bearer export_only_token" })).to have_been_made
+    end
+  end
+
+  describe "giving up in time" do
+    it "stops waiting for a delivery that has run out of time, and frees its bytes" do
+      ingest
+      past = Time.now + Railwatch.config.export_max_age + 60
+      environment.with_telemetry { outbox.expire!(now: past) }
+
+      expect(delivery.disposition).to eq("expired")
+      expect(delivery.body).to be_nil
+    end
+
+    it "is run by the maintenance clock, so the age limit is a limit" do
+      expect(Railwatch::Maintenance::TASKS).to have_key("export_expiry")
+    end
+  end
+
   describe "the whole round trip" do
     it "sends a queued delivery and marks it acknowledged" do
       ingest
@@ -185,7 +288,7 @@ RSpec.describe Railwatch::Export::Sender do
         .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
 
       held = claim
-      result = client.send(held, producer_id: destination.producer_id)
+      result = client.deliver(held, producer_id: destination.producer_id)
       finish(held, result)
 
       expect(delivery.disposition).to eq("acked")
@@ -200,7 +303,7 @@ RSpec.describe Railwatch::Export::Sender do
         .to_return(status: 200, body: '{"disposition":"already_committed","accepted":1,"rejected":0}')
 
       held = claim
-      finish(held, client.send(held, producer_id: destination.producer_id))
+      finish(held, client.deliver(held, producer_id: destination.producer_id))
 
       expect(delivery.disposition).to eq("acked")
     end
@@ -210,7 +313,7 @@ RSpec.describe Railwatch::Export::Sender do
       stub_request(:post, "https://receiver.test/ingest").to_timeout
 
       held = claim
-      finish(held, client.send(held, producer_id: destination.producer_id))
+      finish(held, client.deliver(held, producer_id: destination.producer_id))
 
       expect(delivery.state).to eq("pending")
       expect(delivery.body).not_to be_nil
@@ -226,7 +329,7 @@ RSpec.describe Railwatch::Export::Sender do
 
       2.times do
         held = environment.with_telemetry { outbox.claim!(owner: "o", now: Time.now + 3600) }
-        finish(held, client.send(held, producer_id: destination.producer_id))
+        finish(held, client.deliver(held, producer_id: destination.producer_id))
       end
 
       expect(bodies.size).to eq(2)
