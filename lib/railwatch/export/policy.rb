@@ -21,7 +21,7 @@ module Railwatch
 
       # One thing to send: immutable once built.
       Selection = Struct.new(:key, :body, :body_sha256, :metadata, :record_count, :ndjson_bytes,
-                             keyword_init: true) do
+                             :dropped, keyword_init: true) do
         def metadata_sha256
           @metadata_sha256 ||= Digest::SHA256.hexdigest(JSON.generate(metadata.sort.to_h))
         end
@@ -47,15 +47,23 @@ module Railwatch
           return [] if records.empty?
 
           encoded = encoder.encode(records)
-          return [] if encoded.sent.zero?
+          # Records the encoder left out are lost to the receiver as surely as
+          # ones the client dropped, and the existing HTTP path reports them
+          # together. Adding, not replacing: a batch that dropped 7 and
+          # overflowed 2 lost 9.
+          dropped = metadata.fetch("dropped", 0).to_i + encoded.over_cap
+          dropped_bytes = metadata.fetch("dropped_bytes", 0).to_i + encoded.over_cap_bytes
+          wire = metadata.merge("policy" => VERSION, "version" => Railwatch::VERSION,
+                                "dropped" => dropped, "dropped_bytes" => dropped_bytes)
+          # Nothing fitted. There is no body to send, but the loss is real and
+          # has to be reported rather than filed as "nothing to do".
+          return [ Selection.new(key: nil, record_count: 0, dropped: encoded.over_cap, metadata: wire) ] if encoded.sent.zero?
 
           [ Selection.new(
             key: "batch:#{source_batch_id}:#{VERSION}",
             body: encoded.body, body_sha256: encoded.sha256,
             record_count: encoded.sent, ndjson_bytes: encoded.uncompressed_bytes,
-            metadata: metadata.merge("policy" => VERSION, "version" => Railwatch::VERSION,
-                                     "dropped" => encoded.over_cap,
-                                     "dropped_bytes" => encoded.over_cap_bytes)
+            dropped: encoded.over_cap, metadata: wire
           ) ]
         end
       end

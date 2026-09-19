@@ -20,7 +20,7 @@ module Railwatch
       # is a different binding decision, not a silent rebind: queued bytes
       # were admitted under the old credential and must not follow the new one
       # to whatever tenant it belongs to.
-      def self.bind!(url:, token:, now: Time.current)
+      def self.bind!(url:, token:, now: Time.current, retried: false)
         row = find_or_initialize_by(url_sha256: digest(url))
         row.url = url
         row.producer_id ||= SecureRandom.uuid
@@ -34,6 +34,12 @@ module Railwatch
           row.save!
         end
         row
+      rescue ActiveRecord::RecordNotUnique
+        # Two processes binding for the first time at once. One row wins; the
+        # loser wants that row, not an error.
+        raise if retried
+
+        bind!(url: url, token: token, now: now, retried: true)
       end
 
       def sendable?(now: Time.current)

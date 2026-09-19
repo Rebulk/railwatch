@@ -159,6 +159,104 @@ RSpec.describe Railwatch::Export::Outbox do
     end
   end
 
+  describe "accounting under interference" do
+    it "does not charge for a body it has already freed, or free one twice" do
+      ingest([ request_record ])
+      id = deliveries.sole.id
+      outbox = described_class.new(Railwatch.config, environment)
+
+      environment.with_telemetry do
+        expect(outbox.send(:finish, id, "discarded", now: Time.now)).to be(true)
+        # A second housekeeper reaching the same row must produce no second
+        # transition and no second release of its capacity.
+        expect(outbox.send(:finish, id, "expired", now: Time.now)).to be(false)
+      end
+
+      expect(deliveries.sole.disposition).to eq("discarded")
+      expect(destination.queued_deliveries).to eq(0)
+      expect(destination.queued_bytes).to eq(0)
+    end
+
+    it "never drives its counters below zero, whatever order things happen in" do
+      ingest([ request_record ])
+      # An outbox built before the batch: its idea of the counters is stale.
+      stale = described_class.new(Railwatch.config, environment)
+      environment.with_telemetry { stale.discard_all! }
+      environment.with_telemetry { stale.discard_all! }
+
+      expect(destination.queued_deliveries).to eq(0)
+      expect(destination.queued_bytes).to eq(0)
+    end
+
+    it "reads capacity as it stands, not as it stood when the outbox was built" do
+      outbox = described_class.new(Railwatch.config, environment)
+      environment.with_telemetry { outbox.status }
+      ingest([ request_record ])
+
+      with_export(max_deliveries: 1) { ingest([ request_record ]) }
+      expect(deliveries.size).to eq(1)
+    end
+
+    it "can recount from the rows themselves" do
+      ingest([ request_record ])
+      environment.with_telemetry do
+        Railwatch::Telemetry::ExportDestination.sole.update!(queued_deliveries: 99, queued_bytes: 99)
+        described_class.new(Railwatch.config, environment).recount!
+      end
+
+      expect(destination.queued_deliveries).to eq(1)
+      expect(destination.queued_bytes).to eq(deliveries.sole.body_bytes)
+    end
+
+    it "does not count a replay of work it already holds as newly lost" do
+      id = SecureRandom.uuid
+      ingest([ request_record ], batch_id: id)
+      environment.with_telemetry { Railwatch::Telemetry::IngestBatch.find_by(batch_id: id).destroy }
+
+      with_export(max_deliveries: 1) { ingest([ request_record ], batch_id: id) }
+
+      expect(deliveries.size).to eq(1)
+      expect(destination.counters["shed"]).to be_nil
+    end
+  end
+
+  describe "loss accounting" do
+    it "reports the client's drops and the encoder's together, the way the HTTP path does" do
+      Railwatch::Ingest::Batch.new(environment, [ request_record ], embedded: true,
+                                   batch_id: SecureRandom.uuid, dropped_by_client: 7).write!
+
+      expect(deliveries.sole.wire_metadata["dropped"]).to eq(7)
+    end
+
+    it "says a batch was too large to mirror rather than filing it as nothing to do" do
+      previous = Railwatch.config.batch_bytes
+      Railwatch.config.batch_bytes = 10
+      ingest([ request_record ])
+
+      ledger = environment.with_telemetry { Railwatch::Telemetry::IngestBatch.order(:id).last }
+      expect(ledger.export_disposition).to eq("shed_oversize")
+      expect(destination.counters["shed"]).to eq(1)
+    ensure
+      Railwatch.config.batch_bytes = previous
+    end
+  end
+
+  describe "recovery from a credential change" do
+    it "can be rebound, abandoning what the old token had promised" do
+      ingest([ request_record ])
+      with_export(token: "a_different_token") { ingest([ request_record ]) }
+      expect(destination.state).to eq("unauthorized")
+
+      with_export(token: "a_different_token") do
+        environment.with_telemetry { described_class.new(Railwatch.config, environment).rebind! }
+      end
+
+      expect(destination.state).to eq("ready")
+      expect(destination.reason).to be_nil
+      expect(deliveries.map(&:disposition)).to all(eq("discarded"))
+    end
+  end
+
   describe "housekeeping" do
     it "gives up on a delivery that has run out of time, and frees its body" do
       ingest([ request_record ])
