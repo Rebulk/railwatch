@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.3.0 (2026-09-19)
+
+- An embedded install can now also mirror its telemetry to Railwatch Cloud,
+  or to any receiver speaking the same protocol. It is off unless you ask
+  for it: `c.export_enabled = true` (or `RAILWATCH_EXPORT_ENABLED=true`),
+  reusing the token and ingest URL you already have. A token being present
+  is not consent -- an embedded install that has one configured still sends
+  nothing.
+
+  Records are held in a durable queue in your own telemetry database,
+  admitted in the same transaction as the rows they mirror, and sent by one
+  leased thread. A delivery keeps the exact bytes it will send until the
+  receiver acknowledges it, so a retry is the same delivery rather than a
+  second one; the receiver recognises repeats and answers with the original
+  counts. Local capture never waits on the network, and a queue that cannot
+  drain sheds rather than growing without limit. `railwatch:export:status`
+  shows what is queued; `railwatch:doctor` reports export health, and fails
+  if you asked for mirroring and it cannot work.
+
+  Embedded and cloud installs are otherwise unchanged: same install, same
+  records, same dashboard. See docs/embedded.md.
+
+- Ingest acknowledgements are read more carefully. An all-zero
+  acknowledgement with no reason no longer counts as a successful delivery
+  for a non-empty batch -- nothing legitimate answers a 500-record batch
+  that way, but a proxy error page does, and those were being treated as
+  stored. A paused or over-quota environment still takes the batch rather
+  than burning the retry ladder, and now says so rather than looking like
+  storage.
+
 ## 0.2.2 (2026-09-18)
 
 - README: describe embedded mode. The gem has had two destinations since
