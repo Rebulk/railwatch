@@ -297,7 +297,10 @@ module Railwatch
         # record kind, a record the environment does not retain). Cloud's
         # ingest batch is the authoritative accounting for it; re-reporting it
         # through on_unrecoverable would page an operator for normal traffic.
-        Railwatch.debug { "ingest rejected #{result.rejected} of #{deliverable.size} records" } if result.rejected.to_i.positive?
+        # batch.records, not the local `deliverable`: that is only assigned on
+        # the first attempt, so a retry that succeeds with rejections would
+        # raise here and be retained as if it had failed.
+        Railwatch.debug { "ingest rejected #{result.rejected} of #{batch.records.size} records" } if result.rejected.to_i.positive?
         delivery_succeeded
       elsif retryable?(result)
         retain(batch, result)
