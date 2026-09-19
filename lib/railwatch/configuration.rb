@@ -373,7 +373,15 @@ module Railwatch
     end
 
     def ingest_url_allowed?
-      uri = URI.parse(ingest_url.to_s)
+      url_allowed?(ingest_url)
+    end
+
+    # The same policy, applied to whatever URL is actually about to be
+    # requested. A transport pointed at an explicit endpoint must be judged on
+    # that endpoint: approving it because some other configured URL happens to
+    # be HTTPS would put the token on the wire in plaintext.
+    def url_allowed?(url)
+      uri = url.is_a?(URI::Generic) ? url : URI.parse(url.to_s)
       return true if uri.scheme == "https"
       return false unless uri.scheme == "http"
 

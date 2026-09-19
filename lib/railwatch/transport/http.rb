@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "net/http"
+require "time"
 require "openssl"
 require "zlib"
 require "json"
@@ -22,6 +23,10 @@ module Railwatch
       Result = Struct.new(:ok, :status, :accepted, :rejected, :rejections, :error, :retryable_error,
                           :reason, :retry_after_at, :disposition, keyword_init: true) do
         def retryable?
+          # A permanent failure says so outright: without this, its absent
+          # status would read as "no response yet", which is retryable.
+          return false if disposition == :permanent
+
           !ok && (retryable_error || Http.retryable_status?(status))
         end
 
@@ -53,7 +58,7 @@ module Railwatch
       end
 
       def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
-        unless @config.ingest_url_allowed?
+        unless destination_allowed?
           return Result.new(ok: false, error: "plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
         end
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
@@ -90,22 +95,29 @@ module Railwatch
       # Sends bytes that were encoded earlier and stored. Exactly one attempt:
       # the caller owns a durable queue and its own retry schedule, and
       # multiplying two ladders together would turn one backoff into sixty-four.
-      def deliver_encoded(body:, expected_count:, headers: {}, dropped: 0, dropped_bytes: 0,
-                          backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
-        unless @config.ingest_url_allowed?
-          return Result.new(ok: false, error: "plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
+      def deliver_encoded(body:, expected_count:, batch_id:, headers: {}, dropped: 0, dropped_bytes: 0,
+                          backpressure_factor: 1.0)
+        unless destination_allowed?
+          return permanent("plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
         end
+        # The same latch deliver honours. A caller with its own queue would
+        # otherwise keep presenting a token the receiver has already refused.
+        return permanent("unauthorized, flushing stopped", status: UNAUTHORIZED_STATUS) if @unauthorized
 
         response = post(body, dropped, dropped_bytes, backpressure_factor, batch_id, headers: headers)
         result = parse(response, expected_count: expected_count)
         apply_status_policy(result)
         result
+      rescue ArgumentError, URI::Error, TypeError, NoMethodError => e
+        # Bad input or bad configuration, not a bad network. Retrying the same
+        # stored bytes cannot fix it, and a durable queue would retry forever.
+        permanent("#{e.class}: #{e.message}")
       rescue StandardError => e
         Result.new(ok: false, error: "#{e.class}: #{e.message}", retryable_error: true)
       end
 
       def ping
-        return false unless @config.ingest_url_allowed?
+        return false unless destination_allowed?
 
         response = request(Net::HTTP::Get.new(URI.join(@config.ingest_url, "/ingest/ping")))
         response.is_a?(Net::HTTPSuccess)
@@ -114,6 +126,15 @@ module Railwatch
       end
 
       private
+
+      def destination_allowed? = @config.url_allowed?(@uri)
+
+      # A failure the caller must not retry: nothing about repeating it can
+      # change the outcome. `retryable?` treats a nil status as transient, so
+      # these say so explicitly.
+      def permanent(error, status: nil)
+        Result.new(ok: false, status: status, error: error, retryable_error: false, disposition: :permanent)
+      end
 
       def post(body, dropped, dropped_bytes, backpressure_factor, batch_id, headers: {})
         req = Net::HTTP::Post.new(@uri)
@@ -138,7 +159,10 @@ module Railwatch
           use_ssl: @uri.scheme == "https",
           open_timeout: @config.connect_timeout,
           read_timeout: @config.timeout,
-          write_timeout: @config.timeout
+          write_timeout: @config.timeout,
+          # POST is not in Net::HTTP's idempotent retry set, but say so:
+          # a caller with its own queue must be able to trust "one attempt".
+          max_retries: 0
         }
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
@@ -151,19 +175,21 @@ module Railwatch
       # A receiver in trouble can answer with something enormous -- a proxy
       # error page, a stack trace. Only ever look at the first slice of it.
       MAX_RESPONSE_BYTES = 64 * 1024
+      # The longest delay we will take from a receiver, in either spelling.
+      MAX_RETRY_AFTER = 86_400
 
       def parse(response, expected_count:)
         if response.is_a?(Net::HTTPSuccess)
           parse_acknowledgement(response, expected_count)
         else
-          Result.new(ok: false, status: response.code.to_i, error: body_of(response)[0, 200],
+          Result.new(ok: false, status: response.code.to_i, error: summarize(response.body),
                      retry_after_at: retry_after_at(response))
         end
       end
 
-      def body_of(response)
-        response.body.to_s.byteslice(0, MAX_RESPONSE_BYTES).to_s
-      end
+      # Bounds what we keep and log, not what Net::HTTP already read off the
+      # socket -- it buffers the whole response before we ever see it.
+      def summarize(body) = body.to_s.byteslice(0, 200).to_s.scrub
 
       # Seconds, or an HTTP date. Anything else is not a delay we can trust,
       # so the caller falls back to its own backoff rather than a guess.
@@ -171,19 +197,34 @@ module Railwatch
         raw = response["Retry-After"].to_s.strip
         return nil if raw.empty?
 
-        if raw.match?(/\A\d+\z/)
+        now = Time.now
+        if raw.match?(/\A\d{1,7}\z/)
           seconds = raw.to_i
-          return nil unless seconds.between?(0, 86_400)
-
-          Time.now + seconds
+          seconds <= MAX_RETRY_AFTER ? now + seconds : nil
         else
-          parsed = (Time.httpdate(raw) rescue nil)
-          parsed&.> (Time.now - 1) ? parsed : nil
+          parsed = begin
+            Time.httpdate(raw)
+          rescue ArgumentError
+            nil
+          end
+          return nil unless parsed
+          # One second of slack for whole-second HTTP-date precision, and the
+          # same ceiling the numeric form gets: a far-future date must not
+          # park a delivery for years.
+          parsed.between?(now - 1, now + MAX_RETRY_AFTER) ? parsed : nil
         end
       end
 
       def parse_acknowledgement(response, expected_count)
-        data = JSON.parse(body_of(response))
+        body = response.body.to_s
+        # Refused whole rather than parsed in part: truncating first would let
+        # a padded prefix parse as a complete document, and would reject a
+        # large but valid acknowledgement as malformed JSON.
+        if body.bytesize > MAX_RESPONSE_BYTES
+          return invalid_acknowledgement(response, "acknowledgement larger than #{MAX_RESPONSE_BYTES} bytes")
+        end
+
+        data = JSON.parse(body)
         return invalid_acknowledgement(response, "response must be a JSON object") unless data.is_a?(Hash)
 
         accepted = data["accepted"]
@@ -206,8 +247,10 @@ module Railwatch
                    rejections: Array(rejections).first(10), reason: reason,
                    retry_after_at: retry_after_at(response),
                    disposition: reason ? :deferred : :stored)
-      rescue JSON::ParserError => error
-        invalid_acknowledgement(response, "invalid JSON (#{error.message})")
+      rescue JSON::ParserError
+        # The parser's message quotes the document, which may be a proxy page
+        # echoing the request. Say what happened, not what it contained.
+        invalid_acknowledgement(response, "invalid JSON")
       end
 
       # A proxy-generated 2xx page or a contract mismatch cannot acknowledge

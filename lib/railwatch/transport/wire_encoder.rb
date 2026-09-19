@@ -26,9 +26,11 @@ module Railwatch
 
       def encode(records)
         io = StringIO.new
-        # mtime 0 so the same records always produce the same bytes: the
-        # digest identifies a delivery, and a timestamp baked into the gzip
-        # header would make it differ on every encode.
+        # mtime 0 so encoding the same records twice on this runtime gives the
+        # same bytes, rather than differing by the second they were encoded.
+        # It is not a portability guarantee -- zlib builds may deflate
+        # identical input differently -- which is why a stored delivery keeps
+        # its bytes and its digest rather than re-deriving them later.
         gz = Zlib::GzipWriter.new(io, Zlib::DEFAULT_COMPRESSION, Zlib::DEFAULT_STRATEGY)
         gz.mtime = 0
         bytes = 0
