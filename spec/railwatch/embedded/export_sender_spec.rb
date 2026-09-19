@@ -281,6 +281,76 @@ RSpec.describe Railwatch::Export::Sender do
     end
   end
 
+  describe "what the receiver is told about this delivery" do
+    it "sends the version the delivery was built by, not the one running now" do
+      ingest
+      environment.with_telemetry do
+        row = Railwatch::Telemetry::ExportDelivery.order(:id).last
+        row.update!(wire_metadata: row.wire_metadata.merge("version" => "0.0.1-old"))
+      end
+      stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
+
+      held = claim
+      client.deliver(held, producer_id: destination.producer_id)
+
+      # The receiver digests this header and treats a change as a conflict,
+      # so sending today's version would turn a gem upgrade into a 409 and
+      # destroy a delivery it had already accepted.
+      expect(a_request(:post, "https://receiver.test/ingest")
+        .with(headers: { "X-Railwatch-Version" => "0.0.1-old" })).to have_been_made
+    end
+
+    it "posts to the destination the delivery was admitted for, not wherever config now points" do
+      ingest
+      held = claim
+      stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
+
+      # Reconfigured mid-flight. These bytes were admitted for the first
+      # receiver and belong to whoever that token names.
+      Railwatch.config.export_url = "https://somewhere-else.test/ingest"
+      client.deliver(held, producer_id: held.producer_id)
+
+      expect(a_request(:post, "https://receiver.test/ingest")).to have_been_made
+      expect(a_request(:post, "https://somewhere-else.test/ingest")).not_to have_been_made
+    end
+  end
+
+  describe "work it will not bother sending" do
+    it "does not claim a delivery it has stopped waiting for" do
+      ingest
+      # Past its expiry but before the sweep that terminalises it: claiming
+      # it would post something the receiver may no longer recognise.
+      past = Time.now + Railwatch.config.export_max_age + 60
+      expect(environment.with_telemetry { outbox.claim!(owner: "o", now: past) }).to be_nil
+    end
+
+    it "refuses a retry lifetime the receiver will not honour" do
+      previous = Railwatch.config.export_max_age
+      Railwatch.config.export_max_age = Railwatch::Configuration::MAX_EXPORT_AGE + 1
+
+      expect(Railwatch.config.export?).to be(false)
+      expect(Railwatch.config.export_problem).to include("EXPORT_MAX_AGE")
+    ensure
+      Railwatch.config.export_max_age = previous
+    end
+
+    it "leaves out records beyond what the receiver will accept in one request" do
+      encoder = Railwatch::Transport::WireEncoder.new(batch_bytes: 64 << 20)
+      records = Array.new(Railwatch::Export::Policy::Everything::MAX_RECORDS + 5) { request_record }
+
+      selection = Railwatch::Export::Policy::Everything.prepare(
+        records: records, encoder: encoder, source_batch_id: "b1"
+      ).sole
+
+      # A request over the receiver's ceiling is refused whole, so the excess
+      # is counted as dropped here rather than costing the whole delivery.
+      expect(selection.record_count).to eq(Railwatch::Export::Policy::Everything::MAX_RECORDS)
+      expect(selection.metadata["dropped"]).to eq(5)
+    end
+  end
+
   describe "the whole round trip" do
     it "sends a queued delivery and marks it acknowledged" do
       ingest

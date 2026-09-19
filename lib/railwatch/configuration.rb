@@ -312,6 +312,10 @@ module Railwatch
     # anything else ships it to ingest_url over HTTPS.
     def local? = transport.to_s == "local"
 
+    # The receiver admits an unseen delivery for seven days; queueing one for
+    # longer cannot help.
+    MAX_EXPORT_AGE = 7 * 24 * 60 * 60
+
     # Mirroring is a thing an embedded install opts into; it is meaningless
     # for an install that is already sending everything over HTTP.
     def export? = export_enabled && local? && export_problem.nil?
@@ -325,6 +329,11 @@ module Railwatch
       return "no export token: set RAILWATCH_EXPORT_TOKEN or RAILWATCH_TOKEN" if resolved_export_token.to_s.empty?
       return "no export url: set RAILWATCH_EXPORT_URL or RAILWATCH_INGEST_URL" if resolved_export_url.to_s.empty?
       return "export url must be HTTPS (or set RAILWATCH_ALLOW_HTTP=true)" unless url_allowed?(resolved_export_url)
+      # Past this a receiver stops recognising a delivery's id, so holding one
+      # any longer just means discovering later that it can never be sent.
+      if export_max_age > MAX_EXPORT_AGE
+        return "RAILWATCH_EXPORT_MAX_AGE_SECONDS cannot exceed #{MAX_EXPORT_AGE} (the receiver stops recognising a delivery past that)"
+      end
 
       nil
     end
