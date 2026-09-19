@@ -123,13 +123,24 @@ module Railwatch
 
       # Runs inside the batch's own transaction, so the rows and the intent to
       # mirror them commit together or not at all.
+      # In a savepoint, so a failure here sheds the mirroring and nothing
+      # else. Without it an export table that is missing -- a gem upgraded
+      # without db:prepare, with export already on -- would roll back the
+      # batch that carried it, and every batch after, until nothing was being
+      # recorded at all. Monitoring must degrade to local-only rather than
+      # stop.
       def export_columns
         return { export_disposition: @export_error } if @export_error
         return {} unless @export
 
-        admission = @export.enqueue!(@selections, now: @received_at)
+        admission = TelemetryRecord.transaction(requires_new: true) do
+          @export.enqueue!(@selections, now: @received_at)
+        end
         @queued = admission.disposition == "queued"
         { export_disposition: admission.disposition, export_record_count: admission.record_count }
+      rescue StandardError => e
+        Railwatch.debug { "export admission failed: #{e.class}: #{e.message}" }
+        { export_disposition: "shed_error" }
       end
 
       ROLLED_UP = %w[request job_attempt scheduled_task command channel_action query outgoing_request cache_event mail visit notification span llm_call].freeze

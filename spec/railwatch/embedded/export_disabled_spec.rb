@@ -116,4 +116,16 @@ RSpec.describe "export, switched off" do
     config.token = token
     config.ingest_url = url
   end
+  it "reports a relative ingest url as a problem rather than raising out of the doctor" do
+    config = Railwatch.config
+    url = config.ingest_url
+    config.ingest_url = "receiver.test:8080"
+    config.export_enabled = true
+
+    expect { config.export_problem }.not_to raise_error
+    expect(config.export?).to be(false)
+  ensure
+    config.ingest_url = url
+    config.export_enabled = false
+  end
 end

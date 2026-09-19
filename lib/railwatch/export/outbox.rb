@@ -40,6 +40,13 @@ module Railwatch
         destination = binding_row
         return Admission.new(disposition: "blocked_config", record_count: 0) unless destination
         return shed(destination, 0, "empty") if selections.empty?
+        # A deferred destination still queues -- waiting is what the queue is
+        # for. A blocked one does not: those deliveries could only ever be
+        # discarded, and they would take capacity from telemetry that can
+        # still be sent once somebody fixes it.
+        if destination.blocked?
+          return shed(destination, selections.sum { |s| s.record_count.to_i }, "blocked_destination")
+        end
 
         admitted = 0
         # A selection with no body is the policy telling us everything it was

@@ -344,7 +344,9 @@ module Railwatch
     def resolved_export_url
       url = export_url.presence || (ingest_url.presence && URI.join(ingest_url, "/ingest").to_s)
       url&.sub(%r{/\z}, "")
-    rescue URI::InvalidURIError
+    rescue URI::Error
+      # BadURIError (a relative ingest_url) is not an InvalidURIError, and
+      # letting it out of here takes the doctor down with it.
       nil
     end
 

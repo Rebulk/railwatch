@@ -93,6 +93,32 @@ RSpec.describe Railwatch::Export::Outbox do
     end
   end
 
+  describe "when mirroring cannot be done at all" do
+    it "still stores the telemetry when admitting the delivery blows up" do
+      allow_any_instance_of(described_class).to receive(:enqueue!).and_raise(ActiveRecord::StatementInvalid, "no such table")
+
+      # A gem upgraded without db:prepare, with export already on. Monitoring
+      # degrades to local-only; it does not stop.
+      expect(ingest([ request_record ]).accepted).to eq(1)
+
+      ledger = environment.with_telemetry { Railwatch::Telemetry::IngestBatch.order(:id).last }
+      expect(ledger.export_disposition).to eq("shed_error")
+      expect(environment.with_telemetry { Railwatch::Telemetry::Execution.count }).to eq(1)
+    end
+
+    it "does not queue into a destination only a person can unblock" do
+      ingest([ request_record ])
+      environment.with_telemetry { Railwatch::Telemetry::ExportDestination.sole.update!(state: "unauthorized") }
+
+      ingest([ request_record ])
+
+      expect(deliveries.size).to eq(1)
+      ledger = environment.with_telemetry { Railwatch::Telemetry::IngestBatch.order(:id).last }
+      expect(ledger.export_disposition).to eq("blocked_destination")
+      expect(destination.counters["shed"]).to eq(1)
+    end
+  end
+
   describe "capacity" do
     it "refuses new work rather than evicting work it already promised to send" do
       ingest([ request_record ])
