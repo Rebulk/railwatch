@@ -546,6 +546,35 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(read("config/database.yml")).to include("# Warning: test is erased.")
     end
 
+    # A runner like parallel_tests gives each worker its own TEST_ENV_NUMBER
+    # and expects one database per worker, the way Rails' own test database
+    # naming does. Sharing two SQLite files across four workers fails as
+    # PendingMigrationError and "disk I/O error" out of configure_connection.
+    it "gives each parallel test worker its own databases" do
+      write_file("config/database.yml", flat_database_yml)
+      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+
+      raw = read("config/database.yml")
+      expect(raw).to include(%(database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>_railwatch.sqlite3))
+      expect(raw).to include(%(database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>_railwatch_telemetry.sqlite3))
+
+      worker = ENV["TEST_ENV_NUMBER"]
+      begin
+        ENV["TEST_ENV_NUMBER"] = "3"
+        yml = YAML.safe_load(ERB.new(raw).result, aliases: true)
+        expect(yml["test"]["railwatch"]["database"]).to eq("storage/test3_railwatch.sqlite3")
+        expect(yml["test"]["railwatch_telemetry"]["database"]).to eq("storage/test3_railwatch_telemetry.sqlite3")
+
+        # Worker 1 sets no number by parallel_tests' convention, and an app
+        # with no parallel runner never sets one: the name must stay plain.
+        ENV.delete("TEST_ENV_NUMBER")
+        plain = YAML.safe_load(ERB.new(raw).result, aliases: true)
+        expect(plain["test"]["railwatch"]["database"]).to eq("storage/test_railwatch.sqlite3")
+      ensure
+        worker.nil? ? ENV.delete("TEST_ENV_NUMBER") : ENV["TEST_ENV_NUMBER"] = worker
+      end
+    end
+
     it "writes SQLite entries that do not inherit a PostgreSQL app's adapter" do
       write_file("config/database.yml", <<~YAML)
         default: &default

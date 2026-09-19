@@ -383,10 +383,24 @@ module Railwatch
             lines.insert(start + 1, "  primary:\n")
             stop += 1
           end
-          entries = format(RAILWATCH_DATABASES, env: env).lines.map { |line| "  #{line}" }
+          entries = format(RAILWATCH_DATABASES, env: database_prefix(env)).lines.map { |line| "  #{line}" }
           lines = insert_lines(lines, stop, entries.join).lines
         end
         lines.join
+      end
+
+      # What the database filenames are built from. For test that has to carry
+      # TEST_ENV_NUMBER, the way Rails' own test database naming does: runners
+      # like parallel_tests give each worker its own number and expect a
+      # database per worker. Without it every worker in a run opens the same
+      # two SQLite files and they fight over them -- observed as
+      # PendingMigrationError and "disk I/O error" from configure_connection,
+      # on an app running four workers. An app with no such runner sets no
+      # TEST_ENV_NUMBER, so the suffix is empty and the name is unchanged.
+      def self.database_prefix(env)
+        return env unless env == "test"
+
+        %(test<%= ENV["TEST_ENV_NUMBER"] %>)
       end
 
       # Unconditional: `bundle exec puma` evaluates this file before it loads
