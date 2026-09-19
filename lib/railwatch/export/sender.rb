@@ -111,7 +111,7 @@ module Railwatch
           outbox = Outbox.new(Railwatch.config, environment)
           claim = environment.with_telemetry { outbox.claim!(owner: @owner) } or return false
 
-          outcome = client.deliver(claim, producer_id: environment.with_telemetry { outbox.binding_row&.producer_id })
+          outcome = client.deliver(claim, producer_id: claim.producer_id)
           environment.with_telemetry { outbox.finish!(claim, outcome) }
           true
         end

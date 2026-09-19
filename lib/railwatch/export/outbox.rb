@@ -21,8 +21,10 @@ module Railwatch
     class Outbox
       # A claim handed to a sender: the bytes and the right to finish, with no
       # open database connection attached.
+      # Carries the destination it is FOR. A sender reconfigured between the
+      # claim and the send must not post these bytes somewhere else.
       Claim = Struct.new(:id, :delivery_id, :body, :record_count, :metadata, :token, :generation,
-                         keyword_init: true)
+                         :url, :token_digest, :producer_id, keyword_init: true)
 
       Admission = Struct.new(:disposition, :record_count, keyword_init: true)
 
@@ -82,14 +84,19 @@ module Railwatch
           generation = Lease.acquire(destination.id, owner: owner, now: now) or next nil
 
           reclaim_abandoned(destination, now)
-          delivery = destination.export_deliveries.due(now).oldest_first.lock.first or next nil
+          # Not merely due: still worth sending. Expiry is swept every few
+          # minutes, and a restart after a long outage must not post work from
+          # before the receiver would still recognise it.
+          delivery = destination.export_deliveries.due(now).where(expires_at: now..)
+                                .oldest_first.lock.first or next nil
 
           token = SecureRandom.uuid
           delivery.update!(state: "sending", claim_token: token, claim_generation: generation,
                            claim_expires_at: now + Lease::TTL, attempts: delivery.attempts + 1)
           Claim.new(id: delivery.id, delivery_id: delivery.delivery_id, body: delivery.body,
                     record_count: delivery.record_count, metadata: delivery.wire_metadata,
-                    token: token, generation: generation)
+                    token: token, generation: generation, url: destination.url,
+                    token_digest: destination.credential_sha256, producer_id: destination.producer_id)
         end
       end
 

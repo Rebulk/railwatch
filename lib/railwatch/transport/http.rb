@@ -96,7 +96,7 @@ module Railwatch
       # the caller owns a durable queue and its own retry schedule, and
       # multiplying two ladders together would turn one backoff into sixty-four.
       def deliver_encoded(body:, expected_count:, batch_id:, headers: {}, dropped: 0, dropped_bytes: 0,
-                          backpressure_factor: 1.0)
+                          backpressure_factor: 1.0, gem_version: Railwatch::VERSION)
         unless destination_allowed?
           return permanent("plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
         end
@@ -104,7 +104,8 @@ module Railwatch
         # otherwise keep presenting a token the receiver has already refused.
         return permanent("unauthorized, flushing stopped", status: UNAUTHORIZED_STATUS) if @unauthorized
 
-        response = post(body, dropped, dropped_bytes, backpressure_factor, batch_id, headers: headers)
+        response = post(body, dropped, dropped_bytes, backpressure_factor, batch_id,
+                        headers: headers, gem_version: gem_version)
         result = parse(response, expected_count: expected_count)
         apply_status_policy(result)
         result
@@ -136,7 +137,8 @@ module Railwatch
         Result.new(ok: false, status: status, error: error, retryable_error: false, disposition: :permanent)
       end
 
-      def post(body, dropped, dropped_bytes, backpressure_factor, batch_id, headers: {})
+      def post(body, dropped, dropped_bytes, backpressure_factor, batch_id, headers: {},
+               gem_version: Railwatch::VERSION)
         req = Net::HTTP::Post.new(@uri)
         headers.each { |name, value| req[name] = value.to_s }
         req["Content-Type"] = "application/x-ndjson"
@@ -146,7 +148,11 @@ module Railwatch
         if backpressure_factor > 1.0
           req["X-Railwatch-Backpressure-Factor"] = backpressure_factor.to_s
         end
-        req["X-Railwatch-Version"] = Railwatch::VERSION
+        # The version this payload was built by, which for a stored delivery is
+        # not the version running now. The receiver digests this header, so
+        # sending today's value would turn an upgrade into a conflict and
+        # destroy a delivery it had already accepted.
+        req["X-Railwatch-Version"] = gem_version
         req["X-Railwatch-Batch-Id"] = batch_id
         req.body = body
         request(req)
