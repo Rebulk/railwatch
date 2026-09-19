@@ -102,7 +102,7 @@ RSpec.describe Railwatch::Maintenance do
       described_class.tick(now: now)
 
       expect(described_class.tick(now: now + 90.seconds)).to match_array(%w[drain_followups release_health])
-      expect(described_class.tick(now: now + 6.minutes)).to match_array(%w[drain_followups release_health performance_scan anomaly_scan])
+      expect(described_class.tick(now: now + 6.minutes)).to match_array(%w[drain_followups release_health performance_scan anomaly_scan export_expiry])
     end
 
     it "reports a failing task through on_unrecoverable (never Rails.error, which Railwatch itself captures), keeps going, and retries it next tick" do

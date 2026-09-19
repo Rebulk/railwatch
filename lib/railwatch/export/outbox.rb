@@ -93,6 +93,17 @@ module Railwatch
         end
       end
 
+      # Given up voluntarily, so the next process does not wait out the TTL.
+      # Only ever our own: the generation check means a lease we already lost
+      # is not ours to release.
+      def release_lease!(owner:, now: Time.current)
+        destination = binding_row or return false
+        return false unless destination.lease_owner == owner
+        return false if destination.export_deliveries.exists?(state: "sending")
+
+        Lease.release(destination.id, owner: owner, generation: destination.lease_generation, now: now)
+      end
+
       def renew!(claim, owner:, now: Time.current)
         destination = binding_row or return false
         return false unless Lease.renew(destination.id, owner: owner, generation: claim.generation, now: now)
@@ -110,7 +121,9 @@ module Railwatch
           next false unless delivery&.held_by?(claim.token, claim.generation)
 
           case outcome.disposition
-          when :stored, :acked then finish(claim.id, "acked", now: now, status: outcome.status, ack: outcome.ack)
+          when :stored, :acked
+            clear_pause(delivery.export_destination_id, now)
+            finish(claim.id, "acked", now: now, status: outcome.status, ack: outcome.ack)
           when :rejected then finish(claim.id, "rejected", now: now, status: outcome.status, reason: outcome.reason)
           else defer(delivery, outcome, now)
           end
@@ -207,8 +220,19 @@ module Railwatch
       # down" -- those apply to everything queued. A 500 or a timeout is one
       # delivery having a bad time, and pausing the queue for it would turn a
       # blip into an outage.
+      # 503 is deliberately absent. A receiver briefly unavailable is this
+      # delivery's bad luck; pausing the queue for it would hold up every
+      # other delivery behind one unlucky request. 429 and 402 are the
+      # receiver telling us something about itself.
       DESTINATION_WIDE = { 401 => "unauthorized", 403 => "unauthorized",
-                           402 => "deferred", 429 => "deferred", 503 => "deferred" }.freeze
+                           402 => "deferred", 429 => "deferred" }.freeze
+
+      # It is taking deliveries again, so stop saying it is not. A credential
+      # block is left alone: that one is not ours to decide has passed.
+      def clear_pause(destination_id, now)
+        Telemetry::ExportDestination.where(id: destination_id, state: "deferred")
+          .update_all([ "state = 'ready', reason = NULL, retry_at = NULL, updated_at = ?", now ])
+      end
 
       def pause_destination(destination_id, outcome, at, now)
         state = DESTINATION_WIDE[outcome.status] or return
