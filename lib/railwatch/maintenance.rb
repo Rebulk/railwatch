@@ -66,6 +66,17 @@ module Railwatch
       "auto_resolve" => [ 24.hours, 10.minutes, lambda { |_env|
         AutoResolveIssuesJob.new.perform
       } ],
+      # Deliveries the export queue has stopped waiting for, and the history
+      # of ones it finished. Without this the age limit is advice rather than
+      # a limit: a delivery whose receiver never recovers keeps its bytes,
+      # and the queue eventually fills and sheds live telemetry instead.
+      "export_expiry" => [ 5.minutes, 10.minutes, lambda { |env|
+        next unless Railwatch.config.export?
+
+        outbox = Export::Outbox.new(Railwatch.config, env)
+        outbox.expire!
+        outbox.prune!
+      } ],
       # PASSIVE, not TRUNCATE: this runs inside a Puma worker, and a
       # truncating checkpoint blocks every reader and writer on the file.
       "prune" => [ 24.hours, 60.minutes, lambda { |env|

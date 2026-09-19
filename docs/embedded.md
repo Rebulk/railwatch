@@ -14,6 +14,36 @@ place for many apps, point the gem at Railwatch Cloud instead
 ([Getting started](getting-started.md)); the two are switchable with
 one setting.
 
+## Three ways to run it
+
+Same gem, same install, same records. The only question is where they end
+up:
+
+| | Records live | Dashboard |
+|---|---|---|
+| **Embedded** | your app's SQLite files | `/railwatch` in your app |
+| **Cloud** | Railwatch Cloud | the hosted one |
+| **Both** | your app's files, *and* Railwatch Cloud | either |
+
+Embedded is `c.transport = :local`, which is what `--local` writes.
+Cloud is the default. "Both" is embedded plus one more line:
+
+```ruby
+c.export_enabled = true   # or RAILWATCH_EXPORT_ENABLED=true
+```
+
+It reuses the token and ingest URL you already have, so an install that
+was pointed at the cloud and moved to embedded needs nothing else to send
+to both. Everything captured locally is mirrored — the same records the
+same install would have sent had you chosen the cloud — so the hosted
+dashboard is as complete as it would be either way.
+
+It is off unless you set that flag. A token being present is not consent:
+an embedded install that has one configured still sends nothing.
+`railwatch:doctor` says nothing about export until you ask for it, and
+fails loudly if you ask for it and it cannot work. `railwatch:export:status`
+shows what is queued.
+
 ## Install
 
 ```sh

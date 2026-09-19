@@ -21,6 +21,11 @@ require "railwatch/current"
 require "railwatch/record"
 require "railwatch/buffer"
 require "railwatch/transport/wire_encoder"
+require "railwatch/export/policy"
+require "railwatch/export/lease"
+require "railwatch/export/outbox"
+require "railwatch/export/client"
+require "railwatch/export/sender"
 require "railwatch/transport/http"
 require "railwatch/transport/local"
 require "railwatch/transport/socket"
@@ -104,6 +109,7 @@ module Railwatch
       Subscribers::Users.restart_after_fork!
       Subscribers::ProcessInfo.restart_after_fork!
       Health.restart_after_fork!
+      Export::Sender.restart_after_fork!
       Sessions.restart_after_fork!
       Maintenance.restart_after_fork!
     end

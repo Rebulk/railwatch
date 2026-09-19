@@ -65,6 +65,8 @@ module Railwatch
     # "they left the default".
     DEFAULT_BASE_CONTROLLER = "ActionController::Base"
 
+    attr_accessor :export_enabled, :export_policy, :export_url, :export_token, :export_max_bytes,
+                  :export_max_deliveries, :export_max_age
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
                   :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
                   :http_basic_auth_enabled, :http_basic_auth_user, :http_basic_auth_password, :base_controller_class,
@@ -103,6 +105,16 @@ module Railwatch
       @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
       @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
       @dashboard_user = nil
+      # Mirroring an embedded install's telemetry to a remote receiver. Off
+      # unless asked for: an embedded install's promise is that nothing leaves
+      # the machine, and a token being present is not consent.
+      @export_enabled = env_bool("RAILWATCH_EXPORT_ENABLED", false)
+      @export_policy = ENV.fetch("RAILWATCH_EXPORT_POLICY", "everything").to_sym
+      @export_url = ENV["RAILWATCH_EXPORT_URL"]
+      @export_token = ENV["RAILWATCH_EXPORT_TOKEN"]
+      @export_max_bytes = env_int("RAILWATCH_EXPORT_MAX_BYTES", 256 * 1024 * 1024)
+      @export_max_deliveries = env_int("RAILWATCH_EXPORT_MAX_DELIVERIES", 100_000)
+      @export_max_age = env_int("RAILWATCH_EXPORT_MAX_AGE_SECONDS", 86_400)
       # Dashboard access, the way Mission Control Jobs does it: HTTP Basic
       # authentication is on and CLOSED by default. With no user and password
       # configured every dashboard request is 401, so an install that forgot
@@ -299,6 +311,44 @@ module Railwatch
     # :local writes telemetry into the engine's own database in-process;
     # anything else ships it to ingest_url over HTTPS.
     def local? = transport.to_s == "local"
+
+    # The receiver admits an unseen delivery for seven days; queueing one for
+    # longer cannot help.
+    MAX_EXPORT_AGE = 7 * 24 * 60 * 60
+
+    # Mirroring is a thing an embedded install opts into; it is meaningless
+    # for an install that is already sending everything over HTTP.
+    def export? = export_enabled && local? && export_problem.nil?
+
+    # Why export is configured but unusable, or nil when it is fine. The
+    # doctor reports this; nothing silently half-enables.
+    def export_problem
+      return nil unless export_enabled
+      return "export needs transport :local; an :http install already sends everything" unless local?
+      return "RAILWATCH_EXPORT_POLICY #{export_policy} is not implemented" unless export_policy.to_s == "everything"
+      return "no export token: set RAILWATCH_EXPORT_TOKEN or RAILWATCH_TOKEN" if resolved_export_token.to_s.empty?
+      return "no export url: set RAILWATCH_EXPORT_URL or RAILWATCH_INGEST_URL" if resolved_export_url.to_s.empty?
+      return "export url must be HTTPS (or set RAILWATCH_ALLOW_HTTP=true)" unless url_allowed?(resolved_export_url)
+      # Past this a receiver stops recognising a delivery's id, so holding one
+      # any longer just means discovering later that it can never be sent.
+      if export_max_age > MAX_EXPORT_AGE
+        return "RAILWATCH_EXPORT_MAX_AGE_SECONDS cannot exceed #{MAX_EXPORT_AGE} (the receiver stops recognising a delivery past that)"
+      end
+
+      nil
+    end
+
+    # The receiver, and the credential we are bound to it with. Both fall back
+    # to the ordinary ingest settings so switching an install from embedded to
+    # cloud needs no second set of values.
+    def resolved_export_url
+      url = export_url.presence || (ingest_url.presence && URI.join(ingest_url, "/ingest").to_s)
+      url&.sub(%r{/\z}, "")
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    def resolved_export_token = export_token.presence || token
 
     # Absolute path of the writer socket, or nil when the writer is off.
     def writer_socket_path

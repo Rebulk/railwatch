@@ -38,6 +38,7 @@ module Railwatch
         @session_buckets = Set.new
         @bucket_cache = {}
         @exception_ids = []
+        @export = nil
       end
 
       # The ledger row for a batch id that has already been written, or nil.
@@ -48,6 +49,10 @@ module Railwatch
       end
 
       def write!
+        # Prepared before mapping and outside the transaction: mirroring sends
+        # what we were given, not what we kept, and encoding is not something
+        # to do while holding the write lock.
+        prepare_export
         map_all
         log_truncations
         accepted = 0
@@ -65,7 +70,8 @@ module Railwatch
                                                        dropped_by_client: @dropped_by_client, backpressure_factor: @backpressure_factor,
                                                        bytes: @bytes, gem_version: @gem_version,
                                                        counts_by_type: @counts, rejections: @rejections.first(20),
-                                                       batch_id: @batch_id, followups: followups)
+                                                       batch_id: @batch_id, followups: followups,
+                                                       **export_columns)
             end
           end
         end
@@ -76,6 +82,9 @@ module Railwatch
           @environment.count_events!(accepted)
         end
         enqueue_followups
+        # After the transaction: the sender must never find a delivery that
+        # has not committed yet.
+        Export::Sender.wake! if @queued
         broadcast_live
         Result.new(accepted: accepted, rejected: @rejections.size, rejections: @rejections)
       end
@@ -93,6 +102,35 @@ module Railwatch
       end
 
       private
+
+      # Mirroring, when this install has been told to. Off is the whole of the
+      # cost: no encode, no query, no row, one boolean.
+      def prepare_export
+        return unless @embedded && Railwatch.config.export?
+
+        @export = Export::Outbox.new(Railwatch.config, @environment)
+        @selections = Export::Policy.fetch(Railwatch.config.export_policy).prepare(
+          records: @records, encoder: Transport::WireEncoder.new(batch_bytes: Railwatch.config.batch_bytes),
+          source_batch_id: @batch_id || SecureRandom.uuid,
+          metadata: { "dropped" => @dropped_by_client, "backpressure_factor" => @backpressure_factor.to_s }
+        )
+      rescue StandardError => e
+        # A batch must still be stored when mirroring cannot be prepared.
+        Railwatch.debug { "export preparation failed: #{e.class}: #{e.message}" }
+        @export = nil
+        @export_error = "shed_encoding"
+      end
+
+      # Runs inside the batch's own transaction, so the rows and the intent to
+      # mirror them commit together or not at all.
+      def export_columns
+        return { export_disposition: @export_error } if @export_error
+        return {} unless @export
+
+        admission = @export.enqueue!(@selections, now: @received_at)
+        @queued = admission.disposition == "queued"
+        { export_disposition: admission.disposition, export_record_count: admission.record_count }
+      end
 
       ROLLED_UP = %w[request job_attempt scheduled_task command channel_action query outgoing_request cache_event mail visit notification span llm_call].freeze
       MAX_PAST_AGE = 30.days
