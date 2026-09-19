@@ -578,10 +578,18 @@ RSpec.describe Railwatch do
   end
 
   describe ".adopt_final_config!" do
+    # Nothing resets transport or buffer_bytes between examples, so these go
+    # back exactly as they were rather than to an assumed default.
     around do |example|
-      previous = Railwatch.instance_variable_get(:@reporter)
+      reporter = Railwatch.instance_variable_get(:@reporter)
+      transport = Railwatch.config.transport
+      buffer_bytes = Railwatch.config.buffer_bytes
       example.run
-      Railwatch.instance_variable_set(:@reporter, previous)
+    ensure
+      Railwatch.instance_variable_set(:@reporter, reporter)
+      Railwatch.instance_variable_set(:@redactor, nil)
+      Railwatch.config.transport = transport
+      Railwatch.config.buffer_bytes = buffer_bytes
     end
 
     it "re-aims a reporter that chose HTTP before the app said it was embedded" do
@@ -594,8 +602,6 @@ RSpec.describe Railwatch do
       Railwatch.adopt_final_config!
 
       expect(reporter.instance_variable_get(:@transport)).not_to be_a(Railwatch::Transport::Http)
-    ensure
-      Railwatch.config.transport = :http
     end
 
     it "re-sizes a buffer built from the default config, but not once it holds records" do
@@ -614,8 +620,6 @@ RSpec.describe Railwatch do
 
       expect(holding.buffer.size).to eq(1)
       expect(holding.buffer.instance_variable_get(:@byte_capacity)).to eq(8_192)
-    ensure
-      Railwatch.config.buffer_bytes = 16 * 1024 * 1024
     end
 
     it "does not build a reporter for a process that never reported" do
