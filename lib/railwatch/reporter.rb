@@ -143,6 +143,32 @@ module Railwatch
       self
     end
 
+    # The reporter can be built before the application's own configuration
+    # has had its say. A rake process invokes its top-level task -- which is
+    # where the command patch starts the execution, and sampling that
+    # execution builds the reporter -- before the task's `:environment`
+    # prerequisite boots Rails and runs config/initializers. A token in the
+    # environment is enough for Railwatch to be enabled that early, so an
+    # embedded app gets a reporter aimed at HTTP, chosen from a config that
+    # had not yet been told the app is embedded. Left alone it stays aimed
+    # there: the memo outlives the configuration that produced it, and every
+    # record from that process goes to the receiver instead of the app's own
+    # database, skipping the export queue and the replay receipts it earns.
+    #
+    # Nothing has been recorded at that point -- starting an execution
+    # decides sampling and pushes nothing -- so deciding again here is free.
+    def adopt_final_config!
+      # The swap forked_transport already makes, for the same reason: the
+      # situation this transport was chosen for is not the situation now.
+      reselected = Railwatch.local_transport if @config.local?
+      @transport = reselected if reselected && reselected.class != @transport.class
+      # Sized from the config as it stood, which was the default one. Safe
+      # only while the buffer is still empty: resizing means a new buffer,
+      # and anything already in the old one would go with it.
+      @buffer = build_buffer if @thread.nil? && @buffer.size.zero?
+      self
+    end
+
     def shutdown
       ensure_process!
       ensure_thread if pending_records? && !@thread&.alive?

@@ -72,6 +72,21 @@ module Railwatch
       @reporter ||= Reporter.new(config, transport: local_transport)
     end
 
+    # Called once config/initializers has run, so a reporter built before
+    # that can re-decide what it derived from a configuration that was not
+    # final. Deliberately does not build one: a process that has not
+    # reported anything yet has nothing to correct, and the reporter is
+    # built on first use for a reason.
+    def adopt_final_config!
+      # The redactor snapshots redact_headers when it is built. Today nothing
+      # redacts before this point, so it is built later and already correct --
+      # but an early one would quietly stop hiding the headers an app asked it
+      # to hide, which is not a failure worth leaving to ordering. Dropping the
+      # memo costs a rebuild on next use and nothing else; it holds only caches.
+      @redactor = nil
+      @reporter&.adopt_final_config!
+    end
+
     # Embedded mode: a Puma worker hands its batches to the writer process
     # over the socket; the writer itself, and any process when no socket is
     # configured, writes them straight into SQLite. nil means HTTP.

@@ -576,4 +576,52 @@ RSpec.describe Railwatch do
       expect(out).to include(host: "api.example.test", method: "GET", status_code: 204)
     end
   end
+
+  describe ".adopt_final_config!" do
+    around do |example|
+      previous = Railwatch.instance_variable_get(:@reporter)
+      example.run
+      Railwatch.instance_variable_set(:@reporter, previous)
+    end
+
+    it "re-aims a reporter that chose HTTP before the app said it was embedded" do
+      Railwatch.config.transport = :http
+      reporter = Railwatch::Reporter.new(Railwatch.config)
+      Railwatch.instance_variable_set(:@reporter, reporter)
+      expect(reporter.instance_variable_get(:@transport)).to be_a(Railwatch::Transport::Http)
+
+      Railwatch.config.transport = :local
+      Railwatch.adopt_final_config!
+
+      expect(reporter.instance_variable_get(:@transport)).not_to be_a(Railwatch::Transport::Http)
+    ensure
+      Railwatch.config.transport = :http
+    end
+
+    it "re-sizes a buffer built from the default config, but not once it holds records" do
+      Railwatch.config.buffer_bytes = 4_096
+      sized = Railwatch::Reporter.new(Railwatch.config)
+      Railwatch.config.buffer_bytes = 8_192
+      Railwatch.instance_variable_set(:@reporter, sized)
+      Railwatch.adopt_final_config!
+      expect(sized.buffer.instance_variable_get(:@byte_capacity)).to eq(8_192)
+
+      holding = Railwatch::Reporter.new(Railwatch.config)
+      holding.buffer.push({ t: "log", message: "already buffered" })
+      Railwatch.config.buffer_bytes = 16_384
+      Railwatch.instance_variable_set(:@reporter, holding)
+      Railwatch.adopt_final_config!
+
+      expect(holding.buffer.size).to eq(1)
+      expect(holding.buffer.instance_variable_get(:@byte_capacity)).to eq(8_192)
+    ensure
+      Railwatch.config.buffer_bytes = 16 * 1024 * 1024
+    end
+
+    it "does not build a reporter for a process that never reported" do
+      Railwatch.instance_variable_set(:@reporter, nil)
+      Railwatch.adopt_final_config!
+      expect(Railwatch.instance_variable_get(:@reporter)).to be_nil
+    end
+  end
 end
