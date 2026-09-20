@@ -322,7 +322,7 @@ The work that keeps the dashboard current happens in two places:
 | anomaly scan | every 5 minutes | Anomaly rules, when any are enabled |
 | scheduled tasks | every 10 minutes | Missed and late scheduled tasks |
 | auto-resolve | daily | Resolves issues quiet for 14 days |
-| prune | daily | Deletes telemetry older than `retention_days`, returns the freed pages to the filesystem, then `ANALYZE` |
+| prune | daily | Deletes telemetry older than `retention_days`, returns the freed pages to the filesystem when incremental auto-vacuum is on (see below), then `ANALYZE` |
 
 Because the clock lives in the web process, it keeps running when the
 job worker is down, which is exactly when "scheduled task X missed its

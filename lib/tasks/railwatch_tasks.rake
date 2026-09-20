@@ -95,7 +95,7 @@ module Railwatch
     # the nightly prune is.
     def reclaim!
       with_telemetry do
-        before = file_bytes
+        before = disk_bytes
         if mode == :incremental
           Railwatch::TelemetryRecord.incremental_vacuum
         else
@@ -103,8 +103,17 @@ module Railwatch
           connection.execute("PRAGMA auto_vacuum = incremental")
           connection.execute("VACUUM")
         end
-        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        "\nauto_vacuum=#{mode}, #{human(file_bytes)} on disk (#{human(before - file_bytes)} returned), #{freelist} pages left on the freelist."
+        # A checkpoint that cannot finish says so in its result rather than
+        # raising: a reader still on an older snapshot holds the WAL open.
+        # Counting only the main file would then report the WAL's bytes as
+        # returned while they are still on the disk.
+        busy = checkpoint_busy?
+        [
+          "\nauto_vacuum=#{mode}, #{human(disk_bytes)} on disk including the WAL " \
+            "(#{human(before - disk_bytes)} returned), #{freelist} pages left on the freelist.",
+          busy ? "The WAL could not be truncated yet -- something is still reading it. " \
+                 "Its bytes come back at the next checkpoint; run this again if you want to watch it." : nil
+        ].compact.join("\n")
       end
     end
 
@@ -122,6 +131,19 @@ module Railwatch
       def path = Rails.root.join(Railwatch::TelemetryRecord.connection_db_config.database.to_s)
 
       def file_bytes = File.exist?(path) ? File.size(path) : 0
+
+      # What this database actually occupies. In WAL mode the pages a VACUUM
+      # frees are not off the disk until the WAL is checkpointed, so the main
+      # file alone understates it -- and, right after a vacuum, flatters it.
+      def disk_bytes = file_bytes + wal_bytes
+
+      # `PRAGMA wal_checkpoint` answers with [busy, log_pages, checkpointed];
+      # a non-zero first column means it gave up rather than failed.
+      def checkpoint_busy?
+        connection.select_rows("PRAGMA wal_checkpoint(TRUNCATE)").dig(0, 0).to_i != 0
+      rescue StandardError
+        false
+      end
 
       def wal_bytes = File.exist?("#{path}-wal") ? File.size("#{path}-wal") : 0
 
@@ -228,6 +250,25 @@ namespace :railwatch do
                    when Array then "#{pending.size} pending (bin/rails db:prepare)"
                    else "cannot check: #{pending}"
                    end, fatal: true)
+      end
+      # An install created before 0.3.5 is in auto_vacuum=none, where the
+      # nightly prune's reclaim is a silent no-op and the file only grows.
+      # Nothing converts it on its own, because that needs a full VACUUM with
+      # the write lock held -- so the check people actually run is where it
+      # has to be said, rather than leaving them to notice the disk.
+      if Railwatch.config.local? && Railwatch::TelemetryRecord.sqlite?
+        vacuum_mode = begin
+          Railwatch::Environment.current.with_telemetry { Railwatch::TelemetryRecord.auto_vacuum_mode }
+        rescue StandardError => e
+          e.message
+        end
+        check.call(vacuum_mode == :incremental, "telemetry disk",
+                   case vacuum_mode
+                   when :incremental then "auto_vacuum=incremental; the nightly prune returns freed pages"
+                   when Symbol then "auto_vacuum=#{vacuum_mode}: pruned pages stay in the file " \
+                                    "(bin/rails railwatch:vacuum:status)"
+                   else "cannot check: #{vacuum_mode}"
+                   end)
       end
       # The maintenance clock runs in web and worker processes, not in this
       # rake process, so what can be checked here is whether one has ticked.
