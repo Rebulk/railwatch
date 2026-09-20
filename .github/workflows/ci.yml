@@ -22,6 +22,9 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
+      - name: Audit Ruby dependencies
+        run: bundle exec bundler-audit check --update
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -37,9 +40,6 @@ jobs:
       # the dashboard untested exactly where it is most likely to break.
       - name: Build the dashboard bundle
         run: bundle exec rake dashboard:build
-
-      - name: Audit Ruby dependencies
-        run: bundle exec bundler-audit check --update
 
       - name: Run specs
         run: bundle exec rspec

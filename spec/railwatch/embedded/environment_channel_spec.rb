@@ -73,4 +73,23 @@ RSpec.describe Railwatch::EnvironmentChannel do
   it "refuses an id that is not this install's one environment" do
     expect(subscribe_with(id: 99).send(:streams)).to be_empty
   end
+
+  it "removes a confirmed subscription and sends its protocol rejection on revocation" do
+    allow(connection.server.event_loop).to receive(:post).and_yield
+    allow(connection.pubsub).to receive(:subscribe) { |_topic, _handler, ready| ready.call }
+    allow(connection.pubsub).to receive(:unsubscribe)
+    identifier = JSON.generate(channel: "Railwatch::EnvironmentChannel", id: Railwatch::Environment::ID)
+    connection.subscriptions.add("identifier" => identifier)
+    live = connection.subscriptions.send(:subscriptions).fetch(identifier)
+    expect(connection.transmissions).to include(hash_including(type: "confirm_subscription", identifier: identifier))
+    expect(connection.subscriptions.identifiers).to include(identifier)
+
+    Railwatch.config.dashboard_open = false
+    expect(live).not_to receive(:transmit)
+    live.send(:transmit_authorized, {  "event" => "ingested"  })
+
+    expect(connection.subscriptions.identifiers).not_to include(identifier)
+    expect(live).to be_unsubscribed
+    expect(connection.transmissions.last).to include(type: "reject_subscription", identifier: identifier)
+  end
 end

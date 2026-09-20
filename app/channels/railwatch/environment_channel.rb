@@ -36,6 +36,7 @@ module Railwatch
       else
         stop_all_streams
         reject
+        reject_subscription
       end
     end
 

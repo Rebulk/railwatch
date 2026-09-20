@@ -209,7 +209,8 @@ With Basic off and none of `base_controller_class`, `dashboard_user` or
 forgotten one. It serves the dashboard (a routes constraint it cannot see
 is a legitimate answer) but logs a warning at every boot outside
 development, `railwatch:doctor` reports the gate as undeclared, and live
-updates are refused. Declaring any of the three settles it.
+updates are refused. A custom base controller declares the page gate only;
+live updates still require their own authorization as described below.
 
 ### Live updates and `/cable`
 
@@ -217,9 +218,11 @@ Action Cable runs on your application's own `/cable` endpoint, not under
 the engine's mount, so a routes constraint around `/railwatch` does not
 cover it and a base controller cannot reach it. The live-update channel
 therefore follows what you declared: HTTP Basic credentials are checked
-on the WebSocket handshake, a `dashboard_user` resolver is consulted,
-`dashboard_open` and `base_controller_class` are taken at their word, and
-an undeclared gate is refused. The channel carries an ingest ping (a
+from the WebSocket handshake, a `dashboard_user` resolver is consulted,
+or `dashboard_open` explicitly permits public live updates. A custom
+`base_controller_class` authorizes pages only and never permits a Cable
+subscription by itself. The gate is rechecked before each live update;
+revocation removes the subscription and notifies the client. The channel carries an ingest ping (a
 timestamp and per-type counts) and never telemetry records.
 
 ### Naming the operator, and what an id may be
