@@ -431,9 +431,14 @@ affects one probabilistic decision. Set `backpressure` false to keep the
 factor at 1. The current value is sent as
 `X-Railwatch-Backpressure-Factor` whenever it is greater than 1.
 
-`Railwatch.flush` forces an immediate flush. The `command` patches also
-call it after a rake task/runner invocation finishes, so short-lived
-processes don't lose their last batch to the flush interval. An unhandled
+`Railwatch.flush` forces an immediate flush, on the calling thread and
+without a time limit, so it is yours to call when you know you want to
+wait. Nothing in the gem calls it for you: a short-lived process keeps its
+last batch because the engine's `at_exit` runs `Reporter#shutdown`, which
+wakes the reporter thread and joins it for `shutdown_timeout`. That is a
+bounded wait, which is what a rake task, a runner or a cron job needs --
+a receiver that accepts connections and never answers then costs
+`shutdown_timeout`, not a timeout ladder per process. An unhandled
 exception goes through `Railwatch.record_now` → `Reporter#write_now`,
 which enqueues the record and asks for an urgent flush. It never performs
 network I/O or a timeout cycle on the application thread. Urgent means

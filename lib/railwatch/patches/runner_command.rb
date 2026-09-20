@@ -91,7 +91,9 @@ module Railwatch
           }
           fields[:interactive] = true if interactive
           Railwatch.finish_execution(:command, **fields)
-          Railwatch.flush
+          # No flush here either; see the note in patches/rake_task.rb. The
+          # at_exit shutdown is the bounded delivery, and it runs for a runner
+          # exactly as it does for a task.
         end
       end
 

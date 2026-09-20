@@ -72,7 +72,16 @@ module Railwatch
             name: name,
             command: "rake #{name}#{command_suffix}",
             exit_code: exit_code.to_i.clamp(0, 255))
-          Railwatch.flush
+          # Deliberately no flush. The engine's at_exit calls Reporter#shutdown,
+          # which wakes the reporter thread and joins it for shutdown_timeout --
+          # already a bounded last delivery, and already the one that ships a
+          # failed task's exception. Flushing here as well delivered the same
+          # records a second way, on the application's own thread, with no
+          # bound: against a receiver that accepts connections and never
+          # answers it cost a full timeout ladder per process, measured at ~6s,
+          # and ~12s when it queued behind a delivery the reporter thread was
+          # already stuck in. An app whose entrypoint boots Rails eleven times
+          # spent that eleven times over and lost the deploy.
         end
       end
 
