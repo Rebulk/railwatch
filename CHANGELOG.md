@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.6 (2026-09-20)
+
+- Harden embedded live-stream authorization and telemetry delivery. Bound
+  source-file access and HTTP response reads.
+- Simplify prelaunch interfaces: use prompt, stdin, or environment token input;
+  pass the complete transport delivery metadata; use the current process-version
+  field. Update public install examples and remove obsolete upgrade wording.
+
 ## 0.3.5 (2026-09-20)
 
 - Make the embedded telemetry database give disk back. `PruneTelemetryJob`
