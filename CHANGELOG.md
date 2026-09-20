@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.3.7 (2026-09-20)
+
+- Stop a rake task or `rails runner` waiting on the network as it finishes.
+  The command patches called `Railwatch.flush` when the execution closed --
+  on the application's own thread, with no time limit. The engine's `at_exit`
+  already calls `Reporter#shutdown`, which wakes the reporter thread and joins
+  it for `shutdown_timeout`, so the same records were already being delivered,
+  already bounded, and a failed task's exception already went with them. The
+  flush was a second, unbounded way to do it.
+
+  Against a receiver that accepts connections and never answers, that second
+  way cost a full timeout ladder per process -- measured at ~6s, and ~12s when
+  it queued behind a delivery the reporter thread was already stuck in. An app
+  whose container entrypoint boots Rails eleven times before starting Puma
+  spent that on every boot and lost the deploy to its proxy's timeout. With
+  the call removed the task returns immediately and the process still leaves
+  within `shutdown_timeout`, carrying the same records.
+
+  Only short-lived processes were affected: web and worker processes flush on
+  the reporter's own thread and never blocked. `Railwatch.flush` is unchanged
+  and still public, for a caller who wants to wait on purpose.
+
+- Add a process-level regression that runs a failing rake task against a
+  socket that accepts and never answers, and asserts the task returns without
+  waiting on it and the process exits inside the shutdown bound. In-process
+  examples cannot see this: the cost lives in a socket read and the bound in
+  an `at_exit` join.
+
 ## 0.3.6 (2026-09-20)
 
 - Harden embedded live-stream authorization and telemetry delivery. Bound
