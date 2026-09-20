@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useLive } from "@/hooks/use-live"
+import { useIsLive, useLive } from "@/hooks/use-live"
 
 interface Callbacks {
   connected?: () => void
@@ -159,5 +159,39 @@ describe("useLive", () => {
       vi.advanceTimersByTime(5_000)
     })
     expect(reload).toHaveBeenCalledTimes(2)
+  })
+})
+
+// What a rolling number on the page reads to decide whether it may animate.
+describe("useIsLive", () => {
+  function connect() {
+    created[0].callbacks.connected?.()
+  }
+
+  it("is false until the subscription connects", () => {
+    const { result } = renderHook(() => useIsLive())
+    renderHook(() => useLive(1))
+    expect(result.current).toBe(false)
+    act(connect)
+    expect(result.current).toBe(true)
+  })
+
+  it("is false while live updates are paused", () => {
+    const { result } = renderHook(() => useIsLive())
+    const live = renderHook(() => useLive(1))
+    act(connect)
+    act(() => live.result.current.setPaused(true))
+    expect(result.current).toBe(false)
+    act(() => live.result.current.setPaused(false))
+    expect(result.current).toBe(true)
+  })
+
+  it("is false once the page with the subscription has gone", () => {
+    const { result } = renderHook(() => useIsLive())
+    const live = renderHook(() => useLive(1))
+    act(connect)
+    expect(result.current).toBe(true)
+    act(() => live.unmount())
+    expect(result.current).toBe(false)
   })
 })

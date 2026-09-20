@@ -1,5 +1,5 @@
 import { router } from "@inertiajs/react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 
 import { getConsumer } from "@/lib/cable"
 
@@ -10,6 +10,35 @@ export interface LiveEvent {
   event: string
   at: string
   counts: Record<string, number>
+}
+
+// Whether live updates are actually flowing right now: subscribed and not
+// paused. The page's LiveToggle owns the one `useLive` subscription, so
+// anything else that needs the answer -- a number that only animates while
+// the data behind it is moving -- reads it from here rather than opening a
+// second WebSocket subscription of its own.
+let live = false
+const liveWatchers = new Set<() => void>()
+
+function publishLive(value: boolean) {
+  if (live === value) return
+  live = value
+  for (const watcher of liveWatchers) watcher()
+}
+
+function subscribeLive(onChange: () => void) {
+  liveWatchers.add(onChange)
+  return () => {
+    liveWatchers.delete(onChange)
+  }
+}
+
+export function useIsLive() {
+  return useSyncExternalStore(
+    subscribeLive,
+    () => live,
+    () => false,
+  )
 }
 
 // Subscribes to an environment's EnvironmentChannel stream. On each message,
@@ -52,6 +81,11 @@ export function useLive(
   })
 
   const scheduleRef = useRef<() => void>(() => undefined)
+
+  useEffect(() => {
+    publishLive(connected && !paused)
+    return () => publishLive(false)
+  }, [connected, paused])
 
   function setPaused(value: boolean) {
     pausedRef.current = value

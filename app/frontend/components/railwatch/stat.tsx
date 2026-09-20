@@ -1,6 +1,12 @@
 import { ArrowDown, ArrowUp } from "lucide-react"
 import type { ReactNode } from "react"
 
+import {
+  DIGIT_ROLL_ENABLED,
+  DigitRoll,
+} from "@/components/railwatch/digit-roll"
+import { useIsLive } from "@/hooks/use-live"
+import { useReducedMotion } from "@/hooks/use-reduced-motion"
 import { cn } from "@/lib/utils"
 
 function Delta({
@@ -38,6 +44,46 @@ function Delta({
   )
 }
 
+// A metric a page is happy to see move: the raw number, and the formatter
+// that turns it into what the cell reads. Passing this instead of `value` is
+// how a page opts into the digit roll, which is deliberately the wrong way
+// round from a prop that opts out -- a page that says nothing gets no
+// motion, so a new incident page (issues, executions, traces) cannot inherit
+// it by accident.
+export interface RollingValue {
+  value: number
+  format: (value: number) => string
+}
+
+// The rolling digits are decoration, so they are hidden from assistive tech
+// and the number itself sits beside them in one plain text node. Not an
+// aria-live region: a value that changes every few seconds read aloud all
+// day is not an improvement, and fast live regions misbehave across screen
+// readers anyway. A metric that genuinely needs announcing wants its own
+// debounced role="status" saying what happened, not the number.
+//
+// Four gates stand between a rolling number and motion on the screen, and
+// all of them have to be open: the global switch, the page having opted in
+// at all (this component only renders for `roll`), live updates actually
+// flowing, and the user not having asked for less motion. Live off, paused,
+// disconnected, or reduced motion each mean an instant swap -- which is
+// also WCAG 2.2.2's pause/stop mechanism: the live toggle in the page
+// header stops the motion, not just the data.
+function RollingStatValue({ value, format }: RollingValue) {
+  const live = useIsLive()
+  const reducedMotion = useReducedMotion()
+  const formatted = format(value)
+  const animate = DIGIT_ROLL_ENABLED && live && !reducedMotion
+  return (
+    <>
+      <span aria-hidden="true">
+        {animate ? <DigitRoll value={value} format={format} /> : formatted}
+      </span>
+      <span className="sr-only">{formatted}</span>
+    </>
+  )
+}
+
 // One metric. Nightwatch-style: a small uppercase mono label, a large
 // tabular number, and an optional sub-line. Renders as a cell, not a card,
 // so a row of them reads as one strip (see StatStrip); pass `card` to get
@@ -45,6 +91,7 @@ function Delta({
 export function Stat({
   label,
   value,
+  roll,
   hint,
   tone,
   delta,
@@ -53,7 +100,6 @@ export function Stat({
   className,
 }: {
   label: string
-  value: ReactNode
   hint?: ReactNode
   tone?: "default" | "destructive" | "warning" | "success"
   delta?: {
@@ -66,7 +112,11 @@ export function Stat({
   deltaCaption?: ReactNode
   card?: boolean
   className?: string
-}) {
+  // A pre-formatted value, or a `roll` the digits of which may animate --
+  // one or the other, never both.
+} & (
+  { value: ReactNode; roll?: never } | { value?: never; roll: RollingValue }
+)) {
   return (
     <div
       className={cn(
@@ -85,7 +135,7 @@ export function Stat({
             tone === "success" && "text-live",
           )}
         >
-          {value}
+          {roll ? <RollingStatValue {...roll} /> : value}
         </div>
         {delta && <Delta {...delta} caption={deltaCaption} />}
       </div>
