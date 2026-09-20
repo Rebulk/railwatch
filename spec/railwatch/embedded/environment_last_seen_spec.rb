@@ -36,6 +36,22 @@ RSpec.describe Railwatch::Environment do
       expect(environment.last_seen_at).to be_within(1.second).of(newest)
     end
 
+    # Batches are written concurrently, so the row inserted last is not
+    # necessarily the one received last. Taking the newest id would let the
+    # displayed time go backwards when they disagree.
+    it "takes the newest receipt time even when a later row recorded an earlier one" do
+      newest = Time.current.change(usec: 0)
+
+      environment.with_telemetry do
+        Railwatch::Telemetry::IngestBatch.delete_all
+        Railwatch::Telemetry::IngestBatch.create!(received_at: newest, accepted: 1, rejected: 0, bytes: 10)
+        # Inserted after, received before: the interleaving this guards.
+        Railwatch::Telemetry::IngestBatch.create!(received_at: newest - 10.minutes, accepted: 1, rejected: 0, bytes: 10)
+      end
+
+      expect(environment.last_seen_at).to be_within(1.second).of(newest)
+    end
+
     # The regression itself: ingest recorded in one place and the dashboard
     # read another. Touching the environment the way Ingest::Batch does must
     # not be what makes the value appear, because in production the process
