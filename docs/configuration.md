@@ -829,12 +829,19 @@ permanently rejects a batch, or shutdown expires with retained records
 that could not be sent. Retryable delivery failures stay buffered and do
 not fire the callback on every attempt. With no callback registered, a
 recovered internal error falls back to `Railwatch.debug`, gated on
-`RAILWATCH_DEBUG`; lost records (a batch dropped after its retries,
-permanently rejected, or still unsent when shutdown ran out of time) are
-one `[railwatch]` line on stderr regardless, since a short-lived process
-gets no other chance to say so. Either way it is stderr, never
-`Rails.logger`, so gem-internal failures can never themselves become `log`
-records.
+`RAILWATCH_DEBUG`, and so does lost records (a batch dropped after its
+retries, permanently rejected, or still unsent when shutdown ran out of
+time). Nothing is printed otherwise: a monitoring gem writing into its
+host's own output would be changing that application's behaviour to report
+on itself, and this one stays additive.
+
+Set `warn_on_data_loss` (`RAILWATCH_WARN_ON_DATA_LOSS`) to get one
+`[railwatch]` stderr line when records are lost for good — worth having on
+a box where a rake task's telemetry matters, since a short-lived process
+has no other chance to say so. A registered callback always wins over it.
+
+Either way it is stderr, never `Rails.logger`, so gem-internal failures can
+never themselves become `log` records.
 
 ## Faraday
 

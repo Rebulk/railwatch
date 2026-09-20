@@ -807,18 +807,26 @@ RSpec.describe Railwatch::Reporter do
       Railwatch.config.on_unrecoverable = nil
     end
 
-    it "tells stderr about lost records when no callback is registered, even with debug off" do
+    # Silent by default on purpose: printing into the host application's own
+    # output would be this gem changing that application's behaviour to report
+    # on itself, which is a trade it does not make. warn_on_data_loss is how an
+    # operator asks for it.
+    it "says nothing about lost records unless asked, and then tells stderr once" do
       config = reporter_config
       config.debug = false
+      config.warn_on_data_loss = false
       Railwatch.config.on_unrecoverable = nil
       allow(Railwatch).to receive(:config).and_return(config)
       loss = described_class::DeliveryError.new("Railwatch shutdown timed out with 3 unsent records retained in memory (17686 bytes)",
                                                 records: 3, bytes: 17_686)
 
+      expect { Railwatch.notify_unrecoverable(loss) }.not_to output.to_stderr
+
+      config.warn_on_data_loss = true
       expect { Railwatch.notify_unrecoverable(loss) }
         .to output(a_string_including("[railwatch] Railwatch shutdown timed out with 3 unsent records", "on_unrecoverable")).to_stderr
-      # A recovered internal error is still debug-only: the gem carried on,
-      # and there is nothing for an operator to do about it.
+      # A recovered internal error stays debug-only either way: the gem carried
+      # on, and there is nothing for an operator to do about it.
       expect { Railwatch.notify_unrecoverable(RuntimeError.new("subscriber raised")) }.not_to output.to_stderr
     end
 

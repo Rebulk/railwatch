@@ -17,12 +17,16 @@
   answers: the process left inside `shutdown_timeout` carrying three unsent
   records and printed nothing.
 
-  A `Reporter::DeliveryError` -- raised only once records are already gone
-  -- now goes to stderr as one `[railwatch]` line whether or not debug is
-  on. Registering `on_unrecoverable` replaces the line, which is how an app
-  routes it (`Rails.error.report`) or silences it. Recovered internal errors
-  (a subscriber that raised, a flush that failed and will be retried) stay
-  debug-only: the gem carried on and there is nothing for an operator to do.
+  Nothing is printed by default, and that is deliberate: a monitoring gem
+  writing into its host's own output is the gem changing that application's
+  behaviour in order to report on itself, and this one stays additive and out
+  of the way. New `warn_on_data_loss` (`RAILWATCH_WARN_ON_DATA_LOSS`, off)
+  turns a `Reporter::DeliveryError` -- raised only once records are already
+  gone -- into one `[railwatch]` stderr line. A registered
+  `on_unrecoverable` always wins over it, which is how an app routes the
+  loss (`Rails.error.report`) instead. Recovered internal errors (a
+  subscriber that raised, a flush that will be retried) stay debug-only
+  either way: the gem carried on and there is nothing for an operator to do.
 
 - Report a given-up batch after releasing the reporter lock, not under it.
   `Reporter#retain` called `on_unrecoverable` inside `@mutex.synchronize`.

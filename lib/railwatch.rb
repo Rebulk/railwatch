@@ -353,14 +353,20 @@ module Railwatch
     # shutdown is the only delivery a rake task or runner gets. Behind
     # RAILWATCH_DEBUG that loss was invisible: a cron job whose exception
     # never reached the platform looked exactly like one that had nothing to
-    # say. So it goes to stderr, one line, unconditionally. Registering
-    # on_unrecoverable replaces the line, which is how an app routes (or
-    # silences) it. Kernel#warn, not Rails.logger, for the same reason as
-    # #debug: it must never become a log record about itself.
+    # say.
+    #
+    # It is still not printed by default. A monitoring gem writing into
+    # someone else's cron output is the gem changing their application's
+    # behaviour, which is not a trade this one makes to report on itself: it
+    # stays additive and out of the way. Ask for it with warn_on_data_loss and
+    # it becomes one stderr line, or register on_unrecoverable and route it
+    # wherever the app already sends such things. Kernel#warn, not
+    # Rails.logger, for the same reason as #debug: it must never become a log
+    # record about itself.
     def notify_unrecoverable(error)
       if config.on_unrecoverable
         config.on_unrecoverable.call(error)
-      elsif error.is_a?(Reporter::DeliveryError)
+      elsif error.is_a?(Reporter::DeliveryError) && config.warn_on_data_loss
         warn("[railwatch] #{error.message}. Register Railwatch.on_unrecoverable to route this elsewhere.")
       else
         debug { "unrecoverable internal error: #{error.class}: #{error.message}" }
