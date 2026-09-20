@@ -7,7 +7,7 @@ const STEPS: { comment: string; lines: string[] }[] = [
   {
     comment: "# 2. initializer, routes, Kamal hook, browser client, matchers",
     lines: [
-      "bin/rails generate railwatch:install --token=rw_… --kamal-secrets",
+      "bin/rails generate railwatch:install --prompt-token --kamal-secrets",
     ],
   },
   {
