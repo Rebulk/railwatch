@@ -31,7 +31,16 @@ module Railwatch
     def paused? = false
     def token_prefix = "embedded"
     def retention_days = 7
-    def last_seen_at = Railwatch::Embedded.last_seen_at
+    # Deliberately read from the telemetry database rather than held in this
+    # process. A deployed embedded install ingests in the writer process and
+    # renders the dashboard in a web one, so a value set during ingest is
+    # invisible to the page that needs it -- and a nil here is what the
+    # dashboard treats as "no events yet", so it showed its install steps no
+    # matter how much had been recorded. The newest batch row is the same
+    # fact, in the file both processes already share, one indexed lookup away.
+    def last_seen_at
+      with_telemetry { Telemetry::IngestBatch.order(id: :desc).limit(1).pick(:received_at) }
+    end
     def application = Application.current
     def issues = Issue.where(environment_id: ID)
     def deploys = Deploy.where(environment_id: ID)
@@ -43,8 +52,9 @@ module Railwatch
     # dashboard can flag silent ones. One embedded install is its own server.
     def expected_servers = []
 
-    # Ingest::Batch touches this in embedded mode; there is no row to update.
-    def update_columns(last_seen_at:) = Railwatch::Embedded.last_seen_at = last_seen_at
+    # Ingest::Batch touches this after writing a batch. Nothing to record: the
+    # batch row it just wrote is what last_seen_at reads.
+    def update_columns(last_seen_at:) = nil
 
     # GlobalID for Active Job arguments (RollupJob.perform_later(environment, bucket)).
     include GlobalID::Identification

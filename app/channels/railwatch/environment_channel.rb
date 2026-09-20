@@ -18,11 +18,22 @@ module Railwatch
   # timestamp and per-type counts), never telemetry records.
   class EnvironmentChannel < ActionCable::Channel::Base
     def subscribed
-      if params[:id].to_i == Environment::ID && Railwatch.config.dashboard_channel_allowed?(connection.request)
+      if params[:id].to_i == Environment::ID && Railwatch.config.dashboard_channel_allowed?(connection_request)
         stream_from "environment_#{Environment::ID}"
       else
         reject
       end
     end
+
+    private
+
+    # Built from the connection's env rather than asking it for its request:
+    # ActionCable::Connection::Base#request is private (Rails documents it for
+    # use inside a Connection subclass, not from a channel), so the obvious
+    # call raises NoMethodError, every subscribe fails, and the dashboard sits
+    # on "Disconnected" retrying forever. `env` is public and carries
+    # everything a gate reads -- the Authorization header for HTTP Basic, the
+    # cookies a dashboard_user resolver looks at.
+    def connection_request = ActionDispatch::Request.new(connection.env)
   end
 end

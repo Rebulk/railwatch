@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.4 (2026-09-20)
+
+- Fix the embedded dashboard offering its install steps to an install that is
+  already reporting. `last_seen_at` was process-local state, set by whichever
+  process ingested a batch. A deployed embedded install ingests in the writer
+  process the Puma plugin forks and renders the dashboard in a web one, so the
+  web process never saw it set and read the nil as "no events yet" -- add the
+  gem, run the generator, set the token, run the doctor -- no matter how much
+  had been recorded. It now reads the newest batch row from the telemetry
+  database, which every process shares.
+- Fix live updates never connecting. The channel asked for
+  `connection.request`, which Action Cable defines below `private` for use
+  inside a Connection subclass; from a channel it raises NoMethodError, so
+  every subscribe failed and the dashboard sat on "Disconnected" while the
+  client retried. It now builds the request from the connection's public `env`.
+- Add the gem's first channel spec, with a connection stub that mirrors
+  ActionCable::Connection::Base's real method visibility. Action Cable's own
+  ConnectionStub defines neither `request` nor `env`, so a stub that exposed a
+  public `request` would have agreed with the broken code.
+
 ## 0.3.3 (2026-09-19)
 
 - Fix `railwatch:install --local` writing test databases that parallel test

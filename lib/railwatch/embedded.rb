@@ -46,9 +46,5 @@ module Railwatch
       def quota_exhausted? = false
       def as_json(*) = { id: id, name: name, slug: slug, plan: plan }
     end
-
-    class << self
-      attr_accessor :last_seen_at
-    end
   end
 end
