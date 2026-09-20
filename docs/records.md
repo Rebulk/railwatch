@@ -56,7 +56,7 @@ these fields, from `Railwatch.build_parent` in `lib/railwatch.rb`:
 |---|---|
 | `duration` | Wall time in microseconds, execution start to finish. |
 | `stages` | Hash of stage name → microseconds spent in it (e.g. `{"middleware_before" => 120, "action" => 4300, "render" => 900}`). |
-| `counters` | Hash of child-record counts for this execution — `queries`, `cached_queries`, `exceptions`, `logs`, `cache_events`, `jobs_enqueued`, `mail`, `broadcasts`, `notifications`, `outgoing_requests`, `storage_ops`, `view_renders`, `transactions`, `hydrated_models`, `lazy_loads`, `deprecations`, `spans` (`Execution::COUNTERS`). Counted even when the execution is sampled out, so aggregate rates don't depend on the sample rate. |
+| `counters` | Hash of child-record counts for this execution — `queries`, `cached_queries`, `exceptions`, `logs`, `cache_events`, `jobs_enqueued`, `mail`, `broadcasts`, `notifications`, `outgoing_requests`, `storage_ops`, `view_renders`, `transactions`, `hydrated_models`, `lazy_loads`, `deprecations`, `spans` (`Execution::COUNTERS`). Counted even when the execution is sampled out, so aggregate rates don't depend on the sample rate. Only the counters that fired are sent: a counter missing from the hash is zero, and readers must treat it that way. |
 | `peak_memory` | RSS in bytes, sampled at most once per second process-wide (`Execution.sampled_memory`) — cheap enough to read but not per-execution-accurate to the microsecond. |
 | `allocations` | Objects allocated during the execution (`GC.stat(:total_allocated_objects)` delta). |
 | `gc_time` | GC time in the execution's window, when the Ruby build exposes `GC.stat(:time)`. |

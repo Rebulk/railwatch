@@ -115,7 +115,7 @@ module Railwatch
         Telemetry::Execution.requests.between(from, to).where(app_tenant: tenant).recent.limit(limit).map do |r|
           { execution_id: r.execution_id, name: r.name, status: r.status, duration: r.duration_ms.round(2), occurred_at: r.occurred_at,
             user_ref: r.user_ref, tenant: r.app_tenant, exception_preview: r.exception_preview, inertia_component: r.inertia_component,
-            queries: r.counters["queries"], deploy: r.deploy }
+            queries: r.counters["queries"].to_i, deploy: r.deploy }
         end
       end
 
