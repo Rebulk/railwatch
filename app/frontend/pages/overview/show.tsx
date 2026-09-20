@@ -88,7 +88,7 @@ export default function Overview(p: Props) {
         <StatStrip>
           <Stat
             label="Requests"
-            value={count(r.count)}
+            roll={{ value: r.count, format: count }}
             hint={`${pct(r.errors, r.count)} 5xx · ${pct(r.client_errors, r.count)} 4xx`}
             tone={r.errors > 0 ? "warning" : undefined}
             delta={{
@@ -111,7 +111,7 @@ export default function Overview(p: Props) {
           />
           <Stat
             label="Job attempts"
-            value={count(j.count)}
+            roll={{ value: j.count, format: count }}
             hint={`${pct(j.errors, j.count)} failed`}
             tone={j.errors > 0 ? "warning" : undefined}
             delta={{
