@@ -251,6 +251,35 @@ RSpec.describe Railwatch::Export::Sender do
   end
 
   describe "credentials" do
+    it "never sends a claimed delivery with a replacement tenant credential" do
+      ingest
+      held = claim
+      Railwatch.config.export_token = "rw_other_tenant"
+      sent = stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
+
+      outcome = client.deliver(held, producer_id: held.producer_id)
+      expect(sent).not_to have_been_requested
+      expect(outcome.disposition).to eq(:deferred)
+      expect(outcome.status).to eq(401)
+      finish(held, outcome)
+      expect(delivery.body).not_to be_nil
+      expect(destination).to be_blocked
+    end
+
+    it "rechecks the binding even when a transport was already cached" do
+      ingest
+      held = claim
+      sent = stub_request(:post, "https://receiver.test/ingest")
+        .to_return(status: 200, body: '{"disposition":"committed","accepted":1,"rejected":0}')
+      client.deliver(held, producer_id: held.producer_id)
+      Railwatch.config.export_token = "rw_other_tenant"
+
+      outcome = client.deliver(held, producer_id: held.producer_id)
+      expect(sent).to have_been_requested.once
+      expect(outcome.status).to eq(401)
+    end
+
     it "authenticates with the export token, not whatever the cloud transport uses" do
       Railwatch.config.token = "ordinary_cloud_token"
       Railwatch.config.export_token = "export_only_token"

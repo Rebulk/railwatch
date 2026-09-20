@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "net/http"
+require "openssl"
 require "uri"
 require "pathname"
 require "json"
@@ -10,6 +11,7 @@ module Railwatch
   # during release preparation; it never follows map URLs or HTTP redirects.
   class SourceMaps
     MAX_BYTES = 10 * 1024 * 1024
+    MAX_RESPONSE_BYTES = 64 * 1024
 
     def initialize(config)
       @config = config
@@ -46,7 +48,17 @@ module Railwatch
       request["X-Railwatch-Deploy"] = @config.deploy
       request["X-Railwatch-Filename"] = filename
       request.body = data
-      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", open_timeout: 5, read_timeout: 30, write_timeout: 30) { |http| http.request(request) }
+      response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https", verify_mode: OpenSSL::SSL::VERIFY_PEER,
+                                 open_timeout: 5, read_timeout: 30, write_timeout: 30) do |http|
+        http.request(request) do |result|
+          body = String.new(encoding: Encoding::BINARY)
+          result.read_body do |chunk|
+            raise "Source map response exceeds 64 KiB" if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
+            body << chunk
+          end
+          result.body = body
+        end
+      end
       unless response.is_a?(Net::HTTPSuccess)
         raise "Source map upload failed (HTTP #{response.code}) for #{filename}"
       end

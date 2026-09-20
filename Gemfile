@@ -9,6 +9,7 @@ gem "solid_cache"
 gem "solid_cable"
 
 group :development, :test do
+  gem "bundler-audit", require: false
   # Profiler backends (optional at runtime; apps add one to their Gemfile).
   gem "stackprof"
   gem "vernier"

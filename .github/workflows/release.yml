@@ -9,6 +9,10 @@ on:
   # publish?" without cutting a release.
   workflow_dispatch:
 
+# Jobs get no write access unless they explicitly request it (OIDC publishing).
+permissions:
+  contents: read
+
 jobs:
   # Proves the OIDC exchange this workflow relies on, and publishes nothing.
   # Fails with the same "No trusted publisher configured for this workflow"

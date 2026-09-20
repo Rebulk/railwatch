@@ -407,12 +407,13 @@ module Railwatch
     # engine's mount does not cover and a base controller cannot reach, so an
     # undeclared gate refuses rather than assuming.
     def dashboard_channel_allowed?(request)
-      case dashboard_gate
-      when :basic then http_basic_auth_ok?(request)
-      when :resolver then !(dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user).nil?
-      when :open, :controller then true
-      else false
+      return http_basic_auth_ok?(request) if http_basic_auth_enabled
+      if dashboard_user
+        return !!(dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user)
       end
+
+      # A controller name is not evidence of authorization on /cable.
+      !!dashboard_open
     end
 
     def resolve_dashboard_user(request)

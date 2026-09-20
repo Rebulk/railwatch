@@ -105,8 +105,8 @@ module Railwatch
           Rails.logger.warn(
             "[railwatch] the dashboard at the engine's mount has no gate this gem can see: HTTP Basic is off and " \
             "no base_controller_class, dashboard_user or dashboard_open is set. If a routes constraint or your " \
-            "network already gates it, set `c.dashboard_open = true` to say so (it also enables live updates); " \
-            "otherwise anyone who can reach the URL can read every query, log line and exception this app records."
+            "network already gates it, authorize /cable separately with `c.dashboard_user`, or set `c.dashboard_open = true` " \
+            "only when the network protects both endpoints. Otherwise anyone who can reach the dashboard can read every query, log line and exception this app records."
           )
         end
       end

@@ -165,7 +165,11 @@ c.base_controller_class = "AdminController"   # requires an admin, or redirects 
 ```
 
 Your controller's code runs inside the engine, whose route helpers take
-precedence; reach your app's with `main_app.root_path`.
+precedence; reach your app's with `main_app.root_path`. The controller does
+not run for Action Cable subscriptions: live updates stay closed unless
+`dashboard_user` also authorizes the connection (as below). Return `nil` or
+`false` for unauthorized users. The resolver names the operator on pages;
+keep the controller or mount constraint as the page authorization gate.
 
 Or a routes constraint, which keeps the engine out of it entirely (for
 example with the sessions Rails' authentication generator creates):
@@ -183,7 +187,11 @@ purpose:
 
 ```ruby
 c.http_basic_auth_enabled = false
-c.dashboard_open = true   # "something in front of the mount gates this"
+# The mount constraint does not cover /cable. Authorize live updates too:
+c.dashboard_user = ->(request) {
+  user = Session.find_by(id: request.cookie_jar.signed[:session_id])&.user
+  { id: user.id, name: user.name } if user&.admin?
+}
 ```
 
 ### Deliberately public
@@ -201,7 +209,8 @@ With Basic off and none of `base_controller_class`, `dashboard_user` or
 forgotten one. It serves the dashboard (a routes constraint it cannot see
 is a legitimate answer) but logs a warning at every boot outside
 development, `railwatch:doctor` reports the gate as undeclared, and live
-updates are refused. Declaring any of the three settles it.
+updates are refused. A custom base controller declares the page gate only;
+live updates still require their own authorization as described below.
 
 ### Live updates and `/cable`
 
@@ -209,9 +218,11 @@ Action Cable runs on your application's own `/cable` endpoint, not under
 the engine's mount, so a routes constraint around `/railwatch` does not
 cover it and a base controller cannot reach it. The live-update channel
 therefore follows what you declared: HTTP Basic credentials are checked
-on the WebSocket handshake, a `dashboard_user` resolver is consulted,
-`dashboard_open` and `base_controller_class` are taken at their word, and
-an undeclared gate is refused. The channel carries an ingest ping (a
+from the WebSocket handshake, a `dashboard_user` resolver is consulted,
+or `dashboard_open` explicitly permits public live updates. A custom
+`base_controller_class` authorizes pages only and never permits a Cable
+subscription by itself. The gate is rechecked before each live update;
+revocation removes the subscription and notifies the client. The channel carries an ingest ping (a
 timestamp and per-type counts) and never telemetry records.
 
 ### Naming the operator, and what an id may be

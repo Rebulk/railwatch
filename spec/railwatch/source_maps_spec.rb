@@ -26,6 +26,22 @@ RSpec.describe Railwatch::SourceMaps do
     expect(File.exist?(@file)).to eq(false)
   end
 
+  it "stops an oversized response without deleting the local map" do
+    response = Net::HTTPOK.new("1.1", "200", "OK")
+    allow(response).to receive(:read_body) do |&consume|
+      consume.call("x" * described_class::MAX_RESPONSE_BYTES)
+      consume.call("x")
+      raise "read beyond the response ceiling"
+    end
+    http = instance_double(Net::HTTP)
+    allow(http).to receive(:request).and_yield(response)
+    allow(Net::HTTP).to receive(:start).and_yield(http)
+
+    expect { described_class.new(Railwatch.config).upload(directory: @directory, delete: true) }
+      .to raise_error(RuntimeError, "Source map response exceeds 64 KiB")
+    expect(File.exist?(@file)).to be(true)
+  end
+
   it "retains local maps by default" do
     stub_request(:post, "http://railwatch.test/ingest/sourcemaps")
       .to_return(status: 201, body: JSON.generate(ok: true, filename: "vite/assets/widget.js", bytes: document.bytesize))

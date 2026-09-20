@@ -6,6 +6,23 @@ RSpec.describe Railwatch::Transport::Http do
   let(:transport) { described_class.new(Railwatch.config) }
 
   describe "what the receiver said" do
+    it "stops reading a chunked response as soon as it exceeds the cap" do
+      response = Net::HTTPOK.new("1.1", "200", "OK")
+      allow(response).to receive(:read_body) do |&consume|
+        consume.call("x" * described_class::MAX_RESPONSE_BYTES)
+        consume.call("x")
+        raise "read beyond the response ceiling"
+      end
+      http = instance_double(Net::HTTP)
+      allow(http).to receive(:request).and_yield(response)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+
+      result = transport.deliver_encoded(body: "batch", expected_count: 1, batch_id: "one")
+      expect(result).to be_retryable
+      expect(result.error).to include("ResponseTooLarge")
+      expect(result.error).not_to include("read beyond")
+    end
+
     it "keeps a paused answer off the retry ladder but stops calling it storage" do
       stub_request(:post, "http://railwatch.test/ingest")
         .to_return(status: 200, body: '{"accepted":0,"rejected":0,"reason":"paused"}')

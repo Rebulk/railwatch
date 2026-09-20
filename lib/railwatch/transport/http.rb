@@ -174,12 +174,22 @@ module Railwatch
         # explicitly so a Ruby default change cannot silently weaken ingest.
         options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
         Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
-          http.request(req)
+          http.request(req) do |response|
+            body = String.new(encoding: Encoding::BINARY)
+            response.read_body do |chunk|
+              if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
+                raise ResponseTooLarge, "ingest response is larger than #{MAX_RESPONSE_BYTES} bytes"
+              end
+              body << chunk
+            end
+            response.body = body
+          end
         end
       end
 
-      # A receiver in trouble can answer with something enormous -- a proxy
-      # error page, a stack trace. Only ever look at the first slice of it.
+      # Enforced while streaming, before Net::HTTP can buffer an unbounded
+      # proxy error page or decompressed response inside the monitored app.
+      class ResponseTooLarge < StandardError; end
       MAX_RESPONSE_BYTES = 64 * 1024
       # The longest delay we will take from a receiver, in either spelling.
       MAX_RETRY_AFTER = 86_400
@@ -193,8 +203,7 @@ module Railwatch
         end
       end
 
-      # Bounds what we keep and log, not what Net::HTTP already read off the
-      # socket -- it buffers the whole response before we ever see it.
+      # Keep diagnostics smaller still than the bounded response body.
       def summarize(body) = body.to_s.byteslice(0, 200).to_s.scrub
 
       # Seconds, or an HTTP date. Anything else is not a delay we can trust,

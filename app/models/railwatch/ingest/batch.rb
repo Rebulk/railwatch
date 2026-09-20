@@ -340,7 +340,7 @@ module Railwatch
         return if last && now - last < THROTTLE_WINDOW
 
         LAST_BROADCAST_AT[@environment.id] = now
-        ActionCable.server.broadcast("environment_#{@environment.id}", { event: "ingested", at: now.iso8601, counts: @counts })
+        ActionCable.server.broadcast("railwatch:environment:#{@environment.id}", { event: "ingested", at: now.iso8601, counts: @counts })
       rescue StandardError, LoadError => e
         # A live refresh ping is not worth failing a written batch over.
         # LoadError too: a host whose production cable adapter is redis with

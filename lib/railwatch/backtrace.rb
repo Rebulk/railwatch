@@ -145,9 +145,19 @@ module Railwatch
       url.start_with?("#{origin}/")
     end
 
+    MAX_SOURCE_BYTES = 1024 * 1024
+
     def source_snippet(path, line, context: 5)
-      return nil unless path && File.readable?(path)
-      lines = File.readlines(path, chomp: true)
+      return nil unless path
+      # String backtraces can be assigned by libraries. A lexical Rails.root
+      # prefix alone allows ../ and symlinks to disclose files outside it.
+      root = File.realpath(app_root) + File::SEPARATOR
+      source = File.realpath(path)
+      return nil unless source.start_with?(root) && File.file?(source)
+
+      data = File.binread(source, MAX_SOURCE_BYTES + 1)
+      return nil if data.bytesize > MAX_SOURCE_BYTES
+      lines = data.force_encoding(Encoding::UTF_8).scrub.lines(chomp: true)
       from = [ line - context - 1, 0 ].max
       to = [ line + context - 1, lines.size - 1 ].min
       (from..to).to_h { |i| [ i + 1, lines[i].to_s[0, 200] ] }

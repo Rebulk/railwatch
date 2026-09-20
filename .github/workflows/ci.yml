@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+# Jobs get no write access unless they explicitly request it (OIDC publishing).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,6 +21,9 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
+
+      - name: Audit Ruby dependencies
+        run: bundle exec bundler-audit check --update
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -68,6 +75,9 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit
 
       - name: Typecheck, lint, format, test
         run: pnpm check && pnpm lint && pnpm format && pnpm test
