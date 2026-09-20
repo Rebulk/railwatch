@@ -28,6 +28,108 @@ module Railwatch
     end
   end
 
+  # What the embedded telemetry database is costing on disk, and the one-time
+  # conversion that lets pruning give that cost back.
+  #
+  # Deleting rows does not shrink a SQLite file. The pages go on the freelist
+  # and are reused by later inserts, and the only way back to the filesystem
+  # is auto_vacuum=incremental plus PRAGMA incremental_vacuum -- which
+  # PruneTelemetryJob now runs after every prune. A database can only enter
+  # that mode while it is still empty (EnableIncrementalVacuum does that for
+  # every telemetry database created since it shipped) or through a full
+  # VACUUM, which is what this offers to an older one.
+  class TelemetryDisk
+    # Deliberately pessimistic, and said out loud as an estimate: VACUUM
+    # rewrites the whole file, and what that costs is the operator's disk,
+    # not ours to know.
+    VACUUM_BYTES_PER_SECOND = 50 * 1024 * 1024
+
+    # nil, having said why, for an install with no telemetry database to
+    # talk about.
+    def self.open
+      unless Railwatch.config.local?
+        puts "Railwatch reports over HTTP here (transport = :http), so this app has no telemetry database; nothing to vacuum."
+        return nil
+      end
+
+      environment = Railwatch::Environment.current
+      return new(environment) if environment.with_telemetry { Railwatch::TelemetryRecord.sqlite? }
+
+      puts "The railwatch_telemetry database is not SQLite; auto_vacuum does not apply."
+      nil
+    end
+
+    def initialize(environment)
+      @environment = environment
+    end
+
+    def report
+      with_telemetry do
+        <<~TEXT.chomp
+          Railwatch telemetry database
+            file    #{path}
+            size    #{human(file_bytes)}#{" + #{human(wal_bytes)} WAL" if wal_bytes.positive?}
+            mode    auto_vacuum=#{mode}
+            free    #{freelist} pages (#{human(freelist * page_size)}) on the freelist
+        TEXT
+      end
+    end
+
+    def advice
+      with_telemetry do
+        if mode != :incremental
+          "\nPruning cannot return space to the filesystem in this mode: every page it frees stays in this file.\n" \
+            "`bin/rails railwatch:vacuum` converts the database to incremental auto-vacuum with a full VACUUM. " \
+            "That rewrites all #{human(file_bytes)}, needs about that much free disk for the temporary copy, and " \
+            "holds the write lock for roughly #{estimate}. Telemetry written while it runs waits for it."
+        elsif freelist.positive?
+          "\nThe nightly prune returns up to #{human(Railwatch::PruneTelemetryJob::VACUUM_PAGES_PER_SLICE * Railwatch::PruneTelemetryJob::VACUUM_SLICES * page_size)} " \
+            "a night on its own. `bin/rails railwatch:vacuum` returns all #{human(freelist * page_size)} now."
+        else
+          "\nNothing on the freelist: pruning is already returning this database's space as it goes."
+        end
+      end
+    end
+
+    # The whole point of asking explicitly, so this one is not bounded the way
+    # the nightly prune is.
+    def reclaim!
+      with_telemetry do
+        before = file_bytes
+        if mode == :incremental
+          Railwatch::TelemetryRecord.incremental_vacuum
+        else
+          puts "\nConverting to incremental auto-vacuum (full VACUUM, roughly #{estimate})..."
+          connection.execute("PRAGMA auto_vacuum = incremental")
+          connection.execute("VACUUM")
+        end
+        connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        "\nauto_vacuum=#{mode}, #{human(file_bytes)} on disk (#{human(before - file_bytes)} returned), #{freelist} pages left on the freelist."
+      end
+    end
+
+    private
+      def with_telemetry(&) = @environment.with_telemetry(&)
+
+      def connection = Railwatch::TelemetryRecord.connection
+
+      def mode = Railwatch::TelemetryRecord.auto_vacuum_mode
+
+      def freelist = Railwatch::TelemetryRecord.freelist_pages
+
+      def page_size = Railwatch::TelemetryRecord.page_size
+
+      def path = Rails.root.join(Railwatch::TelemetryRecord.connection_db_config.database.to_s)
+
+      def file_bytes = File.exist?(path) ? File.size(path) : 0
+
+      def wal_bytes = File.exist?("#{path}-wal") ? File.size("#{path}-wal") : 0
+
+      def estimate = ActiveSupport::Duration.build([ (file_bytes / VACUUM_BYTES_PER_SECOND.to_f).ceil, 1 ].max).inspect
+
+      def human(bytes) = ActiveSupport::NumberHelper.number_to_human_size(bytes)
+  end
+
   # Where this install's platform lives, derived from config.ingest_url:
   # railwatch:token and railwatch:mcp point at the same host the gem already
   # ships to, so a self-hosted app never gets told to visit railwatch.rebulk.com.
@@ -295,6 +397,24 @@ namespace :railwatch do
 
     abort "\nrailwatch:doctor failed: #{blockers.join(', ')}" if blockers.any?
     puts "\nRailwatch is wired up."
+  end
+
+  # Disk. `railwatch:vacuum:status` only reads; `railwatch:vacuum` is the
+  # one-time conversion a database created before EnableIncrementalVacuum
+  # needs, and it is a rake task rather than anything automatic because it
+  # rewrites the whole file with the write lock held.
+  desc "Report the telemetry database's size, free pages, and whether pruning can return them to the filesystem"
+  task "vacuum:status" => :environment do
+    disk = Railwatch::TelemetryDisk.open or next
+    puts disk.report
+    puts disk.advice
+  end
+
+  desc "Reclaim disk from the telemetry database. Converts it to incremental auto-vacuum if needed -- a full VACUUM, which locks the file"
+  task vacuum: :environment do
+    disk = Railwatch::TelemetryDisk.open or next
+    puts disk.report
+    puts disk.reclaim!
   end
 
   namespace :export do

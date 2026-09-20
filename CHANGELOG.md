@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.5 (2026-09-20)
+
+- Make the embedded telemetry database give disk back. `PruneTelemetryJob`
+  deleted rows past `retention_days` and nothing ever vacuumed, so the freed
+  pages went on SQLite's freelist to be reused and never returned to the
+  filesystem: the file only ever grew. Measured on a copy of a real production
+  database of the same shape (bulk deletes, continuous inserts), deleting
+  40,148 rows left the file at 21M with 5,164 pages on the freelist; a single
+  `PRAGMA incremental_vacuum` took it to 44K.
+
+  Two halves, and neither is worth anything alone. A new telemetry migration,
+  `EnableIncrementalVacuum`, puts the database into `auto_vacuum=incremental`;
+  and the nightly prune now runs `PRAGMA incremental_vacuum` after its deletes,
+  bounded to 2,000 pages a slice and 25 slices (~200MB at SQLite's 4K default)
+  so a backlog drains over successive nights instead of stalling one.
+
+  The mode cannot be declared in `config/database.yml`: Rails applies its own
+  `DEFAULT_PRAGMAS` before any you declare, and `journal_mode = wal` writes the
+  file header, so by the time `auto_vacuum` runs the database is no longer new
+  and SQLite accepts the statement and ignores it. The migration is numbered
+  below `CreateTelemetry` for the same reason -- it has to run while the file
+  still holds nothing.
+
+- Add `bin/rails railwatch:vacuum:status` and `bin/rails railwatch:vacuum`.
+  An **existing** install cannot change mode without a full `VACUUM`, which
+  rewrites the whole file with the write lock held, so nothing does that on its
+  own: the migration leaves an existing database exactly as it found it.
+  `railwatch:vacuum:status` reports the file, its size, its mode and its
+  freelist and changes nothing; `railwatch:vacuum` says what the conversion
+  will cost and then does it. Installs created from this version on need
+  neither.
+
 ## 0.3.4 (2026-09-20)
 
 - Fix the embedded dashboard offering its install steps to an install that is

@@ -13,7 +13,8 @@ RSpec.describe "railwatch rake tasks" do
   # generator's own specs invoke railwatch:doctor in-process and, depending on
   # seed order, can run first -- leaving the task already-invoked and the
   # first doctor example here capturing nothing at all.
-  TASKS = %w[railwatch:status railwatch:deploy railwatch:doctor railwatch:token railwatch:mcp].freeze
+  TASKS = %w[railwatch:status railwatch:deploy railwatch:doctor railwatch:token railwatch:mcp
+             railwatch:vacuum:status].freeze
 
   before { TASKS.each { |name| Rake::Task[name].reenable } }
   after { TASKS.each { |name| Rake::Task[name].reenable } }
@@ -367,6 +368,39 @@ RSpec.describe "railwatch rake tasks" do
       expect(aborted).to be(false)
     ensure
       Railwatch.config.deploy = old_deploy
+    end
+  end
+
+  describe "railwatch:vacuum:status" do
+    it "says there is nothing to vacuum when this app reports to the platform over HTTP" do
+      expect(capture_task("railwatch:vacuum:status")).to include("no telemetry database")
+    end
+
+    context "embedded" do
+      around do |example|
+        Railwatch.config.transport = :local
+        example.run
+      ensure
+        Railwatch.config.transport = :http
+      end
+
+      it "reports the file, its mode and its freelist, and vacuums nothing" do
+        # The reclaim goes through the raw connection, so watching `execute`
+        # alone would not see it; both routes are watched.
+        statements = []
+        allow(Railwatch::TelemetryRecord.connection).to receive(:execute).and_wrap_original do |original, sql, *rest|
+          statements << sql.to_s
+          original.call(sql, *rest)
+        end
+        expect(Railwatch::TelemetryRecord).not_to receive(:incremental_vacuum)
+
+        output = capture_task("railwatch:vacuum:status")
+
+        expect(output).to include(Railwatch::TelemetryRecord.connection_db_config.database)
+        expect(output).to include("auto_vacuum=#{Railwatch::TelemetryRecord.auto_vacuum_mode}")
+        expect(output).to include("#{Railwatch::TelemetryRecord.freelist_pages} pages")
+        expect(statements.grep(/VACUUM/i)).to be_empty
+      end
     end
   end
 

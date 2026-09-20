@@ -20,6 +20,21 @@ module Railwatch
     # writer that long hold would look like a wedge and end the process.
     MAX_BATCHES_PER_TABLE = 40
 
+    # Reclaim, bounded the same way the deletes are. Deleting rows only moves
+    # their pages to the freelist; PRAGMA incremental_vacuum is what hands
+    # them back to the filesystem, and it is only possible at all on a
+    # database in auto_vacuum=incremental (EnableIncrementalVacuum, or
+    # `bin/rails railwatch:vacuum` for a database that predates it).
+    # Measured at 80k-190k pages/s warm, so a full run is well under a second
+    # there; the slicing is for the cold, large file, where each slice takes
+    # and releases the write lock instead of holding it throughout.
+    VACUUM_PAGES_PER_SLICE = 2_000
+    # 50k pages, ~200MB at SQLite's 4KB default. A few thousand pages a night
+    # would never keep up with a night's deletes on a busy app, and the file
+    # would go on growing with the freelist; a backlog past this one still
+    # drains over successive nightly runs.
+    VACUUM_SLICES = 25
+
     RAW = [ Telemetry::Execution, Telemetry::Query, Telemetry::Exception, Telemetry::CacheEvent, Telemetry::Mail,
             Telemetry::Broadcast, Telemetry::Notification, Telemetry::OutgoingRequest, Telemetry::StorageOp,
             Telemetry::ViewRender, Telemetry::Log, Telemetry::EnqueuedJob, Telemetry::Transaction,
@@ -50,7 +65,11 @@ module Railwatch
         Telemetry::IngestBatch.where(received_at: ...cutoff).delete_all
         Telemetry::Process.where(booted_at: ...cutoff).delete_all
         Telemetry::HealthSample.where(sampled_at: ...cutoff).delete_all
-        TelemetryRecord.connection.execute("PRAGMA wal_checkpoint(#{checkpoint})") if TelemetryRecord.connection.adapter_name =~ /sqlite/i
+        # Before the checkpoint, not after: incremental_vacuum truncates the
+        # database file, and in WAL mode that truncation only reaches the file
+        # on disk once it is checkpointed.
+        TelemetryRecord.reclaim_freelist!(slice: VACUUM_PAGES_PER_SLICE, slices: VACUUM_SLICES)
+        TelemetryRecord.connection.execute("PRAGMA wal_checkpoint(#{checkpoint})") if TelemetryRecord.sqlite?
       end
     end
 
