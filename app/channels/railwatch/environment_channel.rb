@@ -34,6 +34,16 @@ module Railwatch
     # on "Disconnected" retrying forever. `env` is public and carries
     # everything a gate reads -- the Authorization header for HTTP Basic, the
     # cookies a dashboard_user resolver looks at.
-    def connection_request = ActionDispatch::Request.new(connection.env)
+    #
+    # Merging env_config first is what makes those cookies readable: it is
+    # where the key generator, the secret and the cookie serializer live, so
+    # without it `cookie_jar.signed` finds nothing and a resolver that
+    # authenticates by signed cookie refuses a subscriber it should admit.
+    # Same construction Connection#request itself uses.
+    def connection_request
+      env = connection.env
+      env = Rails.application.env_config.merge(env) if defined?(Rails.application) && Rails.application
+      ActionDispatch::Request.new(env)
+    end
   end
 end

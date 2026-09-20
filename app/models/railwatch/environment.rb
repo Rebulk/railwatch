@@ -38,8 +38,12 @@ module Railwatch
     # dashboard treats as "no events yet", so it showed its install steps no
     # matter how much had been recorded. The newest batch row is the same
     # fact, in the file both processes already share, one indexed lookup away.
+    # Ordered by received_at, not id: batches are written concurrently, so one
+    # that captured an earlier receipt time can land after a later one, and
+    # taking the newest row by insertion order would hand the dashboard a
+    # timestamp that goes backwards. `recent` is the scope that states this.
     def last_seen_at
-      with_telemetry { Telemetry::IngestBatch.order(id: :desc).limit(1).pick(:received_at) }
+      with_telemetry { Telemetry::IngestBatch.recent.pick(:received_at) }
     end
     def application = Application.current
     def issues = Issue.where(environment_id: ID)
