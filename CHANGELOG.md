@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.3 (2026-09-19)
+
+- Fix `railwatch:install --local` writing test databases that parallel test
+  runners cannot share. The generated `test` entries named
+  `storage/test_railwatch*.sqlite3` with no `TEST_ENV_NUMBER`, so every worker
+  in a parallel run opened the same two SQLite files and raced through them:
+  `ActiveRecord::PendingMigrationError` and `SQLite3::IOException: disk I/O
+  error` out of `configure_connection`, on every shard. Rails' own test
+  database naming carries the number for this reason, and the generated names
+  now do too. An app with no parallel runner sets no `TEST_ENV_NUMBER`, so its
+  generated file is unchanged and no existing install needs migrating.
+
 ## 0.3.2 (2026-09-19)
 
 - Fix an embedded install's rake tasks reporting over HTTP instead of into
