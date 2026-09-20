@@ -481,19 +481,9 @@ module Railwatch
                         dropped_bytes: batch.dropped_bytes + dropped_bytes, prepared: true)
     end
 
-    # Third-party/test transports written before batch idempotency only accept
-    # `dropped:`. Keep those working while the HTTP transport receives the
-    # stable identity required to replay a request safely.
     def deliver(batch)
-      parameters = @transport.method(:deliver).parameters
-      accepts_batch_id = parameters.any? { |kind, name| kind == :keyrest || name == :batch_id }
-      accepts_dropped_bytes = parameters.any? { |kind, name| kind == :keyrest || name == :dropped_bytes }
-      accepts_backpressure = parameters.any? { |kind, name| kind == :keyrest || name == :backpressure_factor }
-      keywords = { dropped: batch.dropped }
-      keywords[:batch_id] = batch.id if accepts_batch_id
-      keywords[:dropped_bytes] = batch.dropped_bytes if accepts_dropped_bytes
-      keywords[:backpressure_factor] = @backpressure_factor if accepts_backpressure
-      @transport.deliver(batch.records, **keywords)
+      @transport.deliver(batch.records, dropped: batch.dropped, batch_id: batch.id,
+                         dropped_bytes: batch.dropped_bytes, backpressure_factor: @backpressure_factor)
     end
 
     def update_backpressure
