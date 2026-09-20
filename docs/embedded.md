@@ -322,7 +322,7 @@ The work that keeps the dashboard current happens in two places:
 | anomaly scan | every 5 minutes | Anomaly rules, when any are enabled |
 | scheduled tasks | every 10 minutes | Missed and late scheduled tasks |
 | auto-resolve | daily | Resolves issues quiet for 14 days |
-| prune | daily | Deletes telemetry older than `retention_days`, then `ANALYZE` |
+| prune | daily | Deletes telemetry older than `retention_days`, returns the freed pages to the filesystem when incremental auto-vacuum is on (see below), then `ANALYZE` |
 
 Because the clock lives in the web process, it keeps running when the
 job worker is down, which is exactly when "scheduled task X missed its
@@ -374,6 +374,52 @@ telemetry database grows with traffic and sampling and is pruned to
 `retention_days`; the `railwatch` database stays small. Both are plain
 SQLite files in `storage/`, so Litestream or a volume snapshot covers
 them.
+
+### Giving the disk back
+
+Deleting rows does not shrink a SQLite file on its own. The pages go on
+the database's freelist, where later inserts reuse them, and the file
+stays whatever size it reached. So pruning alone keeps the *contents*
+bounded and lets the *file* grow forever.
+
+Railwatch creates its telemetry database in SQLite's
+`auto_vacuum=incremental` mode, and the nightly prune runs `PRAGMA
+incremental_vacuum` after its deletes, which hands those pages back to
+the filesystem. It is bounded -- 2,000 pages a slice, 25 slices, about
+200MB a night at SQLite's 4K default page size -- so a large backlog
+drains over successive nights rather than holding the write lock through
+one enormous reclaim. Nothing to configure.
+
+```
+$ bin/rails railwatch:vacuum:status
+Railwatch telemetry database
+  file    /rails/storage/production_railwatch_telemetry.sqlite3
+  size    1.42 GB
+  mode    auto_vacuum=incremental
+  free    312 pages (1.22 MB) on the freelist
+
+The nightly prune returns up to 195 MB a night on its own.
+`bin/rails railwatch:vacuum` returns all 1.22 MB now.
+```
+
+**Installs created before 0.3.5 report `auto_vacuum=none`, and pruning
+cannot return their space.** SQLite can only set the mode on a database
+that is still empty; on one that has data the only route is a full
+`VACUUM`, which rewrites the entire file with the write lock held.
+Railwatch will not do that to a running application behind your back, so
+upgrading leaves the mode alone and the conversion is a task you run
+when you can spare the lock:
+
+```
+$ bin/rails railwatch:vacuum
+```
+
+It prints the file, its size and its freelist first, then says how long
+the `VACUUM` should take and that it needs about the file's own size in
+free disk for the temporary copy. Telemetry written while it runs waits
+for it and the dashboard is frozen for the duration, so pick a quiet
+moment. Once converted, the nightly prune keeps up on its own and you
+never need to run it again.
 
 ## Switching to the cloud later
 
