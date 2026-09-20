@@ -101,7 +101,7 @@ RSpec.describe Railwatch::Middleware::Request do
     ingest_env = env_for("https://railwatch.test/ingest", method: "POST",
                          headers: { "HTTP_AUTHORIZATION" => "Bearer #{Railwatch.config.token}" })
     transport = Object.new
-    transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+    transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
       deliveries += 1
       receiver.call(ingest_env.dup)
       Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: 1, rejected: 0)

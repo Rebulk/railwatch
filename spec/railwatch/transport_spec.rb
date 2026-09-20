@@ -348,7 +348,7 @@ RSpec.describe Railwatch::Reporter do
         @io = io
       end
 
-      def deliver(records, dropped: 0)
+      def deliver(records, dropped: 0, **)
         @io.puts(JSON.generate(pid: Process.pid, records: records, dropped: dropped))
         @io.flush
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
@@ -399,7 +399,7 @@ RSpec.describe Railwatch::Reporter do
     it "passes the buffer's dropped count through to the transport" do
       captured_dropped = nil
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         captured_dropped = dropped
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
       end
@@ -417,7 +417,7 @@ RSpec.describe Railwatch::Reporter do
     it "passes its current backpressure factor through to supporting transports" do
       captured_factor = nil
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, backpressure_factor:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, backpressure_factor:, **|
         captured_factor = backpressure_factor
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -437,7 +437,7 @@ RSpec.describe Railwatch::Reporter do
         delivery_result(ok: true, status: 200, accepted: 1)
       ]
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:, **|
         attempts << [ records.dup, dropped, batch_id ]
         outcomes.shift
       end
@@ -460,7 +460,7 @@ RSpec.describe Railwatch::Reporter do
       failure = delivery_result(ok: false, error: "Net::OpenTimeout")
       success = delivery_result(ok: true, status: 200, accepted: 1)
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:, **|
         attempts << [ records.map { |r| r[:n] }, dropped ]
         records.first[:n] == 0 ? failure : success
       end
@@ -482,7 +482,7 @@ RSpec.describe Railwatch::Reporter do
     it "uses a new batch id for each distinct batch formed from the buffer" do
       batch_ids = []
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:, **|
         batch_ids << batch_id
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -498,17 +498,6 @@ RSpec.describe Railwatch::Reporter do
       expect(batch_ids).to all(match(/\A[0-9a-f-]{36}\z/))
     end
 
-    it "keeps legacy custom transports that do not accept batch_id working" do
-      transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
-        Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
-      end
-      reporter = described_class.new(reporter_config, transport: transport)
-      reporter.buffer.push({ n: 1 })
-
-      expect(reporter.flush.ok).to be(true)
-    end
-
     it "preserves the prior dropped count across a failed delivery" do
       seen_dropped = []
       outcomes = [
@@ -516,7 +505,7 @@ RSpec.describe Railwatch::Reporter do
         delivery_result(ok: true, status: 200, accepted: 3)
       ]
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
         seen_dropped << dropped
         outcomes.shift
       end
@@ -534,7 +523,7 @@ RSpec.describe Railwatch::Reporter do
       one = Railwatch::Record.buffered_bytes(record, limit: Float::INFINITY)
       deliveries = []
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:, **|
         deliveries << [ records.size, dropped, batch_id ]
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -557,7 +546,7 @@ RSpec.describe Railwatch::Reporter do
       attempts = []
       reporter = nil
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, batch_id:, **|
         attempts << [ records.dup, batch_id ]
         if attempts.one?
           reporter.buffer.push({ n: 3 })
@@ -586,7 +575,7 @@ RSpec.describe Railwatch::Reporter do
       Railwatch.on_unrecoverable { |error| seen_errors << error }
       [ 401, 422 ].each do |status|
         transport = Object.new
-        transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+        transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
           Railwatch::Transport::Http::Result.new(ok: false, status: status, error: "invalid payload")
         end
         reporter = described_class.new(reporter_config, transport: transport)
@@ -615,7 +604,7 @@ RSpec.describe Railwatch::Reporter do
         delivery_result(ok: true, status: 200, accepted: 1, rejected: 0)
       ]
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
         seen_dropped << dropped
         outcomes.shift
       end
@@ -653,7 +642,7 @@ RSpec.describe Railwatch::Reporter do
       calls = 0
       lock = Mutex.new
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
         lock.synchronize { calls += 1 }
         Railwatch::Transport::Http::Result.new(ok: false, status: 503)
       end
@@ -676,7 +665,7 @@ RSpec.describe Railwatch::Reporter do
       started = Queue.new
       release = Queue.new
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         started << true
         release.pop
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
@@ -702,7 +691,7 @@ RSpec.describe Railwatch::Reporter do
       # must instead go out as full batches once the window closes.
       deliveries = Queue.new
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         deliveries << records.size
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -723,7 +712,7 @@ RSpec.describe Railwatch::Reporter do
     it "still ships a lone urgent write within the urgent window, not the flush interval" do
       delivered_at = Queue.new
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         delivered_at << Process.clock_gettime(Process::CLOCK_MONOTONIC)
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -743,7 +732,7 @@ RSpec.describe Railwatch::Reporter do
     it "flushes an urgent write at once when it fills the buffer to flush_threshold" do
       delivered_at = Queue.new
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         delivered_at << Process.clock_gettime(Process::CLOCK_MONOTONIC)
         Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
       end
@@ -765,7 +754,7 @@ RSpec.describe Railwatch::Reporter do
       reporter = nil
       calls = 0
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         calls += 1
         batches << records
         reporter.write({ n: 2 }) if calls == 1
@@ -790,7 +779,7 @@ RSpec.describe Railwatch::Reporter do
       available = false
       calls = 0
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
         calls += 1
         if available
           Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
@@ -813,7 +802,7 @@ RSpec.describe Railwatch::Reporter do
       seen_errors = []
       Railwatch.on_unrecoverable { |error| seen_errors << error }
       transport = Object.new
-      transport.define_singleton_method(:deliver) do |_records, dropped: 0|
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
         Railwatch::Transport::Http::Result.new(ok: false, status: 503, error: "unavailable")
       end
       config = reporter_config
@@ -993,7 +982,7 @@ RSpec.describe Railwatch::Reporter do
       pid = Process.fork do
         reader.close
         transport = Object.new
-        transport.define_singleton_method(:deliver) do |records, dropped: 0|
+        transport.define_singleton_method(:deliver) do |records, dropped: 0, **|
           writer.puts("delivered:#{records.size}")
           Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size, rejected: 0)
         end

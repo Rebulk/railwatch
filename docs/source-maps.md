@@ -48,9 +48,7 @@ New default browser issue fingerprints use the resolved original location
 when a map is already available. Custom fingerprints are preserved. Late
 uploads improve existing stack displays, Copy for AI, API issue details and
 MCP `get_issue`, while existing occurrences keep their original grouping.
-Missing maps or columns fall back to the raw stack. Upgrade the gem for
-new browser occurrences to include columns; older gem versions discarded
-them and cannot resolve minified locations accurately.
+Missing maps or columns fall back to the raw stack.
 
 For a custom release uploader, POST the raw `.map` bytes to
 `/ingest/sourcemaps` with `Content-Type: application/octet-stream`,

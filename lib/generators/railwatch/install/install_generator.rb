@@ -13,8 +13,6 @@ module Railwatch
 
       class_option :local, type: :boolean, default: false,
                            desc: "Keep telemetry in this app and serve the dashboard at /railwatch: no token, no cloud."
-      class_option :token, type: :string,
-                           desc: "Deprecated: token in process arguments. Prefer --prompt-token, --token-stdin, or RAILWATCH_TOKEN."
       class_option :prompt_token, type: :boolean, default: false,
                                   desc: "Prompt for the ingest token without echoing it."
       class_option :token_stdin, type: :boolean, default: false,
@@ -167,10 +165,6 @@ module Railwatch
         return if options[:local]
 
         token = resolved_token
-        if options[:token]
-          say("--token exposes #{Railwatch::SecretSafety.token_preview(options[:token])} in process arguments; " \
-              "use --prompt-token or --token-stdin next time.", :yellow)
-        end
         vars = { TOKEN_VAR => token, URL_VAR => options[:url] }.compact
         return if vars.empty?
         return say(env_instructions(vars), :yellow) unless dotenv_app?
@@ -463,8 +457,6 @@ module Railwatch
             ask("Railwatch ingest token (input hidden):", echo: false)
           elsif options[:token_stdin]
             $stdin.gets
-          elsif options[:token]
-            options[:token]
           elsif !ENV[TOKEN_VAR].to_s.empty?
             ENV[TOKEN_VAR]
           end

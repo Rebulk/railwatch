@@ -417,9 +417,7 @@ module Railwatch
         [ Telemetry::Process, {
           booted_at: timestamp_string(rec["timestamp"]), pid: rec["pid"], role: rec["role"], server: rec["server"],
           deploy: rec["deploy"], ruby_version: rec["ruby_version"], rails_version: rec["rails_version"],
-          # Gems older than 0.1.3 send lantern_version; processes recorded
-          # by one are still readable.
-          railwatch_version: rec["railwatch_version"] || rec["lantern_version"], boot_seconds: rec["boot_seconds"],
+          railwatch_version: rec["railwatch_version"], boot_seconds: rec["boot_seconds"],
           detail: rec.slice("app", "environment", "database_adapter", "queue_adapter", "cache_store")
         } ]
       end

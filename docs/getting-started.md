@@ -36,8 +36,6 @@ bin/rails generate railwatch:install \
 
 - `--prompt-token` reads without echo. `--token-stdin` is available for a
   secret-manager pipe; an already exported `RAILWATCH_TOKEN` is also detected.
-  The legacy `--token=` flag warns because command arguments can be visible in
-  shell history and process listings.
 - A token is written to `.env` only when Git confirms that `.env` is ignored.
   A tracked or non-ignored dotenv file is refused; use Rails credentials, a
   deployment secret manager, or add `.env` to `.gitignore` first. Token values

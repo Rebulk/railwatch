@@ -203,11 +203,15 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     end
   end
 
-  describe "--token / --url" do
+  describe "token input / --url" do
     def env_file = File.join(destination_root, ".env")
 
     def install(*extra)
-      Dir.chdir(destination_root) { run_generator(%w[--no-doctor --token=rw_abc123 --url=https://railwatch.example.com] + extra) }
+      previous_token = ENV["RAILWATCH_TOKEN"]
+      ENV["RAILWATCH_TOKEN"] = "rw_abc123"
+      Dir.chdir(destination_root) { run_generator(%w[--no-doctor --url=https://railwatch.example.com] + extra) }
+    ensure
+      previous_token.nil? ? ENV.delete("RAILWATCH_TOKEN") : ENV["RAILWATCH_TOKEN"] = previous_token
     end
 
     it "appends both variables to an existing .env, leaving what was there alone" do
@@ -282,13 +286,6 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_from_environment\n")
     ensure
       previous_token.nil? ? ENV.delete("RAILWATCH_TOKEN") : ENV["RAILWATCH_TOKEN"] = previous_token
-    end
-
-    it "warns about the legacy command-line token without printing it" do
-      output = install
-
-      expect(output).to include("--token exposes rw_abc... (9 chars) in process arguments")
-      expect(output).not_to include("--token exposes rw_abc123")
     end
 
     it "refuses a token when .env is tracked, while still writing the non-secret URL" do
