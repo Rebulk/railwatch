@@ -278,6 +278,14 @@ module Railwatch
       @counters[counter] += by
     end
 
+    # The counters that actually fired. Most executions touch a handful of the
+    # 18, so sending the rest as explicit zeros costs roughly 240 bytes on the
+    # wire and in storage, per execution, to say nothing happened. A reader
+    # treats an absent counter as zero, exactly as it treats a zero.
+    def counted
+      @counters.reject { |_, value| value.zero? }
+    end
+
     # Rails.error and an outer middleware can observe the same error. Count
     # that occurrence once even when sampling or pause prevents its report.
     # Reporting has separate flags so a suppressed observation can still be

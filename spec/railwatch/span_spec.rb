@@ -45,7 +45,9 @@ RSpec.describe "Railwatch.span" do
 
     expect(in_execution { Railwatch.span("pdf.render") { 42 } }).to eq(42)
     expect(railwatch_records(:span)).to be_empty
-    expect(railwatch_records(:command).sole[:counters][:spans]).to eq(0)
+    # A counter that never fired is absent rather than zero; either way the
+    # fact under test is that no span was counted.
+    expect(railwatch_records(:command).sole[:counters]).not_to include(:spans)
   ensure
     Railwatch.config.enabled = true
   end

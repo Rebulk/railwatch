@@ -239,7 +239,7 @@ module Railwatch
     def build_parent(type, exe, group: nil, **fields)
       rec = Record.build(type, exe, group: group, timestamp: exe.started_at,
                          duration: exe.duration, stages: exe.stage_durations.compact.transform_keys(&:to_s),
-                         counters: exe.counters, peak_memory: exe.peak_memory, allocations: exe.allocations,
+                         counters: exe.counted, peak_memory: exe.peak_memory, allocations: exe.allocations,
                          gc_time: exe.gc_time, exception_preview: exe.exception_preview,
                          context: Context.serialized, **fields)
       run_redactors(type, rec)
