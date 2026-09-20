@@ -217,7 +217,7 @@ already appear on its own ingest batch. Those are visible under
 On shutdown, `at_exit` gives the thread `c.shutdown_timeout` (2 seconds) to
 attempt retained records immediately and retry within the remaining time.
 If the deadline expires, the records stay retained and their count is sent
-to `Railwatch.on_unrecoverable` (or stderr under `RAILWATCH_DEBUG=1`). This is an
+to `Railwatch.on_unrecoverable` (or, with no callback, one line on stderr). This is an
 in-memory buffer, not an on-disk spool: a hard kill, or exiting after that
 deadline, cannot carry those records into the next process. Railwatch never
 uses `Rails.logger` for its own failures, which would turn them into `log`

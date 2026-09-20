@@ -76,5 +76,11 @@ RSpec.describe "a cloud-only command process exiting" do
     # what makes an entrypoint that boots Rails repeatedly survivable.
     bound = Railwatch.config.shutdown_timeout + 3.0
     expect(exiting).to be < bound
+
+    # Leaving inside the bound means leaving records behind, and since this
+    # shutdown is the only delivery a rake task gets, that must be said out
+    # loud. The fixture does not set RAILWATCH_DEBUG or register a callback,
+    # so this is what a default install's cron output shows.
+    expect(output).to include("[railwatch] Railwatch shutdown timed out with", "unsent records retained in memory")
   end
 end

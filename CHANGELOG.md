@@ -6,6 +6,45 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Say so when records are lost. `Railwatch.on_unrecoverable` fell back to
+  the debug log, so with no callback registered and `RAILWATCH_DEBUG` unset
+  a batch dropped after its retry ladder, one the receiver permanently
+  refused, or the records still unsent when `at_exit`'s bounded shutdown
+  ran out of time all vanished without a word. Since 0.3.7 that shutdown is
+  the only delivery a rake task or `rails runner` gets, so a cron job whose
+  exception never reached the platform looked exactly like one that had
+  nothing to report. Confirmed against a receiver that accepts and never
+  answers: the process left inside `shutdown_timeout` carrying three unsent
+  records and printed nothing.
+
+  A `Reporter::DeliveryError` -- raised only once records are already gone
+  -- now goes to stderr as one `[railwatch]` line whether or not debug is
+  on. Registering `on_unrecoverable` replaces the line, which is how an app
+  routes it (`Rails.error.report`) or silences it. Recovered internal errors
+  (a subscriber that raised, a flush that failed and will be retried) stay
+  debug-only: the gem carried on and there is nothing for an operator to do.
+
+- Report a given-up batch after releasing the reporter lock, not under it.
+  `Reporter#retain` called `on_unrecoverable` inside `@mutex.synchronize`.
+  The documented callback is `Rails.error.report`, whose subscriber records
+  the error as an exception -- a write back into the same reporter, which
+  takes `@mutex` to arm its thread or request a flush. That was
+  `ThreadError: deadlock; recursive locking`, rescued and hidden by
+  `notify_unrecoverable`, so the callback died halfway and the loss it was
+  reporting was never seen. A callback that merely blocked held every
+  request thread's `write_now` and `shutdown` itself behind it for the
+  duration. `notify_unsent` and `delivery_rejected` already called out
+  unlocked; this was the one that did not.
+
+- Investigated and left alone: `Reporter#shutdown` after `thread.join`.
+  The bookkeeping that follows the join (`pending_delivery`, the
+  once-only notify latch) takes `@mutex` for microseconds and never does
+  I/O -- measured 0.2ms over `shutdown_timeout` against a transport wedged
+  forever. The only thing that can extend it is the operator's own
+  callback, which runs once and is theirs to bound, as any `at_exit`
+  handler is. Wrapping it in `Timeout` would trade a visible cost for a
+  killed thread.
+
 ## 0.5.1 (2026-09-21)
 
 Three small seams for a host that runs these models on its own routes and

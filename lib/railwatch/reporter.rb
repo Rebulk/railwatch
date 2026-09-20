@@ -350,7 +350,7 @@ module Railwatch
     end
 
     def retain(batch, result)
-      @mutex.synchronize do
+      gave_up = @mutex.synchronize do
         @in_flight_records = 0
         @in_flight_dropped = 0
         @in_flight_bytes = 0
@@ -362,17 +362,7 @@ module Railwatch
           @retry_attempt = 0
           @retry_at = nil
           Railwatch.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
-          # Losing a batch is not a debug-level event: with an ingest (or an
-          # embedded writer) that never comes back this is the only place the
-          # loss is ever reported, and the dropped counter it leaves behind
-          # rides on the NEXT successful delivery, which may never happen.
-          Railwatch.notify_unrecoverable(
-            DeliveryError.new("Railwatch dropped #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} failed delivery attempts: " \
-                              "#{result.error || result.status}",
-                              status: result.status, records: batch.records.size, bytes: batch.bytes,
-                              dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
-          )
-          next
+          next true
         end
         @retry_batch = batch
         delay = retry_delay(@retry_attempt)
@@ -382,7 +372,31 @@ module Railwatch
           "retained #{batch.records.size} records after retryable delivery failure " \
             "(#{result.error || result.status}); retry #{@retry_attempt} in #{delay.round(3)}s"
         end
+        false
       end
+      return unless gave_up
+
+      # Losing a batch is not a debug-level event: with an ingest (or an
+      # embedded writer) that never comes back this is the only place the
+      # loss is ever reported, and the dropped counter it leaves behind
+      # rides on the NEXT successful delivery, which may never happen.
+      #
+      # Reported here, after the lock is released, never inside it. The
+      # callback is the app's: the documented one is Rails.error.report,
+      # whose subscriber records the error as an exception and so writes
+      # straight back into this reporter -- which needs @mutex to arm the
+      # thread or ask for a flush, and under the lock that was
+      # "ThreadError: deadlock; recursive locking" and a callback cut off
+      # halfway. A slow callback under the lock was worse: shutdown's own
+      # @mutex.synchronize and every request thread's write_now sat behind
+      # it for as long as it took. notify_unsent and delivery_rejected
+      # already call out unlocked; this was the one that did not.
+      Railwatch.notify_unrecoverable(
+        DeliveryError.new("Railwatch dropped #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} failed delivery attempts: " \
+                          "#{result.error || result.status}",
+                          status: result.status, records: batch.records.size, bytes: batch.bytes,
+                          dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
+      )
     end
 
     def discard_unauthorized

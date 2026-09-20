@@ -343,10 +343,25 @@ module Railwatch
 
     # Called (rescued) whenever the gem itself rescues an internal exception:
     # a subscriber block raising, or delivery failing after its retry.
-    # Falls back to the debug log when no callback is registered.
+    #
+    # With no callback registered, an internal error goes to the debug log:
+    # the gem recovered, and a subscriber that raises once is noise in
+    # someone else's cron output. A DeliveryError is different. It is raised
+    # only when records are already gone -- a batch dropped after the retry
+    # ladder, one the receiver permanently refused, or the ones still unsent
+    # when at_exit's bounded shutdown ran out of time -- and since 0.3.7 that
+    # shutdown is the only delivery a rake task or runner gets. Behind
+    # RAILWATCH_DEBUG that loss was invisible: a cron job whose exception
+    # never reached the platform looked exactly like one that had nothing to
+    # say. So it goes to stderr, one line, unconditionally. Registering
+    # on_unrecoverable replaces the line, which is how an app routes (or
+    # silences) it. Kernel#warn, not Rails.logger, for the same reason as
+    # #debug: it must never become a log record about itself.
     def notify_unrecoverable(error)
       if config.on_unrecoverable
         config.on_unrecoverable.call(error)
+      elsif error.is_a?(Reporter::DeliveryError)
+        warn("[railwatch] #{error.message}. Register Railwatch.on_unrecoverable to route this elsewhere.")
       else
         debug { "unrecoverable internal error: #{error.class}: #{error.message}" }
       end

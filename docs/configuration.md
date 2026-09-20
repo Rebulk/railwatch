@@ -827,10 +827,14 @@ Railwatch.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 Called whenever Railwatch rescues one of its own internal errors, ingest
 permanently rejects a batch, or shutdown expires with retained records
 that could not be sent. Retryable delivery failures stay buffered and do
-not fire the callback on every attempt. With no callback registered, this
-falls back to `Railwatch.debug`. That goes to stderr, gated on
-`RAILWATCH_DEBUG`, never `Rails.logger`, so gem-internal failures can
-never themselves become `log` records.
+not fire the callback on every attempt. With no callback registered, a
+recovered internal error falls back to `Railwatch.debug`, gated on
+`RAILWATCH_DEBUG`; lost records (a batch dropped after its retries,
+permanently rejected, or still unsent when shutdown ran out of time) are
+one `[railwatch]` line on stderr regardless, since a short-lived process
+gets no other chance to say so. Either way it is stderr, never
+`Rails.logger`, so gem-internal failures can never themselves become `log`
+records.
 
 ## Faraday
 
