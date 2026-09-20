@@ -25,14 +25,20 @@ RSpec.describe "a cloud-only command process exiting" do
   # would not exercise the timeout this guards at all.
   def with_hung_receiver
     server = TCPServer.new("127.0.0.1", 0)
+    # Held, not dropped. An accepted socket that goes out of scope can be
+    # collected, and collecting it closes the descriptor -- the client would
+    # then read EOF straight away instead of waiting, and this would pass
+    # without ever having exercised a hung receiver.
+    accepted = []
     accepter = Thread.new do
-      loop { server.accept }
+      loop { accepted << server.accept }
     rescue StandardError
       nil
     end
     yield server.addr[1]
   ensure
     accepter&.kill
+    accepted&.each { |socket| socket.close rescue nil }
     server&.close
   end
 

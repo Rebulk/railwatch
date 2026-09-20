@@ -37,13 +37,20 @@ Rake::Task.define_task(rake_exit_probe: :environment) do
 end
 
 started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+# Registered BEFORE the task runs, and that ordering is the whole point:
+# invoking the task boots Rails, which registers the engine's own at_exit for
+# Reporter#shutdown. at_exit runs last-registered-first, so a handler added
+# after the task would run BEFORE the shutdown it is trying to measure and
+# would report a bound that nothing had waited for yet. Registering first
+# means this runs last, with the shutdown already paid for.
+at_exit { warn "PROCESS_EXITING_AFTER=#{Process.clock_gettime(Process::CLOCK_MONOTONIC) - started}" }
+
 begin
   Rake::Task["rake_exit_probe"].invoke
 rescue ArgumentError
   # The point is what the task's failure costs on the way out, not the failure.
 end
-# Printed before at_exit runs, so the spec can tell the task's own cost apart
-# from the bounded shutdown that follows it.
+# Printed before any at_exit runs, so the spec can tell the task's own cost
+# apart from the bounded shutdown that follows it.
 warn "TASK_RETURNED_AFTER=#{Process.clock_gettime(Process::CLOCK_MONOTONIC) - started}"
-
-at_exit { warn "PROCESS_EXITING_AFTER=#{Process.clock_gettime(Process::CLOCK_MONOTONIC) - started}" }
