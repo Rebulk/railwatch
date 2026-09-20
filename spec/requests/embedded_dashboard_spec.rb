@@ -261,12 +261,17 @@ RSpec.describe "embedded dashboard", type: :request do
       expect(config.dashboard_channel_allowed?(request.call)).to be(true)
 
       config.dashboard_open = false
+      config.base_controller_class = "AdminController"
+      expect(config.dashboard_channel_allowed?(request.call)).to be(false)
+      config.dashboard_user = ->(_req) { false }
+      expect(config.dashboard_channel_allowed?(request.call)).to be(false)
       config.dashboard_user = ->(req) { req.headers["X-Operator"] && { id: 1, name: "Ada" } }
       expect(config.dashboard_channel_allowed?(request.call)).to be(false)
       expect(config.dashboard_channel_allowed?(request.call("HTTP_X_OPERATOR" => "1"))).to be(true)
     ensure
       config.dashboard_open = false
       config.dashboard_user = nil
+      config.base_controller_class = Railwatch::Configuration::DEFAULT_BASE_CONTROLLER
     end
 
     it "does not gate the beacon, which is the app's own browser client posting timings" do

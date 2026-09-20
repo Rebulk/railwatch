@@ -51,4 +51,41 @@ RSpec.describe Railwatch::Backtrace do
       expect(described_class.frames(RuntimeError.new("fresh"), with_source: false)).to eq([])
     end
   end
+
+  describe ".source_snippet" do
+    around do |example|
+      Dir.mktmpdir("railwatch-source") do |directory|
+        @root = File.join(directory, "app")
+        FileUtils.mkdir_p(@root)
+        @secret = File.join(directory, "private.key")
+        File.write(@secret, "private-secret")
+        example.run
+      end
+    end
+
+    before { allow(described_class).to receive(:app_root).and_return(@root + "/") }
+
+    it "reads regular application source with line numbers" do
+      file = File.join(@root, "example.rb")
+      File.write(file, "first\nsecond\nthird\n")
+      expect(described_class.source_snippet(file, 2, context: 1)).to eq(1 => "first", 2 => "second", 3 => "third")
+    end
+
+    it "does not disclose a file reached through a traversal in a string backtrace" do
+      error = wrapper_with_string_backtrace([ "#{@root}/../private.key:1" ])
+      expect(described_class.frames(error).first[:code]).to be_nil
+    end
+
+    it "does not follow an application symlink outside the application" do
+      link = File.join(@root, "linked.rb")
+      File.symlink(@secret, link)
+      expect(described_class.source_snippet(link, 1)).to be_nil
+    end
+
+    it "does not load unbounded source files" do
+      file = File.join(@root, "large.rb")
+      File.write(file, "x" * (described_class::MAX_SOURCE_BYTES + 1))
+      expect(described_class.source_snippet(file, 1)).to be_nil
+    end
+  end
 end

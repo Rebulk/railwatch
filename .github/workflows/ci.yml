@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+# Jobs get no write access unless they explicitly request it (OIDC publishing).
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -33,6 +37,9 @@ jobs:
       # the dashboard untested exactly where it is most likely to break.
       - name: Build the dashboard bundle
         run: bundle exec rake dashboard:build
+
+      - name: Audit Ruby dependencies
+        run: bundle exec bundler-audit check --update
 
       - name: Run specs
         run: bundle exec rspec
@@ -68,6 +75,9 @@ jobs:
 
       - name: Install
         run: pnpm install --frozen-lockfile
+
+      - name: Audit JavaScript dependencies
+        run: pnpm audit
 
       - name: Typecheck, lint, format, test
         run: pnpm check && pnpm lint && pnpm format && pnpm test

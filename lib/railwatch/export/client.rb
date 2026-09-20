@@ -22,7 +22,14 @@ module Railwatch
       # Not `send`: shadowing Object#send on a class makes it impossible to
       # reach the real one, and reads as a coincidence rather than a verb.
       def deliver(claim, producer_id:)
-        result = transport_for(claim).deliver_encoded(
+        # Snapshot once, then verify and use those exact bytes. Configuration
+        # can change after Outbox#claim! checked the destination binding.
+        token = @config.resolved_export_token.to_s.dup.freeze
+        unless Digest::SHA256.hexdigest(token) == claim.token_digest
+          return Outcome.new(disposition: :deferred, status: 401, reason: "export credential changed after claim")
+        end
+
+        result = transport_for(claim, token: token).deliver_encoded(
           body: claim.body, expected_count: claim.record_count, batch_id: claim.delivery_id,
           dropped: claim.metadata.fetch("dropped", 0).to_i,
           dropped_bytes: claim.metadata.fetch("dropped_bytes", 0).to_i,
@@ -54,11 +61,11 @@ module Railwatch
       # otherwise post bytes admitted for one receiver to another one -- and,
       # if they belong to different tenants, hand a customer's telemetry to
       # somebody else while marking it delivered.
-      def transport_for(claim)
+      def transport_for(claim, token:)
         key = [ claim.url, claim.token_digest ]
         @transports[key] ||= begin
           credentialed = @config.dup
-          credentialed.token = @config.resolved_export_token
+          credentialed.token = token
           Transport::Http.new(credentialed, endpoint: claim.url)
         end
       end

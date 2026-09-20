@@ -56,7 +56,18 @@ RSpec.describe Railwatch::EnvironmentChannel do
     channel = nil
 
     expect { channel = subscribe_with(id: Railwatch::Environment::ID) }.not_to raise_error
-    expect(channel.send(:streams)).to include("environment_#{Railwatch::Environment::ID}")
+    expect(channel.send(:streams)).not_to include("environment_1")
+    expect(channel.send(:streams)).to include("railwatch:environment:#{Railwatch::Environment::ID}")
+  end
+
+  it "stops an existing stream when its gate no longer allows access" do
+    channel = subscribe_with(id: Railwatch::Environment::ID)
+    Railwatch.config.dashboard_open = false
+
+    expect(channel).not_to receive(:transmit)
+    channel.send(:transmit_authorized, { "event" => "ingested" })
+    expect(channel.send(:streams)).to be_empty
+    expect(channel.send(:subscription_rejected?)).to be(true)
   end
 
   it "refuses an id that is not this install's one environment" do
