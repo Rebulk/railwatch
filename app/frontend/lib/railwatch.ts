@@ -198,8 +198,8 @@ function startSession() {
       sessionStorage.setItem(SESSION_ID_KEY, id)
       sessionStorage.setItem(SESSION_STARTED_KEY, String(startedAt))
     }
-    // gem API (the pinned gem reads this cookie name); renames with the railwatch gem bump
-    document.cookie = `lantern_session=${id}; path=/; SameSite=Lax`
+    // Railwatch::Sessions::COOKIE reads this name to stitch server requests to the browser session.
+    document.cookie = `railwatch_session=${id}; path=/; SameSite=Lax`
     session = { id, started_at: startedAt }
     // No duration on the first beat: that is what opens the session.
     if (!existing)

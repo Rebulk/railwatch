@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.4.0 (2026-09-21)
+
+The gem is the one author of what goes over the wire and what runs in the
+browser. Anything that receives from it, Railwatch Cloud first, reads these
+from the gem instead of keeping a copy.
+
+- **One browser client.** The gem carried two: the install template wrote
+  the `railwatch_session` cookie that `Railwatch::Sessions` reads, while the
+  dashboard's own copy still wrote `lantern_session`, so every embedded
+  dashboard shipped a beacon whose sessions never stitched to their server
+  requests. There is one file now, `app/frontend/lib/railwatch.ts`, shipped
+  in the gem (`Railwatch.browser_client_path`): the dashboard bundle is built
+  from it, `railwatch:install` copies it, and a host with its own frontend
+  build imports it. A spec holds the cookie name to the regex.
+- **Shipped wire fixtures.** `lib/railwatch/wire_fixtures.json` holds one
+  record per type in `Railwatch::Record::VERSIONS`, produced by the gem's own
+  subscribers and middleware, stabilized, and checked in.
+  `Railwatch.wire_fixtures` loads it. A receiver tests its mapper against
+  these rather than hand-writing what it remembers the gem sending. The spec
+  that generates them fails when the file is stale; `rake
+  railwatch:wire_fixtures` regenerates it, and that diff is the review
+  surface for a wire change.
+- **Record versions are enforced.** Every record has carried a `v` since the
+  first release and no receiver read it. `Railwatch::Ingest::Mapper` now
+  refuses a record whose version is not the one this gem emits for its type,
+  by name (`log v2 is not v1`), on both the trusted embedded path and the
+  untrusted one. A shape change without a version bump is caught by the
+  fixture spec; a version bump the receiver has not shipped is refused
+  instead of misread.
+- `Railwatch::Transport::Http::HEADERS` names the delivery headers in one
+  place for the receiver to read.
+
 ## 0.3.7 (2026-09-20)
 
 - Stop a rake task or `rails runner` waiting on the network as it finishes.

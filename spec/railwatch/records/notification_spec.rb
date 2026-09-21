@@ -17,7 +17,9 @@ class Noticed::TestDelivery < ActiveJob::Base
 end
 
 RSpec.describe "notification record" do
-  before(:context) { Railwatch::Subscribers::Notifications.install!(Rails.application) }
+  before(:context) do
+    $railwatch_notifications_installed ||= Railwatch::Subscribers::Notifications.install!(Rails.application) || true
+  end
 
   def finish!
     Railwatch.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)

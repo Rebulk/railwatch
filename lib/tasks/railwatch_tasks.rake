@@ -612,3 +612,10 @@ namespace :railwatch do
     res.is_a?(Net::HTTPSuccess) ? puts("Deploy #{deploy} recorded") : abort("Deploy failed: #{res.code} #{res.body}")
   end
 end
+
+namespace :railwatch do
+  desc "Regenerate lib/railwatch/wire_fixtures.json from the gem's own subscribers"
+  task :wire_fixtures do
+    sh({ "RAILWATCH_WRITE_WIRE_FIXTURES" => "1" }, "bundle exec rspec spec/railwatch/wire_fixtures_spec.rb -e 'matches the shipped'")
+  end
+end

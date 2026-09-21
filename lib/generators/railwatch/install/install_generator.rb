@@ -119,9 +119,13 @@ module Railwatch
         chmod ".kamal/hooks/post-deploy", 0o755
       end
 
+      # The one browser client, the same file the gem's own dashboard bundle
+      # is built from (Railwatch.browser_client_path). Copied rather than
+      # templated: there is nothing to interpolate, and a copy means the host
+      # sees exactly what the gem tests.
       def create_browser_client
         return unless File.directory?("app/frontend")
-        template "railwatch.ts", "app/frontend/lib/railwatch.ts"
+        copy_file Railwatch.browser_client_path.to_s, "app/frontend/lib/railwatch.ts"
       end
 
       # Adds the import and the call to the Inertia entrypoint, so page-visit
