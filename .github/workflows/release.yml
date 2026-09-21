@@ -62,6 +62,24 @@ jobs:
           ruby-version: "3.4"
           bundler-cache: true
 
+      # A tag only names a release. Every step below reads the version out of
+      # lib/railwatch/version.rb instead, and nothing compared the two -- so
+      # `git tag v0.4.0` on a tree still saying 0.3.8 built, verified and
+      # pushed 0.3.8 under a tag claiming otherwise, and the "already
+      # published?" check would then skip the real 0.3.8 as done. Fails here,
+      # before the dashboard build, because a wrong version is not something
+      # to discover at `gem push`.
+      - name: The tag and lib/railwatch/version.rb must agree
+        run: |
+          tagged="${GITHUB_REF_NAME#v}"
+          declared="$(ruby -Ilib -rrailwatch/version -e 'print Railwatch::VERSION')"
+          if [ "$tagged" != "$declared" ]; then
+            echo "Tag ${GITHUB_REF_NAME} asks for ${tagged}, but lib/railwatch/version.rb says ${declared}."
+            echo "Bump version.rb on main (with Gemfile.lock in the same commit) and retag."
+            exit 1
+          fi
+          echo "Tag and version.rb agree on ${declared}."
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
