@@ -9,6 +9,12 @@ require "puma/plugin/railwatch"
 # whether or not the wait was bounded.
 RSpec.describe "the Railwatch Puma plugin stopping its writer" do
   let(:log) { [] }
+  around do |example|
+    was = Railwatch.config.shutdown_timeout
+    example.run
+  ensure
+    Railwatch.config.shutdown_timeout = was
+  end
   let(:plugin) do
     Puma::Plugins.find("railwatch").new.tap do |p|
       p.instance_variable_set(:@log_writer, Class.new { def initialize(lines) = @lines = lines; def log(m) = @lines << m }.new(log))
@@ -37,11 +43,13 @@ RSpec.describe "the Railwatch Puma plugin stopping its writer" do
       loop { sleep }
     end
     sleep 0.1
-    allow(plugin).to receive(:stop_timeout).and_return(0.3)
+    # The real budget, not a stub of it: the bound is shutdown_timeout and
+    # the example must fail if that stops being where the number comes from.
+    Railwatch.config.shutdown_timeout = 0.3
 
     elapsed = stop_with_writer(pid)
 
-    expect(elapsed).to be_between(0.3, 2.0)
+    expect(elapsed).to be_between(0.3, 1.5)
     expect(alive?(pid)).to be(false)
     expect(plugin.writer_pid).to be_nil
     expect(log).to include(a_string_matching(/did not exit within 0.3s of TERM; killing it/))
@@ -73,9 +81,9 @@ RSpec.describe "the Railwatch Puma plugin stopping its writer" do
     expect(plugin.writer_pid).to be_nil
   end
 
-  it "gives a healthy writer its whole drain and reporter shutdown before killing it" do
+  it "budgets the stop at shutdown_timeout, the same allowance the process gives its own reporter" do
     Railwatch.config.shutdown_timeout = 2.0
 
-    expect(plugin.send(:stop_timeout)).to eq(Railwatch::Writer::SHUTDOWN_DRAIN + 1 + 2.0)
+    expect(plugin.send(:stop_timeout)).to eq(2.0)
   end
 end

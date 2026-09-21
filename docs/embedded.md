@@ -319,12 +319,13 @@ through `Railwatch.on_unrecoverable`, so loss is never silent. A Puma
 phased restart stops the writer and starts a fresh one once the new
 workers are up.
 
-Stopping the writer is bounded. Puma sends it TERM and waits for it to
-drain what it is holding and exit, up to the writer's own allowance
-(five seconds for in-flight batches, plus `c.shutdown_timeout`). A writer
-still there after that is wedged, not draining -- a SQLite write that
-never returns, a full disk -- and is killed so Puma's own exit is not
-held open by it.
+Stopping the writer is bounded. Puma sends it TERM and waits up to
+`c.shutdown_timeout` (2 seconds) for it to exit, the same allowance it
+gives its own reporter, then kills it. A writer killed mid-batch loses
+nothing: the transaction rolls back and the worker retries that batch by
+id against the next writer. The bound is what keeps Puma's exit inside a
+container's stop grace (10 seconds by default under Docker) when the
+writer is wedged in a SQLite write or on a full disk.
 
 ## Maintenance
 

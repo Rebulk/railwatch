@@ -11,12 +11,15 @@
   a writer that did not exit -- stuck in a SQLite write, on a full disk --
   held Puma's shutdown open for as long as it stayed stuck. Measured against
   a child that ignores TERM, the stop never returned (the harness gave up at
-  10s with the child still alive). Puma now waits for the writer's own exit
-  allowance (its five-second batch drain, its maintenance join, and
-  `shutdown_timeout`; 8s at the defaults), then KILLs it and reaps it, so a
-  wedged writer costs a bounded 8s and never leaves a zombie. A writer that
-  exits on TERM is let go the moment it does (measured ~50ms), and a pid the
-  cluster has already reaped is still treated as gone.
+  10s with the child still alive). Puma now waits `shutdown_timeout` (2s),
+  the same allowance it gives its own reporter, then KILLs the writer and
+  reaps it, so a wedged writer costs a bounded 2s and never leaves a zombie.
+  A writer killed mid-batch loses nothing -- the batch is retried by id
+  against the next writer -- which is why the bound is not the writer's own
+  worst-case drain: the whole `at_exit` has to fit inside a container's stop
+  grace, 10s by default under Docker. A writer that exits on TERM is let go
+  the moment it does (measured ~50ms), and a pid the cluster has already
+  reaped is still treated as gone.
 
 - Make one HTTP attempt per delivery. `Transport::Http#deliver` retried a
   raised error or a 5xx once on its own, inside a reporter that already owns

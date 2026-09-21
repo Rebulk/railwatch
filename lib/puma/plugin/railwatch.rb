@@ -156,12 +156,11 @@ Puma::Plugin.create do
     log "Railwatch writer shutdown failed (#{e.class}: #{e.message})"
   end
 
-  # TERM closes the writer's listener; it drains what it is holding and
-  # exits on its own. Waited for with a deadline, not Process.wait: a writer
-  # that is still there once its own exit allowance has passed is not
-  # draining, it is wedged (a SQLite write that never returns, a full disk),
-  # and Puma's exit must not wait on it. KILL then. Reaped either way, so a
-  # cluster master never leaves a zombie behind.
+  # TERM closes the writer's listener; it finishes what it is holding and
+  # exits on its own. Waited for with a deadline, not Process.wait, which
+  # has none: a writer wedged in a SQLite write or on a full disk would hold
+  # Puma's exit open for as long as it stayed wedged. KILL past the deadline.
+  # Reaped either way, so a cluster master never leaves a zombie behind.
   def stop_writer
     return unless @writer_pid
 
@@ -177,13 +176,19 @@ Puma::Plugin.create do
     @writer_pid = nil
   end
 
-  # What the writer's own exit is allowed to cost, so a healthy one is never
-  # killed mid-drain: after TERM it gives the batches it is holding
-  # SHUTDOWN_DRAIN, joins its maintenance thread (one second), then shuts
-  # its reporter down within shutdown_timeout. Past all of that it is not
-  # going to leave by itself.
+  # shutdown_timeout: the same allowance this process gives its own
+  # reporter, and deliberately NOT the writer's full theoretical exit time
+  # (a sequential SHUTDOWN_DRAIN join per worker thread, its maintenance
+  # join, then its own reporter shutdown -- 13s at the defaults). Two
+  # reasons. This runs from at_exit inside the container's stop grace, which
+  # under Kamal with its proxy is Docker's default 10s from TERM to KILL,
+  # and the reporter shutdown that precedes this has already spent up to
+  # shutdown_timeout of it. And a writer killed mid-batch loses nothing:
+  # the transaction rolls back and the worker retries the batch by id
+  # against the next writer (Writer#serve says so), so waiting longer buys
+  # no data, only exit time. An idle writer is gone in well under a second.
   def stop_timeout
-    ::Railwatch::Writer::SHUTDOWN_DRAIN + 1 + ::Railwatch.config.shutdown_timeout.to_f
+    [ ::Railwatch.config.shutdown_timeout.to_f, 0.0 ].max
   end
 
   # Non-blocking waits on a short poll; Process.wait has no timeout and a
