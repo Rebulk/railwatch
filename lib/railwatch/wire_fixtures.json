@@ -652,7 +652,7 @@
     "timestamp": 1767225600.0,
     "deploy": "3f9c2a1",
     "server": "web-1",
-    "_group": "dc9d63d86a77e9b894f7d9416a13e42a",
+    "_group": "535d5c4459866787c7db87dbe509a1b2",
     "trace_id": "8f14e45f-ceea-4b8f-8ac2-9a6e0c9f1a11",
     "execution_source": "command",
     "execution_id": "5c3b1e2a-9d4f-4a2b-8e1c-2f6a7b9c0d3e",
@@ -661,7 +661,7 @@
     "execution_stage": null,
     "user": null,
     "tenant": null,
-    "message": "DEPRECATION WARNING: old_method is deprecated (called from RSpec::ExampleGroups::WireFixtures#in_command at /spec/railwatch/wire_fixtures_spec.rb)",
+    "message": "DEPRECATION WARNING: old_method is deprecated (called from Widget#rename at app/models/widget.rb:12)",
     "gem_name": "Rails",
     "horizon": "2.0",
     "source": null

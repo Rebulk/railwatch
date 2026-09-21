@@ -144,9 +144,11 @@ RSpec.describe "wire fixtures", type: :request do
     deprecation: -> {
       deprecator = ActiveSupport::Deprecation.new("2.0", "Rails")
       deprecator.behavior = :notify
-      # The group hashes the message, and the message names the caller; a
-      # synthetic callstack keeps that off this machine's paths.
-      in_command { deprecator.warn("old_method is deprecated", [ "app/models/widget.rb:12:in 'rename'" ]) }
+      # The group hashes the message, and the message names the caller, so
+      # a fixed caller keeps both off this file's line numbers and this
+      # machine's paths. Active Support reads it like a Thread::Backtrace::Location.
+      frame = Struct.new(:path, :absolute_path, :lineno, :label).new("app/models/widget.rb", "/app/models/widget.rb", 12, "Widget#rename")
+      in_command { deprecator.warn("old_method is deprecated", [ frame ]) }
     },
     visit: -> {
       post_beacon(visits: [ { component: "Widgets/Index", url: "/widgets", method: "GET", started_at: Time.now.to_f * 1000,
