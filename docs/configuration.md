@@ -385,7 +385,7 @@ the app database.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `buffer_size` | `RAILWATCH_BUFFER_SIZE` | `10000` | Max buffered records (`Railwatch::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. Keep it at or above `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
+| `buffer_size` | `RAILWATCH_BUFFER_SIZE` | `10000` | Max buffered records (`Railwatch::Buffer`). Oldest is dropped (and counted) when full — never blocks the request thread. In practice `buffer_bytes` fills first: on a realistic mix of records, 16 MiB holds about 5,000 of them, so this count is never reached and raising it changes nothing. Tune `buffer_bytes` instead. Do not lower this below `Execution::MAX_RECORDS` (10,000): a kept execution's whole tree is written here at once when it ends, and a queue smaller than the tree drops the tree's own oldest records first. |
 | `buffer_bytes` | `RAILWATCH_BUFFER_BYTES` | `16777216` (16 MiB) | Estimated payload memory the reporter queue may hold. A record count alone does not bound memory: 10,000 records is a few megabytes of ordinary telemetry, or a gigabyte of captured attachments. Oldest records are dropped (and counted) under byte pressure, same as under count pressure. |
 | `execution_buffer_bytes` | `RAILWATCH_EXECUTION_BUFFER_BYTES` | `8388608` (8 MiB) | The same ceiling for one execution's buffered tree, before it finishes. A normal execution keeps its earliest records; a failure-context ring keeps its latest. |
 | `batch_bytes` | `RAILWATCH_BATCH_BYTES` | `8388608` (8 MiB) | Uncompressed NDJSON bytes in one ingest request. A queue holding more than this is delivered as several batches — the tail is kept for the next flush, not dropped. |
@@ -399,13 +399,13 @@ the app database.
 
 Delivery is `Railwatch::Transport::Http`, in
 `lib/railwatch/transport/http.rb`: a gzip NDJSON POST to
-`{ingest_url}/ingest`, with one retry on a raised error or a 5xx within
-each delivery attempt. If that still fails, or ingest returns 402, 408,
-or 429, the immutable batch and its prior drop count are retained for
-retry. Every newly formed batch gets an `X-Railwatch-Batch-Id` UUID. It is
-reused for the immediate HTTP retry and every later reporter retry, so
-the platform can return the first committed result without inserting the
-payload twice. Records written while a request is in flight collect in a
+`{ingest_url}/ingest`, one attempt per delivery. If it raises, or ingest
+returns 402, 408, 429, or a 5xx, the immutable batch and its prior drop
+count are retained for retry; the transport does not retry on its own,
+so each rung of the reporter's ladder costs one timeout, not two. Every
+newly formed batch gets an `X-Railwatch-Batch-Id` UUID. It is reused for
+every reporter retry, so the platform can return the first committed
+result without inserting the payload twice. Records written while a request is in flight collect in a
 separate bounded buffer, so they never change the retained request's
 identity. At most one retained batch plus one live buffer are held in
 memory. The reporter retries with jittered exponential backoff, from one

@@ -319,6 +319,13 @@ through `Railwatch.on_unrecoverable`, so loss is never silent. A Puma
 phased restart stops the writer and starts a fresh one once the new
 workers are up.
 
+Stopping the writer is bounded. Puma sends it TERM and waits for it to
+drain what it is holding and exit, up to the writer's own allowance
+(five seconds for in-flight batches, plus `c.shutdown_timeout`). A writer
+still there after that is wedged, not draining -- a SQLite write that
+never returns, a full disk -- and is killed so Puma's own exit is not
+held open by it.
+
 ## Maintenance
 
 Railwatch needs no job worker and nothing in `config/recurring.yml`.

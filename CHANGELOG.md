@@ -6,6 +6,33 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Bound how long Puma waits for the embedded writer to stop. The plugin sent
+  the writer TERM and then called `Process.wait` on it, which has no timeout:
+  a writer that did not exit -- stuck in a SQLite write, on a full disk --
+  held Puma's shutdown open for as long as it stayed stuck. Measured against
+  a child that ignores TERM, the stop never returned (the harness gave up at
+  10s with the child still alive). Puma now waits for the writer's own exit
+  allowance (its five-second batch drain, its maintenance join, and
+  `shutdown_timeout`; 8s at the defaults), then KILLs it and reaps it, so a
+  wedged writer costs a bounded 8s and never leaves a zombie. A writer that
+  exits on TERM is let go the moment it does (measured ~50ms), and a pid the
+  cluster has already reaped is still treated as gone.
+
+- Make one HTTP attempt per delivery. `Transport::Http#deliver` retried a
+  raised error or a 5xx once on its own, inside a reporter that already owns
+  a retry ladder of eight attempts, so each rung cost two socket timeouts
+  and the effective attempt count was about sixteen. Against a receiver that
+  accepts connections and never answers, one delivery cost 6.0s; it now
+  costs 3.0s (one `read_timeout`), and one attempt, like `deliver_encoded`.
+  Response classification and `Retry-After` are unchanged: a 5xx or a raised
+  error still comes back retryable and the reporter still schedules it.
+
+- Correct `docs/configuration.md` and `docs/troubleshooting.md`, which told
+  users to raise `buffer_size` under pressure. At the defaults the byte
+  ceiling (`buffer_bytes`, 16 MiB) fills at roughly 5,000 records on a
+  realistic mix, so the 10,000-record count is never reached and raising it
+  changes nothing. The setting stays; the advice now points at `buffer_bytes`.
+
 - Say so when records are lost. `Railwatch.on_unrecoverable` fell back to
   the debug log, so with no callback registered and `RAILWATCH_DEBUG` unset
   a batch dropped after its retry ladder, one the receiver permanently
@@ -64,6 +91,7 @@
   callback, which runs once and is theirs to bound, as any `at_exit`
   handler is. Wrapping it in `Timeout` would trade a visible cost for a
   killed thread.
+
 
 ## 0.5.1 (2026-09-21)
 

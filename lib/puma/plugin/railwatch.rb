@@ -21,6 +21,11 @@ Puma::Plugin.create do
   attr_reader :log_writer, :writer_pid
 
   POLL = 2
+  # How often a stopping writer is checked for, and how long a KILL is given
+  # to take before the pid is abandoned (a process stuck in disk I/O cannot
+  # die until the I/O returns, and Puma's exit should not wait for that).
+  REAP_POLL = 0.05
+  KILL_REAP = 1
 
   def start(launcher)
     @log_writer = launcher.log_writer
@@ -151,17 +156,48 @@ Puma::Plugin.create do
     log "Railwatch writer shutdown failed (#{e.class}: #{e.message})"
   end
 
-  # TERM closes the writer's listener and it drains what it is holding; the
-  # wait also reaps it, so a cluster master never leaves a zombie behind.
+  # TERM closes the writer's listener; it drains what it is holding and
+  # exits on its own. Waited for with a deadline, not Process.wait: a writer
+  # that is still there once its own exit allowance has passed is not
+  # draining, it is wedged (a SQLite write that never returns, a full disk),
+  # and Puma's exit must not wait on it. KILL then. Reaped either way, so a
+  # cluster master never leaves a zombie behind.
   def stop_writer
     return unless @writer_pid
 
     Process.kill(:TERM, @writer_pid)
-    Process.wait(@writer_pid)
+    return if reaped_within?(stop_timeout)
+
+    log "Railwatch writer (pid #{@writer_pid}) did not exit within #{stop_timeout}s of TERM; killing it"
+    Process.kill(:KILL, @writer_pid)
+    log "Railwatch writer (pid #{@writer_pid}) did not exit on KILL; leaving it" unless reaped_within?(KILL_REAP)
   rescue Errno::ECHILD, Errno::ESRCH
     nil
   ensure
     @writer_pid = nil
+  end
+
+  # What the writer's own exit is allowed to cost, so a healthy one is never
+  # killed mid-drain: after TERM it gives the batches it is holding
+  # SHUTDOWN_DRAIN, joins its maintenance thread (one second), then shuts
+  # its reporter down within shutdown_timeout. Past all of that it is not
+  # going to leave by itself.
+  def stop_timeout
+    ::Railwatch::Writer::SHUTDOWN_DRAIN + 1 + ::Railwatch.config.shutdown_timeout.to_f
+  end
+
+  # Non-blocking waits on a short poll; Process.wait has no timeout and a
+  # child that never exits would hold it forever. ECHILD (the cluster's
+  # wait2(-1) reaped it first) propagates to stop_writer, which reads it as
+  # gone.
+  def reaped_within?(seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    loop do
+      return true if Process.waitpid(@writer_pid, Process::WNOHANG)
+      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      sleep REAP_POLL
+    end
   end
 
   def log(message)
