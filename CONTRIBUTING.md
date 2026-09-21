@@ -22,6 +22,22 @@ release is `git tag vX.Y.Z && git push --tags`: the workflow builds the
 bundle, verifies the package, and publishes. A host application never sees
 Node; it installs the compiled bundle inside the gem.
 
+### Versioning
+
+**A pull request does not bump the version.** Put the entry under
+`## Unreleased` in `CHANGELOG.md` and leave `lib/railwatch/version.rb` and
+`Gemfile.lock` alone.
+
+Those two files are the only ones every branch touches identically, so a
+branch that bumps conflicts with every other branch in flight, on both files,
+every time -- and the lockfile conflict is the kind that resolves cleanly and
+is still wrong. Deciding the number per-branch also cannot work: four open
+pull requests cannot each know whether they are the patch release or the one
+that lands after the feature, and whoever merges second has guessed wrong.
+
+The release commit picks the number once, when the set of changes is known
+and semver can actually be applied to it.
+
 ### Gemfile.lock
 
 Commit it in the same commit as anything that changes resolution: a gemspec
@@ -33,9 +49,14 @@ the committed file for exactly this reason and will tell you first.
 
 ### Releasing
 
-1. `CHANGELOG.md` gets the entry, `lib/railwatch/version.rb` gets the
-   version, both on `main`.
-2. `git tag vX.Y.Z && git push --tags`.
+1. On `main`: retitle `## Unreleased` to `## X.Y.Z (YYYY-MM-DD)`, set
+   `lib/railwatch/version.rb` to the same version, run `bundle lock`, and
+   commit all three together. `spec/railwatch/gemfile_lock_spec.rb` fails if
+   the lockfile is missing from that commit.
+2. `git tag vX.Y.Z && git push --tags`. The tag must match what version.rb
+   now says -- the workflow checks, because every other step reads the
+   version from the file rather than the tag, and a mismatch would publish
+   the wrong one under a tag claiming otherwise.
 3. `.github/workflows/release.yml` runs the specs, verifies the package,
    rebuilds the dashboard, refuses to publish a gem whose dashboard is
    missing (`rake package:assert_dashboard`), and pushes to RubyGems.
@@ -58,5 +79,5 @@ The `publish` job needs `bundler-cache: true`, because it runs
 before reaching rake.
 
 Add or update specs with behavioral changes. Before opening a pull request,
-add a concise entry under the current release in `CHANGELOG.md` and make sure
-both benchmark gates pass.
+add a concise entry under `## Unreleased` in `CHANGELOG.md` and make sure both
+benchmark gates pass.

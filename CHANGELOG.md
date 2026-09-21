@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+<!-- Pull requests add their entry here. The version number and the date are
+     filled in by the release commit, which is also the only commit that
+     touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
+
 ## 0.5.1 (2026-09-21)
 
 Three small seams for a host that runs these models on its own routes and
