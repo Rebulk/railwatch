@@ -31,7 +31,7 @@
 
 ## For coding agents
 
-- [AGENTS.md](AGENTS.md): how to install and use Railwatch from inside a Rails app — the facade methods, the spec matchers, `railwatch:doctor`, and the MCP hookup. Duplicated verbatim as [CLAUDE.md](CLAUDE.md).
+- [AGENTS.md](AGENTS.md): how to install and use Railwatch from inside a Rails app — the facade methods, the spec matchers, `railwatch:doctor`, and the MCP hookup.
 
 ## Optional
 
