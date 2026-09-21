@@ -42,6 +42,13 @@ module Railwatch
         text
       end
 
+      def as_row
+        { id: id, group_hash: group_hash, sql: sql.first(2_000), name: name, duration: duration_ms.round(3), occurred_at: occurred_at,
+          deploy: deploy, execution_id: execution_id, execution_preview: execution_preview, source: source,
+          connection: connection, role: role, adapter: adapter, row_count: row_count, tenant: app_tenant, user_ref: user_ref,
+          explain: explain.present? }
+      end
+
       def timeline_label
         sql.to_s.first(120)
       end

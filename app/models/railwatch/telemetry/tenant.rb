@@ -18,7 +18,6 @@ module Railwatch
       # aggregate), so only the busiest tenants get one; the rest report 0.
       P95_TENANTS = 50
       SPARKLINE_BUCKETS = 12
-      SERIES_BUCKETS = 48
       SORTS = { "requests" => :requests, "errors" => :errors, "p95" => :p95, "users" => :users }.freeze
 
       ERRORS_SQL = Arel.sql("SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END)")
@@ -71,21 +70,12 @@ module Railwatch
         }
       end
 
-      # Request volume and duration bucketed over the window, SeriesPoint-shaped
-      # so the same charts render it. Percentiles are approximations: these
-      # buckets come from raw rows, without the per-bucket t-digest
-      # Telemetry::Rollup keeps, so p50 is the bucket's average and p95/p99 its
-      # max.
-      def self.series(tenant, from, to)
-        width = bucket_width(from, to, SERIES_BUCKETS)
-        bucket = bucket_sql(from, width)
-        Telemetry::Execution.requests.between(from, to).where(app_tenant: tenant).group(bucket)
-          .pluck(bucket, COUNT_SQL, ERRORS_SQL, CLIENT_ERRORS_SQL, Arel.sql("SUM(duration)"), Arel.sql("MAX(duration)"))
-          .map { |index, count, errors, client_errors, sum, max|
-            avg = ms(sum / count)
-            { t: bucket_at(from, width, index, SERIES_BUCKETS).iso8601, count: count, errors: errors, client_errors: client_errors,
-              avg: avg, p50: avg, p95: ms(max), p99: ms(max) }
-          }.sort_by { |point| point[:t] }
+      # Request volume and duration bucketed over the window at `step`,
+      # SeriesPoint-shaped so the same charts render it. Rollups carry no tenant,
+      # so every step reads raw rows (Telemetry::Aggregations.points does that
+      # for a tenant), with exact percentiles per bucket.
+      def self.series(tenant, from, to, step: nil)
+        Telemetry::Aggregations.points("request", from: from, to: to, step: step, tenant: tenant)
       end
 
       def self.routes(tenant, from, to, limit: 20)
@@ -109,14 +99,9 @@ module Railwatch
         end
       end
 
-      # Same field shape as RequestsController#execution_row, for the tenant
-      # page's "Recent requests" table.
+      # The tenant page's "Recent requests" table.
       def self.recent_requests(tenant, from, to, limit: 50)
-        Telemetry::Execution.requests.between(from, to).where(app_tenant: tenant).recent.limit(limit).map do |r|
-          { execution_id: r.execution_id, name: r.name, status: r.status, duration: r.duration_ms.round(2), occurred_at: r.occurred_at,
-            user_ref: r.user_ref, tenant: r.app_tenant, exception_preview: r.exception_preview, inertia_component: r.inertia_component,
-            queries: r.counters["queries"], deploy: r.deploy }
-        end
+        Telemetry::Execution.requests.between(from, to).where(app_tenant: tenant).recent.limit(limit).map(&:as_row)
       end
 
       # -- Aggregation steps -----------------------------------------------------

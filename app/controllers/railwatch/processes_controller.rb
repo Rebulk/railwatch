@@ -6,7 +6,7 @@ module Railwatch
       live_since = Telemetry::HealthSample::LIVE_WINDOW.ago
       samples, series, queues, live_servers, processes = telemetry do
         live = Telemetry::HealthSample.live(live_since).to_a
-        [ live, Telemetry::HealthSample.series(*window_range), Telemetry::HealthSample.queue_depths(live),
+        [ live, Telemetry::HealthSample.series(*window_range, bucket: Telemetry::Aggregations::STEPS.fetch(step_key)), Telemetry::HealthSample.queue_depths(live),
           live.map(&:server) | Telemetry::Execution.servers_since(live_since),
           Telemetry::Process.recent.limit(200).to_a ]
       end

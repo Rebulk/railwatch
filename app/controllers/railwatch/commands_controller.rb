@@ -5,7 +5,7 @@ module Railwatch
     def index
       rows = telemetry { Telemetry::Execution.commands.between(*window_range).recent.limit(200).to_a }
       render inertia: { commands: grouped("command", limit: 100),
-                        runs: rows.map { |r| { execution_id: r.execution_id, name: r.name, exit_code: r.status, duration: r.duration_ms.round(1), occurred_at: r.occurred_at, server: r.server, exception_preview: r.exception_preview } } }
+                        runs: rows.map(&:as_row) }
     end
 
     def show

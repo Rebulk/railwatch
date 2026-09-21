@@ -2,12 +2,14 @@
 
 module Railwatch
   # Base class for everything the engine stores about the host application.
-  # The hosted platform keeps one SQLite file per monitored environment through
-  # activerecord-tenanted; an embedded install monitors exactly one application,
-  # so this is a plain second database (`railwatch_telemetry` in the host's
-  # database.yml), separate from the host's own primary and from the engine's
-  # meta tables. Every telemetry query still runs inside
-  # Environment#with_telemetry so the code path matches the platform's.
+  # An embedded install monitors exactly one application, so this is a plain
+  # second database (`railwatch_telemetry` in the host's database.yml),
+  # separate from the host's own primary and from the engine's meta tables.
+  # The hosted platform keeps one SQLite file per monitored environment
+  # instead: it calls `Railwatch::TelemetryRecord.tenanted("telemetry")`
+  # (activerecord-tenanted) from an initializer, which replaces the
+  # connection below with a per-tenant one, and every telemetry query runs
+  # inside Environment#with_telemetry so the code path is the same in both.
   class TelemetryRecord < ActiveRecord::Base
     self.abstract_class = true
     begin

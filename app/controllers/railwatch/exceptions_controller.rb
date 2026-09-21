@@ -38,16 +38,15 @@ module Railwatch
     # `errors` carries the unhandled count so the chart legend (handled /
     # unhandled) agrees with the Unhandled card above the table.
     def exception_series(from, to)
+      step = Telemetry::Aggregations::STEPS.fetch(step_key)
+      bucket = Telemetry::Aggregations.bucket_sql("occurred_at", step)
       buckets = Hash.new { |h, k| h[k] = { count: 0, errors: 0 } }
-      Telemetry::Exception.between(from, to)
-        .group(Arel.sql("strftime('%Y-%m-%dT%H:00:00Z', occurred_at)"), :handled)
-        .count
-        .each do |(bucket, handled), c|
-          buckets[bucket][:count] += c
-          buckets[bucket][:errors] += c unless handled
-        end
-      buckets.map { |bucket, b| { t: bucket, count: b[:count], errors: b[:errors], client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0 } }
-        .sort_by { |r| r[:t] }
+      Telemetry::Exception.between(from, to).group(bucket, :handled).count.each do |(b, handled), c|
+        buckets[b][:count] += c
+        buckets[b][:errors] += c unless handled
+      end
+      points = buckets.map { |b, c| { t: Time.at(b).utc, count: c[:count], errors: c[:errors], client_errors: 0, avg: nil, p50: nil, p95: nil, p99: nil } }
+      Telemetry::Aggregations.fill(points, from, to, step)
     end
     end
 end

@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0 (2026-09-21)
+
+The telemetry layer the hosted platform runs is this gem's, not a copy. Everything
+Railwatch Cloud had improved in its fork comes home, and the two seams the platform
+needs are named.
+
+- **Chart bucket widths.** `Telemetry::Aggregations` offers `STEPS` (1m to 1d),
+  `default_step`, and `steps_for` a window; `series` takes a `step:` and reads raw
+  rows with exact per-bucket percentiles under an hour, rollups at an hour and up;
+  `fill` zero-fills quiet buckets. The dashboard shows a step picker beside the
+  window picker, and every series page, release health, tenants, processes, and
+  exceptions draw at the chosen step. Latency lines break over an empty bucket
+  instead of dropping to zero.
+- **One `Window`.** `Railwatch::Window` resolves `?window=` presets and custom
+  `?from=&to=` ranges, with the previous period for deltas; the controller concern
+  reads it instead of carrying the table.
+- **Rollup extras.** `Telemetry::Rollup.summarize` merges each type's `extra`
+  (LLM spend and tokens, cache hits and misses) the way `absorb!` does.
+- **LLM thresholds and anomaly rules.** `spend`, `tokens`, and `truncation_rate`
+  metrics on `llm_calls` and `llm_tools`; the form narrows metrics by kind and
+  shows the unit; `Threshold#format_value` prints dollars and percentages.
+- **`as_row`** on Execution, Log, Exception, and Query: the one row shape every
+  list surface shows. The commands page reads the exit code from `status`.
+- `Railwatch::TelemetryRecord` documents that the hosted platform tenants it, and
+  `docs/embedded.md` says what the platform is in terms of this engine.
+
 ## 0.4.0 (2026-09-21)
 
 The gem is the one author of what goes over the wire and what runs in the

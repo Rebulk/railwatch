@@ -12,7 +12,8 @@ module Railwatch
     MAX_ROLLUP_ROWS_PER_RULE = MAX_GROUPS_PER_RULE * 25
 
     TYPE_FOR = { "requests" => "request", "jobs" => "job_attempt", "commands" => "command", "queries" => "query",
-                 "scheduled_tasks" => "scheduled_task", "outgoing_requests" => "outgoing_request" }.freeze
+                 "scheduled_tasks" => "scheduled_task", "outgoing_requests" => "outgoing_request",
+                 "llm_calls" => "llm_call", "llm_tools" => "llm_tool" }.freeze
 
     def perform(environment)
       now = Time.current
@@ -51,19 +52,28 @@ module Railwatch
           .transform_values { |group_rows| [ group_rows.first.name, Telemetry::Rollup.summarize(group_rows) ] }
     end
 
+    NANOS_PER_DOLLAR = 1_000_000_000.0
+
     def value_for(metric, s)
+      extra = s[:extra] || {}
       case metric
       when "p95" then s[:p95] / 1000.0
       when "max" then s[:max] / 1000.0
       when "avg" then s[:avg] / 1000.0
       when "error_rate", "failure_rate" then s[:count].zero? ? nil : (s[:errors] * 100.0 / s[:count])
+      # Money and tokens are sums over the window, not percentiles of it.
+      when "spend" then extra["cost_nanos"].to_i / NANOS_PER_DOLLAR
+      when "tokens" then extra["input_tokens"].to_i + extra["output_tokens"].to_i
+      # A cut-off answer is a successful call, so it is invisible to
+      # error_rate. This is the only way to be told about it.
+      when "truncation_rate" then s[:count].zero? ? nil : (extra["truncated"].to_i * 100.0 / s[:count])
       end
     end
 
     def open_issue(environment, threshold, group_hash, name, value, from, now)
       issue, outcome = Issue.record_occurrence!(
         environment: environment, group_hash: "perf:#{threshold.id}:#{group_hash}", kind: "performance",
-        title: "#{name} exceeded #{threshold.metric} #{threshold.limit}#{threshold.metric.end_with?('rate') ? '%' : 'ms'} (#{value.round(1)})",
+        title: "#{name} exceeded #{threshold.metric} #{threshold.format_value(threshold.limit)} (#{threshold.format_value(value.round(2))})",
         culprit: name, occurred_at: now, deploy: nil, user_ref: nil,
         sample: { threshold_id: threshold.id, value: value.round(2), metric: threshold.metric, limit: threshold.limit })
       carry_detection(issue, outcome) do

@@ -20,8 +20,8 @@ module Railwatch
       from, to = window_range
       data = telemetry do
         { tenant: tenant, summary: { current: Telemetry::Tenant.summary(tenant, from, to),
-                                    previous: Telemetry::Tenant.summary(tenant, *previous_window_range) },
-          series: Telemetry::Tenant.series(tenant, from, to), routes: Telemetry::Tenant.routes(tenant, from, to),
+                                    previous: Telemetry::Tenant.summary(tenant, *window.previous.range) },
+          series: Telemetry::Tenant.series(tenant, from, to, step: step_key), routes: Telemetry::Tenant.routes(tenant, from, to),
           jobs: Telemetry::Tenant.job_classes(tenant, from, to), exceptions: Telemetry::Tenant.exceptions(tenant, from, to),
           people: Telemetry::Tenant.people(tenant), recent_requests: Telemetry::Tenant.recent_requests(tenant, from, to) }
       end

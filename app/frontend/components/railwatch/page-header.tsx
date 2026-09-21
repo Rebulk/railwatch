@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import type { SharedProps } from "@/types"
 
 import { LiveToggle } from "./live-toggle"
+import { StepPicker } from "./step-picker"
 import { WindowPicker } from "./window-picker"
 
 // Page title row. On phones the controls drop under the title and wrap onto
@@ -33,6 +34,7 @@ export function PageHeader({
       <div className="flex flex-wrap items-center gap-2 md:shrink-0 md:justify-end">
         {environment && <LiveToggle environmentId={environment.id} />}
         {actions}
+        {withWindow && <StepPicker />}
         {withWindow && <WindowPicker />}
       </div>
     </div>

@@ -141,8 +141,10 @@ export function DurationPanel({
   className?: string
 }) {
   const withData = data.filter((d) => d.count > 0)
-  const avgs = withData.map((d) => d.avg)
-  const pcts = withData.map((d) => d[percentile])
+  const avgs = withData.flatMap((d) => (d.avg == null ? [] : [d.avg]))
+  const pcts = withData.flatMap((d) =>
+    d[percentile] == null ? [] : [d[percentile]],
+  )
   const avg = avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : 0
   const pct = pcts.length ? Math.max(...pcts) : 0
   const lo = avgs.length ? Math.min(...avgs) : 0

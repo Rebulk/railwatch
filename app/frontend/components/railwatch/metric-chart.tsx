@@ -14,11 +14,26 @@ export interface MetricPoint {
 
 const axisTick = { fontSize: 10, fontFamily: "var(--font-mono)" }
 
-function tick(t: string) {
-  return new Date(t).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+// Time-of-day ticks up to two days, dates beyond, like series-chart.tsx.
+const DAY = 24 * 60 * 60 * 1000
+
+function tickFormatter(data: { t: string }[]) {
+  const span =
+    data.length > 1
+      ? new Date(data[data.length - 1].t).getTime() -
+        new Date(data[0].t).getTime()
+      : 0
+  if (span > 2 * DAY)
+    return (t: string) =>
+      new Date(t).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })
+  return (t: string) =>
+    new Date(t).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
 }
 
 function stamp(t: string) {
@@ -47,6 +62,7 @@ export function MetricChart({
   className?: string
 }) {
   const config = { value: { label, color } } satisfies ChartConfig
+  const tick = tickFormatter(data)
   return (
     <div>
       <ChartContainer config={config} className={`${className} w-full`}>

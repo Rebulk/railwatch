@@ -17,7 +17,7 @@ module Railwatch
       new_issues = new_issue_counts(deploys, to)
       summary, series, adoption, health = telemetry do
         [ Telemetry::ReleaseHealth.for_deploy(nil, from, to),
-          Telemetry::ReleaseHealth.series(nil, from, to),
+          Telemetry::ReleaseHealth.series(nil, from, to, step: step_key),
           Telemetry::ReleaseHealth.adoption(from, to),
           deploys.to_h { |d| [ d.deploy, Telemetry::ReleaseHealth.for_deploy(d.deploy, from, to) ] } ]
       end
@@ -37,7 +37,7 @@ module Railwatch
       data = telemetry do
         { summary: Telemetry::ReleaseHealth.for_deploy(release, from, to),
           previous_summary: previous && Telemetry::ReleaseHealth.for_deploy(previous.deploy, *previous.window),
-          series: Telemetry::ReleaseHealth.series(release, from, to),
+          series: Telemetry::ReleaseHealth.series(release, from, to, step: step_key),
           sessions: Telemetry::Session.where(deploy: release).recent.limit(SESSIONS_SHOWN).map { |s| session_row(s) } }
       end
       render inertia: data.merge(
