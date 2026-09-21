@@ -599,10 +599,14 @@ module Railwatch
     File.expand_path("../db/#{database}_migrate", __dir__)
   end
 
-  # The one browser client (Railwatch::Packaging::BROWSER_CLIENT), as an
-  # absolute path for the install generator and for a host that imports it.
+  # The one browser client, relative to the gem root. The dashboard bundle
+  # is built from it, the install generator copies it, the gem ships it (the
+  # only app/frontend file it does), and a host with its own frontend build
+  # (Railwatch Cloud) imports it from browser_client_path.
+  BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
+
   def self.browser_client_path
-    File.expand_path("../#{Packaging::BROWSER_CLIENT}", __dir__)
+    File.expand_path("../#{BROWSER_CLIENT}", __dir__)
   end
 
   # One realistic wire record per record type, exactly as the gem's own

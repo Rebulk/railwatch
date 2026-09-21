@@ -6,6 +6,7 @@ require "spec_helper"
 # which the install generator copies and Railwatch Cloud imports.
 RSpec.describe "browser client" do
   it "is the shipped file" do
+    expect(Railwatch::BROWSER_CLIENT).to eq(Railwatch::Packaging::BROWSER_CLIENT)
     expect(Railwatch.browser_client_path).to eq(File.expand_path("../../app/frontend/lib/railwatch.ts", __dir__))
     expect(File).to exist(Railwatch.browser_client_path)
     expect(Railwatch::Packaging.specification.files).to include(Railwatch::Packaging::BROWSER_CLIENT)

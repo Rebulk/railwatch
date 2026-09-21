@@ -5,9 +5,7 @@ require_relative "lib/railwatch/version"
 module Railwatch
   module Packaging
     PUBLIC_NAME = "railwatch"
-    # The one browser client. The dashboard bundle is built from it, the
-    # install generator copies it, and a host with its own frontend build
-    # (Railwatch Cloud) imports it. The only app/frontend file the gem ships.
+    # Mirrors Railwatch::BROWSER_CLIENT; the gemspec loads only version.rb.
     BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
 
     module_function
