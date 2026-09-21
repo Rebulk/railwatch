@@ -171,16 +171,25 @@ RSpec.describe "wire fixtures", type: :request do
       Railwatch.attach("payload.json", '{"order":1}', exception: error)
     },
     session: -> { post_beacon(visits: [], session: { id: "s1", started_at: (Time.now.to_f - 60) * 1000 }) },
+    # A RubyLLM 2.0 chat with everything optional present: a workflow step,
+    # attachments on the last user turn, and tools, so the fixture carries
+    # every column the subscriber can fill.
     llm_call: -> {
       tokens = Struct.new(:input, :output, :cache_read, :cache_write, :thinking, :reported_cost, keyword_init: true)
       cost = Struct.new(:total, keyword_init: true)
-      message = Struct.new(:role, :content, keyword_init: true)
+      attachment = Struct.new(:type, :filename, keyword_init: true)
+      message = Struct.new(:role, :content, :attachments, keyword_init: true)
       in_command do
         ActiveSupport::Notifications.instrument("chat.ruby_llm",
-          chat: nil, provider: "anthropic", model: "claude-opus-5",
-          input_messages: [ message.new(role: :user, content: "How many tons?") ], message_count: 1, tools: [],
-          streaming: false, tokens: tokens.new(input: 12, output: 3, cache_read: 0, cache_write: 0, thinking: 0),
-          cost: cost.new(total: 0.0001), response_model: "claude-opus-5") { nil }
+          chat: nil, provider: "anthropic", model: "claude-opus-5", response_model: "claude-opus-5",
+          input_messages: [ message.new(role: :user, content: "How many tons?",
+                                        attachments: [ attachment.new(type: :image, filename: "placard.jpg"),
+                                                       attachment.new(type: :pdf, filename: "bol.pdf") ]) ],
+          message_count: 1, tools: [ :lookup ], streaming: false, temperature: 0.2,
+          tokens: tokens.new(input: 12, output: 3, cache_read: 0, cache_write: 0, thinking: 0),
+          cost: cost.new(total: 0.0001),
+          workflow_id: "article-42", workflow_name: "Write article",
+          workflow_step_id: "step-1", workflow_step_name: "Research", workflow_step_parent_id: "step-0") { nil }
       end
     }
   }.freeze
