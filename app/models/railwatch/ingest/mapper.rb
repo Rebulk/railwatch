@@ -111,6 +111,7 @@ module Railwatch
       def validate_record!(rec, identifiers: true)
         raise TypeError, "record must be an object" unless rec.is_a?(Hash)
         raise TypeError, "t must be a string" unless rec["t"].is_a?(String)
+        validate_version!(rec)
 
         if identifiers
           validate_identifier!(rec, "_group", GROUP_HASH, "32 hexadecimal characters")
@@ -127,6 +128,17 @@ module Railwatch
         validate_numeric_hash!(rec["counters"], "counters")
         validate_frames!(rec["frames"])
         validate_locals!(rec["locals"])
+      end
+
+      # A record shape is named by its type and version (Railwatch::Record::VERSIONS).
+      # This mapper only knows the versions the gem it ships with emits; a
+      # record from a newer or older gem is refused by name rather than read
+      # through columns that may no longer mean the same thing.
+      def validate_version!(rec)
+        expected = Record::VERSIONS[rec["t"].to_sym]
+        return if expected.nil? # unknown type: row_for answers nil and the batch rejects it as such
+
+        raise TypeError, "#{rec["t"]} v#{rec["v"].inspect} is not v#{expected}" unless rec["v"].is_a?(Integer) && rec["v"] == expected
       end
 
       def validate_identifier!(rec, field, pattern, description)

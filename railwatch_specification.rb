@@ -5,6 +5,8 @@ require_relative "lib/railwatch/version"
 module Railwatch
   module Packaging
     PUBLIC_NAME = "railwatch"
+    # Mirrors Railwatch::BROWSER_CLIENT; the gemspec loads only version.rb.
+    BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
 
     module_function
 
@@ -35,7 +37,7 @@ module Railwatch
           # app/frontend is the dashboard's source; the gem ships its build
           # (public/railwatch) so a host needs no Node.
           Dir["{app,config,db,lib,docs,public}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
-            .select { |path| File.file?(path) && !path.start_with?("app/frontend/") }
+            .select { |path| File.file?(path) && (!path.start_with?("app/frontend/") || path == BROWSER_CLIENT) }
         end
 
         spec.add_dependency "rails", ">= 8.1", "< 9"

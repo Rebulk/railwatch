@@ -182,6 +182,7 @@ module Railwatch
             # batch does not need.
             raise TypeError, "record must be an object" unless rec.is_a?(Hash)
             raise TypeError, "t must be a string" unless rec["t"].is_a?(String)
+            Ingest::Mapper.validate_version!(rec)
           else
             Ingest::Mapper.validate_record!(rec)
           end

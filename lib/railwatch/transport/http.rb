@@ -13,6 +13,16 @@ module Railwatch
     # Reporter owns retention and backoff between calls. A 401 marks the
     # transport unauthorized so no further requests are made.
     class Http
+      # The request headers a delivery carries besides the body. The receiver
+      # reads them by these names; Railwatch Cloud does so through this table.
+      HEADERS = {
+        dropped: "X-Railwatch-Dropped",
+        dropped_bytes: "X-Railwatch-Dropped-Bytes",
+        backpressure_factor: "X-Railwatch-Backpressure-Factor",
+        version: "X-Railwatch-Version",
+        batch_id: "X-Railwatch-Batch-Id"
+      }.freeze
+
       RETRYABLE_STATUSES = [ 402, 408, 429 ].freeze
       UNAUTHORIZED_STATUS = 401
 
@@ -143,17 +153,17 @@ module Railwatch
         headers.each { |name, value| req[name] = value.to_s }
         req["Content-Type"] = "application/x-ndjson"
         req["Content-Encoding"] = "gzip"
-        req["X-Railwatch-Dropped"] = dropped.to_s if dropped.positive?
-        req["X-Railwatch-Dropped-Bytes"] = dropped_bytes.to_s if dropped_bytes.positive?
+        req[HEADERS[:dropped]] = dropped.to_s if dropped.positive?
+        req[HEADERS[:dropped_bytes]] = dropped_bytes.to_s if dropped_bytes.positive?
         if backpressure_factor > 1.0
-          req["X-Railwatch-Backpressure-Factor"] = backpressure_factor.to_s
+          req[HEADERS[:backpressure_factor]] = backpressure_factor.to_s
         end
         # The version this payload was built by, which for a stored delivery is
         # not the version running now. The receiver digests this header, so
         # sending today's value would turn an upgrade into a conflict and
         # destroy a delivery it had already accepted.
-        req["X-Railwatch-Version"] = gem_version
-        req["X-Railwatch-Batch-Id"] = batch_id
+        req[HEADERS[:version]] = gem_version
+        req[HEADERS[:batch_id]] = batch_id
         req.body = body
         request(req)
       end

@@ -73,6 +73,7 @@ begin
     lib/generators/railwatch/install/templates/initializer.rb.tt
     lib/railwatch.rb
     lib/railwatch/version.rb
+    lib/railwatch/wire_fixtures.json
     llms.txt
     app/controllers/railwatch/dashboard_controller.rb
     app/views/layouts/railwatch/dashboard.html.erb
@@ -88,7 +89,10 @@ begin
   forbidden = package_spec.files.reject { |path| allowed.match?(path) }
   assert!(forbidden.empty?, "package contains files outside the allowlist: #{forbidden.sort.join(', ')}")
   explicitly_forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|tmp|node_modules|app/frontend)/|\A(?:Gemfile\.lock|land\.sh|CLAUDE\.md|package\.json|pnpm-lock\.yaml|vite\.config\.ts)\z})
-  # The dashboard ships built, never as source: a host has no Node.
+  # The dashboard ships built, never as source: a host has no Node. The one
+  # exception is the browser client, which a host's own build imports.
+  explicitly_forbidden -= [ Railwatch::Packaging::BROWSER_CLIENT ]
+  assert!(package_spec.files.include?(Railwatch::Packaging::BROWSER_CLIENT), "package is missing the browser client")
   entries = package_spec.files.grep(%r{\Apublic/railwatch/assets/.*\.js\z})
   assert!(entries.any?, "package has no built dashboard bundle; run rake dashboard:build")
   assert!(explicitly_forbidden.empty?, "package contains internal files: #{explicitly_forbidden.sort.join(', ')}")
