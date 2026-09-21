@@ -182,10 +182,10 @@ being silent.
 A queue holding more than one batch is delivered as several batches: the
 tail is put back for the next flush rather than dropped.
 
-A background thread drains the buffer and POSTs. Each POST retries one
-raised network error or 5xx immediately. If delivery still fails, the batch
-and its drop counter go back into the bounded buffer; **402**, **408**,
-**429**, and all **5xx** responses are retained the same way. So is a **2xx
+A background thread drains the buffer and POSTs, one attempt per delivery.
+If it fails, the batch and its drop counter go back into the bounded
+buffer; a raised network error, **402**, **408**, **429**, and all **5xx**
+responses are retained the same way. So is a **2xx
 that cannot acknowledge the batch** — a proxy's HTML sign-in page, malformed
 JSON, or `accepted`/`rejected` counts that do not cover what was sent — which
 would otherwise be a silent drop. The reporter

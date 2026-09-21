@@ -71,16 +71,20 @@ RSpec.describe Railwatch::Transport::Http do
       expect(captured.headers["X-Railwatch-Backpressure-Factor"]).to eq("4.0")
     end
 
-    it "uses one caller-supplied batch id for the original request and its immediate retry" do
+    it "sends the caller-supplied batch id, so the reporter's retries of one batch share it" do
       seen_ids = []
       stub_request(:post, "http://railwatch.test/ingest").to_return do |request|
         seen_ids << request.headers["X-Railwatch-Batch-Id"]
         seen_ids.one? ? { status: 503, body: "unavailable" } : { status: 200, body: '{"accepted":1,"rejected":0}' }
       end
 
-      result = transport.deliver([ { t: "log" } ], batch_id: "804b36bd-5cf7-4ed5-b649-ab8a7064e13b")
+      # Two calls with one id: what the reporter does when it retries a
+      # retained batch. The transport itself no longer retries.
+      first = transport.deliver([ { t: "log" } ], batch_id: "804b36bd-5cf7-4ed5-b649-ab8a7064e13b")
+      second = transport.deliver([ { t: "log" } ], batch_id: "804b36bd-5cf7-4ed5-b649-ab8a7064e13b")
 
-      expect(result.ok).to be(true)
+      expect(first).to be_retryable
+      expect(second.ok).to be(true)
       expect(seen_ids).to eq([ "804b36bd-5cf7-4ed5-b649-ab8a7064e13b" ] * 2)
     end
 
@@ -118,7 +122,10 @@ RSpec.describe Railwatch::Transport::Http do
       expect(decoded).to include('"message":"a"')
     end
 
-    it "retries once on a network error, then returns a retryable result without raising" do
+    # One attempt per call, so a network error costs the reporter one timeout
+    # per rung of its ladder, not two. It used to retry here as well, which
+    # doubled the cost of every rung against a receiver that never answers.
+    it "makes one attempt on a network error, then returns a retryable result without raising" do
       seen_errors = []
       Railwatch.on_unrecoverable { |e| seen_errors << e }
       stub_request(:post, "http://railwatch.test/ingest").to_raise(Net::OpenTimeout)
@@ -128,7 +135,7 @@ RSpec.describe Railwatch::Transport::Http do
 
       expect(result.ok).to be(false)
       expect(result).to be_retryable
-      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.times(2)
+      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.once
       expect(seen_errors).to be_empty
     ensure
       Railwatch.config.on_unrecoverable = nil
@@ -144,14 +151,19 @@ RSpec.describe Railwatch::Transport::Http do
       expect(result.error).to include("Net::OpenTimeout")
     end
 
-    it "retries a 5xx response once and succeeds on the retry" do
+    it "hands a 5xx back to the reporter as retryable rather than retrying it here" do
       stub_request(:post, "http://railwatch.test/ingest")
-        .to_return({ status: 503, body: "unavailable" }, { status: 200, body: '{"accepted":1,"rejected":0}' })
+        .to_return({ status: 503, body: "unavailable", headers: { "Retry-After" => "7" } },
+                   { status: 200, body: '{"accepted":1,"rejected":0}' })
 
       result = transport.deliver([ { t: "log" } ])
 
-      expect(result.ok).to be(true)
-      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.times(2)
+      expect(result.ok).to be(false)
+      expect(result.status).to eq(503)
+      expect(result).to be_retryable
+      # The receiver's delay still comes through: the classification is intact, only the loop is gone.
+      expect(result.retry_after_at).to be_within(2).of(Time.now + 7)
+      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.once
     end
 
     it "classifies quota, timeout, rate-limit, and server responses as retryable" do

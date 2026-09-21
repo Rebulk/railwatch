@@ -21,6 +21,11 @@ Puma::Plugin.create do
   attr_reader :log_writer, :writer_pid
 
   POLL = 2
+  # How often a stopping writer is checked for, and how long a KILL is given
+  # to take before the pid is abandoned (a process stuck in disk I/O cannot
+  # die until the I/O returns, and Puma's exit should not wait for that).
+  REAP_POLL = 0.05
+  KILL_REAP = 1
 
   def start(launcher)
     @log_writer = launcher.log_writer
@@ -151,17 +156,57 @@ Puma::Plugin.create do
     log "Railwatch writer shutdown failed (#{e.class}: #{e.message})"
   end
 
-  # TERM closes the writer's listener and it drains what it is holding; the
-  # wait also reaps it, so a cluster master never leaves a zombie behind.
+  # TERM closes the writer's listener; it finishes what it is holding and
+  # exits on its own. Waited for with a deadline, not Process.wait, which
+  # has none: a writer wedged in a SQLite write or on a full disk would hold
+  # Puma's exit open for as long as it stayed wedged. KILL past the deadline.
+  # Reaped either way, so a cluster master never leaves a zombie behind.
   def stop_writer
     return unless @writer_pid
 
     Process.kill(:TERM, @writer_pid)
-    Process.wait(@writer_pid)
+    return if reaped_within?(stop_timeout)
+
+    log "Railwatch writer (pid #{@writer_pid}) did not exit within #{stop_timeout}s of TERM; killing it"
+    Process.kill(:KILL, @writer_pid)
+    log "Railwatch writer (pid #{@writer_pid}) did not exit on KILL; leaving it" unless reaped_within?(KILL_REAP)
   rescue Errno::ECHILD, Errno::ESRCH
     nil
   ensure
     @writer_pid = nil
+  end
+
+  # shutdown_timeout: the same allowance this process gives its own
+  # reporter, and deliberately NOT the writer's full theoretical exit time
+  # (a sequential SHUTDOWN_DRAIN join per worker thread, its maintenance
+  # join, then its own reporter shutdown -- 13s at the defaults). Waiting
+  # that long would buy nothing: a writer killed mid-batch loses no data,
+  # because the transaction rolls back and the worker retries the batch by
+  # id against the next writer (Writer#serve says so). Exit time spent
+  # waiting for the drain is spent for nothing. An idle writer is gone in
+  # well under a second either way.
+  #
+  # This runs from at_exit, inside the container's TERM-to-KILL grace. Under
+  # Kamal that is Docker's 10s default for a proxied role that has not set
+  # `stop_timeout`, or whatever `stop_timeout` says when it has; an app that
+  # wants the writer given longer can raise RAILWATCH_SHUTDOWN_TIMEOUT to
+  # match its grace, and this bound rises with it.
+  def stop_timeout
+    [ ::Railwatch.config.shutdown_timeout.to_f, 0.0 ].max
+  end
+
+  # Non-blocking waits on a short poll; Process.wait has no timeout and a
+  # child that never exits would hold it forever. ECHILD (the cluster's
+  # wait2(-1) reaped it first) propagates to stop_writer, which reads it as
+  # gone.
+  def reaped_within?(seconds)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    loop do
+      return true if Process.waitpid(@writer_pid, Process::WNOHANG)
+      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      sleep REAP_POLL
+    end
   end
 
   def log(message)

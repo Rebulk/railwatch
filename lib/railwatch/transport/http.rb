@@ -8,9 +8,10 @@ require "json"
 
 module Railwatch
   module Transport
-    # POSTs gzip NDJSON batches to the platform. Each call retries one raised
-    # error or 5xx response, then returns a classified, non-raising result;
-    # Reporter owns retention and backoff between calls. A 401 marks the
+    # POSTs gzip NDJSON batches to the platform. Each call makes exactly one
+    # attempt and returns a classified, non-raising result; Reporter owns
+    # retention, the retry ladder, and backoff between calls, so a retry here
+    # would multiply into its schedule rather than add to it. A 401 marks the
     # transport unauthorized so no further requests are made.
     class Http
       # The request headers a delivery carries besides the body. The receiver
@@ -87,17 +88,11 @@ module Railwatch
           dropped += over_cap
           dropped_bytes += over_cap_bytes
         end
-        attempt = 0
         begin
-          attempt += 1
           result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
-          if attempt < 2 && (500..599).cover?(result.status)
-            result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
-          end
           apply_status_policy(result)
           result
         rescue StandardError => e
-          retry if attempt < 2
           Result.new(ok: false, error: "#{e.class}: #{e.message}")
         end
       end

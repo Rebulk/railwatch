@@ -319,6 +319,17 @@ through `Railwatch.on_unrecoverable`, so loss is never silent. A Puma
 phased restart stops the writer and starts a fresh one once the new
 workers are up.
 
+Stopping the writer is bounded. Puma sends it TERM and waits up to
+`c.shutdown_timeout` (2 seconds) for it to exit, the same allowance it
+gives its own reporter, then kills it. A writer killed mid-batch loses
+nothing: the transaction rolls back and the worker retries that batch by
+id against the next writer, so waiting longer for its drain would buy no
+data. The bound is what keeps Puma's exit short when the writer is wedged
+in a SQLite write or on a full disk. It counts against the container's
+stop grace (Docker's default is 10 seconds; Kamal's `stop_timeout` sets
+it), and `RAILWATCH_SHUTDOWN_TIMEOUT` raises it for an app whose grace
+allows more.
+
 ## Maintenance
 
 Railwatch needs no job worker and nothing in `config/recurring.yml`.
