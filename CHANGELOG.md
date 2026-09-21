@@ -6,6 +6,30 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Say so when an execution's record tree was truncated. The per-execution
+  buffer (`execution_buffer_bytes`, 8 MiB) keeps the earliest child records
+  and drops the rest, and the parent said nothing about it: a job that
+  issued 5,048 queries showed a plausible-looking 3,155-query trace. The
+  author's own production app was losing 27.6% of its telemetry this way
+  (1,258,996 accepted against 480,992 dropped in a day), visible only as an
+  aggregate on the usage page. The parent record now carries
+  `dropped_records` and `dropped_bytes` when the tree lost anything, the
+  telemetry database stores them (`executions.dropped_records`,
+  `executions.dropped_bytes`), and the execution page states, in one line
+  above the timeline, how many child records were recorded, how many were
+  dropped, and why. The cap itself is unchanged: a tree that overflows it
+  has an N+1 to fix, and the point is to show that rather than buffer more.
+
+- Stop building records the execution is about to drop. Once its buffer
+  has overflowed, `Execution#recording?` answers no and counts the record
+  the subscriber was about to build, so the SQL normalisation, redaction,
+  backtrace walk and byte weighing for it never run. Measured on a query
+  notification against a full buffer, same process, best of three: 15.3us
+  to 8.2us per query with the SQL shape cached, 35.4us to 8.0us with a
+  fresh shape, against a 7.7us floor for a sampled-out execution that only
+  counts. A dropped query now costs the gem ~0.4us over that floor instead
+  of ~8us (cached) or ~28us (uncached).
+
 - Bound how long Puma waits for the embedded writer to stop. The plugin sent
   the writer TERM and then called `Process.wait` on it, which has no timeout:
   a writer that did not exit -- stuck in a SQLite write, on a full disk --

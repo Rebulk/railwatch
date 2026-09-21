@@ -62,6 +62,8 @@ these fields, from `Railwatch.build_parent` in `lib/railwatch.rb`:
 | `gc_time` | GC time in the execution's window, when the Ruby build exposes `GC.stat(:time)`. |
 | `exception_preview` | First unhandled exception's `"Class: message"`, truncated to 255 chars, or nil. |
 | `context` | Serialized `Railwatch.context(...)` key/values active for this execution, parameter-filtered like request params. `"_railwatch_truncated": true` when it did not fit in 64KB. |
+| `dropped_records` | Child records this execution's tree lost to `execution_buffer_bytes` (or `Execution::MAX_RECORDS`): the earliest records are kept and everything after the first overflow is counted here instead of built. Present only when non-zero, and only on a tree that shipped. The dashboard's execution page says so in words. |
+| `dropped_bytes` | Estimated in-memory weight of those dropped records. Present alongside `dropped_records`. |
 
 A sampled-out execution still ships its parent record if it raised an
 unhandled exception. See `Railwatch.finish_execution`. Sampling controls

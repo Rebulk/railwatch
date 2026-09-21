@@ -183,6 +183,14 @@ module Railwatch
         group ||= fields.delete(:group)
         fields[:tail_sampled] = true if tail
         fields[:profiled] = true if profiled
+        # What the tree lost to its own buffer (Execution#buffer), so the
+        # parent says so where someone opening it will look. Only on a tree
+        # that ships: a ring that was never promoted lost nothing anyone was
+        # going to see.
+        if shipping && exe.dropped_records.positive?
+          fields[:dropped_records] = exe.dropped_records
+          fields[:dropped_bytes] = exe.dropped_bytes
+        end
         parent = build_parent(parent_type, exe, group: group, **fields)
       end
       if shipping

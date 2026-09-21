@@ -102,6 +102,27 @@ RSpec.describe "embedded dashboard", type: :request do
     expect(page["props"]["execution"]).to include("name" => "GET /widgets(.:format)", "kind" => "request")
   end
 
+  it "stores what a truncated execution lost and hands it to the execution page" do
+    previous = Railwatch.config.execution_buffer_bytes
+    Railwatch.config.execution_buffer_bytes = 1_500
+    get "/widgets"
+    records = railwatch_records
+    request = records.find { |r| r[:t] == "request" }
+    expect(request[:dropped_records]).to be > 0
+
+    local_write!(records)
+
+    stored = telemetry { Railwatch::Telemetry::Execution.find_by!(execution_id: request[:execution_id]) }
+    expect(stored.dropped_records).to eq(request[:dropped_records])
+    expect(stored.dropped_bytes).to eq(request[:dropped_bytes])
+
+    get "/railwatch/apps/1/envs/1/requests/#{stored.execution_id}", headers: inertia_headers
+    execution = response.parsed_body["props"]["execution"]
+    expect(execution).to include("dropped_records" => request[:dropped_records], "dropped_bytes" => request[:dropped_bytes])
+  ensure
+    Railwatch.config.execution_buffer_bytes = previous
+  end
+
   it "groups a raised exception into an issue as the batch lands, without touching the host's job queue" do
     get "/boom"
     result = local_write!(railwatch_records)
