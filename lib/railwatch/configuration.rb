@@ -81,7 +81,7 @@ module Railwatch
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
                   :beacon_enabled, :beacon_rate_limit, :beacon_global_rate_limit, :beacon_allowed_origins,
                   :debug, :capture_default_vendor_commands,
-                  :capture_default_vendor_cache_keys, :on_unrecoverable,
+                  :capture_default_vendor_cache_keys, :on_unrecoverable, :warn_on_data_loss,
                   :capture_framework_events,
                   :tail_sample_slow_ms, :failure_context, :propagate_traces, :trace_propagation_hosts,
                   :health_interval, :capture_query_explain, :explain_threshold_ms,
@@ -195,6 +195,12 @@ module Railwatch
       @capture_default_vendor_cache_keys = env_bool("RAILWATCH_CAPTURE_DEFAULT_VENDOR_CACHE_KEYS", false)
       @capture_framework_events = env_bool("RAILWATCH_CAPTURE_FRAMEWORK_EVENTS", false)
       @on_unrecoverable = nil
+      # Off, because a gem printing into an application's own output is the
+      # gem changing that application's behaviour, and this one stays
+      # additive. Turn it on and a batch lost for good says so in one stderr
+      # line; leave it off and the loss shows behind RAILWATCH_DEBUG, or
+      # wherever on_unrecoverable routes it.
+      @warn_on_data_loss = env_bool("RAILWATCH_WARN_ON_DATA_LOSS", true)
       @beacon_enabled = env_bool("RAILWATCH_BEACON", true)
       # The beacon is unauthenticated and forces Railwatch.keep! for browser
       # errors, so without a ceiling anyone can spend an app's event quota

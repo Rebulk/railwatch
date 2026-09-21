@@ -100,10 +100,17 @@ module Railwatch
 
     def flush
       ensure_process!
-      @flush_mutex.synchronize do
+      deferred = nil
+      result = @flush_mutex.synchronize do
+        @deferred_notifications = []
         update_backpressure
         deliver_buffer
+      ensure
+        deferred = @deferred_notifications
+        @deferred_notifications = nil
       end
+      deferred&.each { |error| Railwatch.notify_unrecoverable(error) }
+      result
     end
 
     def ensure_thread
@@ -278,6 +285,19 @@ module Railwatch
       end
     end
 
+    # Everything reachable from deliver_buffer runs inside @flush_mutex, so
+    # the loss it reports cannot be handed to the application there. Ruby's
+    # Mutex is not reentrant: the documented callback is Rails.error.report,
+    # whose subscriber records the error as an exception and can end up asking
+    # this same reporter to flush -- "ThreadError: deadlock; recursive
+    # locking", rescued by notify_unrecoverable and so a callback cut off
+    # halfway, reporting nothing. Collected here and dispatched by flush once
+    # the lock is released. retain already does this for @mutex; @flush_mutex
+    # is the outer one it still sat inside.
+    def defer_notification(error)
+      @deferred_notifications ? @deferred_notifications << error : Railwatch.notify_unrecoverable(error)
+    end
+
     def deliver_buffer
       # A 401 was reported once, when the transport first saw it; after
       # that the token is wrong until the process restarts, and repeating
@@ -337,7 +357,7 @@ module Railwatch
     rescue StandardError => e
       result = Transport::Http::Result.new(ok: false, error: "#{e.class}: #{e.message}")
       batch&.records&.any? ? retain(batch, result) : delivery_succeeded
-      Railwatch.notify_unrecoverable(e)
+      defer_notification(e)
       result
     ensure
       in_flight(0, 0, 0, 0)
@@ -350,7 +370,7 @@ module Railwatch
     end
 
     def retain(batch, result)
-      @mutex.synchronize do
+      gave_up = @mutex.synchronize do
         @in_flight_records = 0
         @in_flight_dropped = 0
         @in_flight_bytes = 0
@@ -362,17 +382,7 @@ module Railwatch
           @retry_attempt = 0
           @retry_at = nil
           Railwatch.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
-          # Losing a batch is not a debug-level event: with an ingest (or an
-          # embedded writer) that never comes back this is the only place the
-          # loss is ever reported, and the dropped counter it leaves behind
-          # rides on the NEXT successful delivery, which may never happen.
-          Railwatch.notify_unrecoverable(
-            DeliveryError.new("Railwatch dropped #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} failed delivery attempts: " \
-                              "#{result.error || result.status}",
-                              status: result.status, records: batch.records.size, bytes: batch.bytes,
-                              dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
-          )
-          next
+          next true
         end
         @retry_batch = batch
         delay = retry_delay(@retry_attempt)
@@ -382,7 +392,32 @@ module Railwatch
           "retained #{batch.records.size} records after retryable delivery failure " \
             "(#{result.error || result.status}); retry #{@retry_attempt} in #{delay.round(3)}s"
         end
+        false
       end
+      return unless gave_up
+
+      # Losing a batch is not a debug-level event: with an ingest (or an
+      # embedded writer) that never comes back this is the only place the
+      # loss is ever reported, and the dropped counter it leaves behind
+      # rides on the NEXT successful delivery, which may never happen.
+      #
+      # Reported here, after the lock is released, never inside it. The
+      # callback is the app's: the documented one is Rails.error.report,
+      # whose subscriber records the error as an exception and so writes
+      # straight back into this reporter -- which needs @mutex to arm the
+      # thread or ask for a flush, and under the lock that was
+      # "ThreadError: deadlock; recursive locking" and a callback cut off
+      # halfway. A slow callback under the lock was worse: shutdown's own
+      # @mutex.synchronize and every request thread's write_now sat behind
+      # it for as long as it took. notify_unsent and delivery_rejected
+      # already call out unlocked; this was the one that did not.
+      defer_notification(
+        DeliveryError.new("Railwatch dropped #{batch.records.size} #{batch.records.size == 1 ? "record" : "records"} " \
+                          "after #{MAX_RETRY_ATTEMPTS + 1} failed delivery attempts: " \
+                          "#{result.error || result.status}",
+                          status: result.status, records: batch.records.size, bytes: batch.bytes,
+                          dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
+      )
     end
 
     def discard_unauthorized
@@ -406,7 +441,7 @@ module Railwatch
     def delivery_rejected(batch, result)
       delivery_succeeded
       detail = result.error.to_s.empty? ? "HTTP #{result.status}" : result.error
-      Railwatch.notify_unrecoverable(
+      defer_notification(
         DeliveryError.new("Railwatch ingest permanently rejected #{batch.records.size} records: #{detail}",
                           status: result.status, records: batch.records.size, bytes: batch.bytes,
                           dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
@@ -550,7 +585,8 @@ module Railwatch
       return unless should_notify
 
       Railwatch.notify_unrecoverable(
-        DeliveryError.new("Railwatch #{reason} with #{records} unsent records retained in memory (#{bytes} bytes)",
+        DeliveryError.new("Railwatch #{reason} with #{records} unsent #{records == 1 ? "record" : "records"} " \
+                          "retained in memory (#{bytes} bytes)",
                           records: records, bytes: bytes, dropped: dropped, dropped_bytes: dropped_bytes)
       )
     end

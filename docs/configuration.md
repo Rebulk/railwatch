@@ -827,9 +827,25 @@ Railwatch.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 Called whenever Railwatch rescues one of its own internal errors, ingest
 permanently rejects a batch, or shutdown expires with retained records
 that could not be sent. Retryable delivery failures stay buffered and do
-not fire the callback on every attempt. With no callback registered, this
-falls back to `Railwatch.debug`. That goes to stderr, gated on
-`RAILWATCH_DEBUG`, never `Rails.logger`, so gem-internal failures can
+not fire the callback on every attempt. With no callback registered, a
+recovered internal error falls back to `Railwatch.debug`, gated on
+`RAILWATCH_DEBUG` — the gem carried on and there is nothing to do about it.
+
+**Lost records are different, and are reported by default.** A batch
+dropped after its retry ladder, one the receiver permanently refused, or
+records still unsent when the bounded shutdown ran out of time each print
+one `[railwatch]` stderr line. Telemetry that vanishes silently looks
+exactly like having nothing to report, and a short-lived process — a rake
+task, a `rails runner`, a cron job — gets one bounded shutdown and no
+second chance to mention it.
+
+Two ways out, and the line names both. A registered `on_unrecoverable`
+always wins, which is how an app routes the loss somewhere better
+(`Rails.error.report`). Or set `warn_on_data_loss = false`
+(`RAILWATCH_WARN_ON_DATA_LOSS=false`) and the gem goes back to saying
+nothing.
+
+Either way it is stderr, never `Rails.logger`, so gem-internal failures can
 never themselves become `log` records.
 
 ## Faraday

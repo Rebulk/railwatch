@@ -774,6 +774,109 @@ RSpec.describe Railwatch::Reporter do
   end
 
 
+  describe "reporting a lost batch" do
+    # What the documented callback does: Rails.error.report reaches
+    # Subscribers::Exceptions, which records the error -- as a write into
+    # this same reporter. The give-up path used to make that call while
+    # holding @mutex, so the callback died with "deadlock; recursive
+    # locking" (rescued and hidden by notify_unrecoverable) and the loss was
+    # never reported anywhere the app could see.
+    it "runs on_unrecoverable outside the reporter lock, so a callback that records into Railwatch completes" do
+      completed = false
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
+        Railwatch::Transport::Http::Result.new(ok: false, status: 503, error: "unavailable")
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      Railwatch.on_unrecoverable do |error|
+        # Enough records to cross flush_threshold: write then takes @mutex
+        # to ask for a flush, which is the re-entry that deadlocked.
+        reporter_config.flush_threshold.times { reporter.write({ t: "exception", message: error.message }) }
+        completed = true
+      end
+      reporter.buffer.push({ t: "log" })
+
+      (described_class::MAX_RETRY_ATTEMPTS + 1).times do
+        reporter.instance_variable_set(:@retry_at, nil)
+        reporter.flush
+      end
+
+      expect(completed).to be(true)
+      expect(reporter.buffer.size).to eq(reporter_config.flush_threshold)
+    ensure
+      Railwatch.config.on_unrecoverable = nil
+    end
+
+    # @mutex was the inner lock. flush holds @flush_mutex around the whole of
+    # deliver_buffer, and retain/delivery_rejected/the rescue all report from
+    # inside it, so a callback that asks this same reporter to flush hit the
+    # same non-reentrant Mutex one level out -- same "deadlock; recursive
+    # locking", same silent half-run callback. Railwatch.flush is public and
+    # documented, so this is a callback an app can reasonably write.
+    it "runs on_unrecoverable outside the flush lock, so a callback that flushes completes" do
+      outcome = nil
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
+        Railwatch::Transport::Http::Result.new(ok: false, status: 503, error: "unavailable")
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      Railwatch.on_unrecoverable do |_error|
+        reporter.flush
+        outcome = :completed
+      rescue StandardError => e
+        outcome = "#{e.class}: #{e.message}"
+      end
+      reporter.buffer.push({ t: "log" })
+
+      (described_class::MAX_RETRY_ATTEMPTS + 1).times do
+        reporter.instance_variable_set(:@retry_at, nil)
+        reporter.flush
+      end
+
+      expect(outcome).to eq(:completed)
+    ensure
+      Railwatch.config.on_unrecoverable = nil
+    end
+
+    # Loud by default on purpose. Losing telemetry silently is the failure that
+    # looks exactly like having nothing to report, and an operator who is never
+    # told cannot tell the two apart. One stderr line carries both ways out of
+    # it, so nobody has to find this in the docs to stop it.
+    it "tells stderr when records are lost for good, and says how to silence it" do
+      config = reporter_config
+      config.debug = false
+      Railwatch.config.on_unrecoverable = nil
+      allow(Railwatch).to receive(:config).and_return(config)
+      loss = described_class::DeliveryError.new("Railwatch shutdown timed out with 3 unsent records retained in memory (17686 bytes)",
+                                                records: 3, bytes: 17_686)
+
+      expect(config.warn_on_data_loss).to be(true)
+      expect { Railwatch.notify_unrecoverable(loss) }
+        .to output(a_string_including("[railwatch] Railwatch shutdown timed out with 3 unsent records",
+                                      "on_unrecoverable", "warn_on_data_loss = false")).to_stderr
+
+      # And an operator who does not want it keeps a silent host.
+      config.warn_on_data_loss = false
+      expect { Railwatch.notify_unrecoverable(loss) }.not_to output.to_stderr
+
+      # A recovered internal error stays debug-only either way: the gem carried
+      # on, and there is nothing for an operator to do about it.
+      config.warn_on_data_loss = true
+      expect { Railwatch.notify_unrecoverable(RuntimeError.new("subscriber raised")) }.not_to output.to_stderr
+    end
+
+    it "lets a registered callback replace the stderr line" do
+      seen = []
+      Railwatch.on_unrecoverable { |error| seen << error }
+      loss = described_class::DeliveryError.new("Railwatch dropped 1 records", records: 1)
+
+      expect { Railwatch.notify_unrecoverable(loss) }.not_to output.to_stderr
+      expect(seen).to eq([ loss ])
+    ensure
+      Railwatch.config.on_unrecoverable = nil
+    end
+  end
+
   describe "shutdown" do
     it "immediately attempts an already-retained batch and sends it on recovery" do
       available = false
@@ -815,7 +918,7 @@ RSpec.describe Railwatch::Reporter do
       expect(reporter.send(:pending_delivery).first).to eq(1)
       error = seen_errors.grep(described_class::DeliveryError).first
       expect(error&.records).to eq(1)
-      expect(error&.message).to include("unsent records retained in memory")
+      expect(error&.message).to include("1 unsent record retained in memory")
     ensure
       Railwatch.config.on_unrecoverable = nil
     end
