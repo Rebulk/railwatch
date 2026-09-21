@@ -599,6 +599,18 @@ module Railwatch
     File.expand_path("../db/#{database}_migrate", __dir__)
   end
 
+  # Where links the models build (a trace from an execution page, a saved
+  # view's page) resolve. The engine's own routes serve the embedded
+  # dashboard; a host that mounts these pages on its own routes, as
+  # Railwatch Cloud does, points this at them.
+  def self.url_helpers
+    @url_helpers || Engine.routes.url_helpers
+  end
+
+  def self.url_helpers=(helpers)
+    @url_helpers = helpers
+  end
+
   # The one browser client, relative to the gem root. The dashboard bundle
   # is built from it, the install generator copies it, the gem ships it (the
   # only app/frontend file it does), and a host with its own frontend build

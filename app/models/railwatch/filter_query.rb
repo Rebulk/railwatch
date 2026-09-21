@@ -38,6 +38,26 @@ module Railwatch
       end
     end
 
+    # Narrows grouped route rows (Telemetry::Aggregations.grouped for "request")
+    # by method:, route:, and status:. Rollup rows carry no raw status codes,
+    # only aggregated count/errors/client_errors, so status:5xx and friends are
+    # a family match against those buckets rather than an exact code lookup.
+    def self.filter_routes(routes, query)
+      fields = parse(query).fetch(:fields)
+      routes = routes.select { |r| r[:name].start_with?("#{fields['method'].upcase} ") } if fields["method"].present?
+      routes = routes.select { |r| r[:name].include?(fields["route"]) } if fields["route"].present?
+      if (range = status_range(fields["status"]))
+        routes = routes.select do |r|
+          case range.begin
+          when 500..599 then r[:errors].positive?
+          when 400..499 then r[:client_errors].positive?
+          else (r[:count] - r[:errors] - r[:client_errors]).positive?
+          end
+        end
+      end
+      routes
+    end
+
     def self.fields_for(resource)
       COMMON_FIELDS + RESOURCE_FIELDS.fetch(resource.to_sym)
     end

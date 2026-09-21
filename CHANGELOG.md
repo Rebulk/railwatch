@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.1 (2026-09-21)
+
+Three small seams for a host that runs these models on its own routes and
+migration history, found while Railwatch Cloud deleted its fork of them.
+
+- `Railwatch.url_helpers` is where the models resolve the links they build
+  (a trace from an execution page, a saved view's page). It is the engine's
+  routes unless the host sets it to its own.
+- `FilterQuery.filter_routes` narrows grouped route rows by `method:`,
+  `route:`, and `status:`; it lived in the requests controller.
+- The export queue migration is renumbered to 20260919000100. A host with
+  a telemetry migration of its own at the old number would otherwise fail
+  to run either.
+
 ## 0.5.0 (2026-09-21)
 
 The telemetry layer the hosted platform runs is this gem's, not a copy. Everything

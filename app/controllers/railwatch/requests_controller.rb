@@ -4,7 +4,7 @@ module Railwatch
     class RequestsController < DashboardController
     def index
       routes = grouped("request", limit: 200, order: params[:sort], dir: params[:dir])
-      routes = apply_filters(routes, FilterQuery.parse(params[:q]).fetch(:fields))
+      routes = FilterQuery.filter_routes(routes, params[:q])
       render inertia: { routes: routes, series: series("request"), deploys: deploys_in_window,
                         sort: params[:sort] || "count", dir: params[:dir] || "desc", q: params[:q].to_s }
     end
@@ -27,24 +27,6 @@ module Railwatch
     end
 
     private
-
-    # Rollup rows for "request" carry no raw status codes, only aggregated
-    # count/errors/client_errors, so status:5xx etc. is a family match against
-    # those buckets rather than an exact code lookup.
-    def apply_filters(routes, fields)
-      routes = routes.select { |r| r[:name].start_with?("#{fields['method'].upcase} ") } if fields["method"].present?
-      routes = routes.select { |r| r[:name].include?(fields["route"]) } if fields["route"].present?
-      if (range = FilterQuery.status_range(fields["status"]))
-        routes = routes.select do |r|
-          case range.begin
-          when 500..599 then r[:errors].positive?
-          when 400..499 then r[:client_errors].positive?
-          else (r[:count] - r[:errors] - r[:client_errors]).positive?
-          end
-        end
-      end
-      routes
-    end
 
     def execution_row(r)
       { execution_id: r.execution_id, name: r.name, status: r.status, duration: r.duration_ms.round(2), occurred_at: r.occurred_at,

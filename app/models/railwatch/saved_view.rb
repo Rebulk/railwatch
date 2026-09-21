@@ -56,7 +56,7 @@ module Railwatch
     # This page's index path with the view's window, query, and extra params
     # (sort/dir) applied -- the shareable URL.
     def path_for(environment)
-      Railwatch::Engine.routes.url_helpers.public_send(PAGE_PATHS.fetch(page), environment.application_id, environment.id,
+      Railwatch.url_helpers.public_send(PAGE_PATHS.fetch(page), environment.application_id, environment.id,
         { window: window.presence, q: query.presence, **params.to_h.symbolize_keys }.compact)
     end
   end

@@ -168,7 +168,7 @@ module Railwatch
     # is not the whole trace.
     def trace_url
       return nil unless @exe.trace_id && trace.size > 1
-      Railwatch::Engine.routes.url_helpers.application_environment_trace_path(@environment.application, @environment, @exe.trace_id)
+      Railwatch.url_helpers.application_environment_trace_path(@environment.application, @environment, @exe.trace_id)
     end
 
     def issues
