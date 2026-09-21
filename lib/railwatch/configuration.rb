@@ -200,7 +200,7 @@ module Railwatch
       # additive. Turn it on and a batch lost for good says so in one stderr
       # line; leave it off and the loss shows behind RAILWATCH_DEBUG, or
       # wherever on_unrecoverable routes it.
-      @warn_on_data_loss = env_bool("RAILWATCH_WARN_ON_DATA_LOSS", false)
+      @warn_on_data_loss = env_bool("RAILWATCH_WARN_ON_DATA_LOSS", true)
       @beacon_enabled = env_bool("RAILWATCH_BEACON", true)
       # The beacon is unauthenticated and forces Railwatch.keep! for browser
       # errors, so without a ceiling anyone can spend an app's event quota

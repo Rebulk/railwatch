@@ -17,14 +17,19 @@
   answers: the process left inside `shutdown_timeout` carrying three unsent
   records and printed nothing.
 
-  Nothing is printed by default, and that is deliberate: a monitoring gem
-  writing into its host's own output is the gem changing that application's
-  behaviour in order to report on itself, and this one stays additive and out
-  of the way. New `warn_on_data_loss` (`RAILWATCH_WARN_ON_DATA_LOSS`, off)
-  turns a `Reporter::DeliveryError` -- raised only once records are already
-  gone -- into one `[railwatch]` stderr line. A registered
-  `on_unrecoverable` always wins over it, which is how an app routes the
-  loss (`Rails.error.report`) instead. Recovered internal errors (a
+  A `Reporter::DeliveryError` -- raised only once the records are already
+  gone -- now prints one `[railwatch]` stderr line, and `warn_on_data_loss`
+  (`RAILWATCH_WARN_ON_DATA_LOSS`) defaults to **on**. Silence was the wrong
+  default: telemetry that disappears without a word looks exactly like
+  having nothing to report, which is the one failure an operator cannot
+  diagnose from the platform side, because the evidence is what went
+  missing. One line a deploy is the whole cost, and it only ever appears
+  when something was actually lost.
+
+  Both ways out are named in the line itself, so nobody has to find this
+  entry to stop it: a registered `on_unrecoverable` always wins, which is
+  how an app routes the loss somewhere better (`Rails.error.report`), and
+  `warn_on_data_loss = false` restores silence. Recovered internal errors (a
   subscriber that raised, a flush that will be retried) stay debug-only
   either way: the gem carried on and there is nothing for an operator to do.
 

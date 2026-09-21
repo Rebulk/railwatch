@@ -77,10 +77,13 @@ RSpec.describe "a cloud-only command process exiting" do
     bound = Railwatch.config.shutdown_timeout + 3.0
     expect(exiting).to be < bound
 
-    # Leaving inside the bound means leaving records behind -- and saying
-    # nothing about it, because the fixture sets neither RAILWATCH_DEBUG nor
-    # warn_on_data_loss. A default install's cron output stays exactly as it
-    # was without the gem: whatever the task itself printed, and no more.
-    expect(output).not_to include("[railwatch]")
+    # Leaving inside the bound means leaving records behind -- and this is the
+    # process that most needs to say so. A rake task gets one bounded shutdown
+    # and no second chance, so a cron job whose exception never reached the
+    # platform would otherwise look exactly like one that had nothing to
+    # report. The fixture sets neither RAILWATCH_DEBUG nor warn_on_data_loss,
+    # so this is the default install talking.
+    expect(output).to include("[railwatch]")
+    expect(output).to include("unsent records")
   end
 end

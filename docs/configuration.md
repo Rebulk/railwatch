@@ -829,16 +829,21 @@ permanently rejects a batch, or shutdown expires with retained records
 that could not be sent. Retryable delivery failures stay buffered and do
 not fire the callback on every attempt. With no callback registered, a
 recovered internal error falls back to `Railwatch.debug`, gated on
-`RAILWATCH_DEBUG`, and so does lost records (a batch dropped after its
-retries, permanently rejected, or still unsent when shutdown ran out of
-time). Nothing is printed otherwise: a monitoring gem writing into its
-host's own output would be changing that application's behaviour to report
-on itself, and this one stays additive.
+`RAILWATCH_DEBUG` — the gem carried on and there is nothing to do about it.
 
-Set `warn_on_data_loss` (`RAILWATCH_WARN_ON_DATA_LOSS`) to get one
-`[railwatch]` stderr line when records are lost for good — worth having on
-a box where a rake task's telemetry matters, since a short-lived process
-has no other chance to say so. A registered callback always wins over it.
+**Lost records are different, and are reported by default.** A batch
+dropped after its retry ladder, one the receiver permanently refused, or
+records still unsent when the bounded shutdown ran out of time each print
+one `[railwatch]` stderr line. Telemetry that vanishes silently looks
+exactly like having nothing to report, and a short-lived process — a rake
+task, a `rails runner`, a cron job — gets one bounded shutdown and no
+second chance to mention it.
+
+Two ways out, and the line names both. A registered `on_unrecoverable`
+always wins, which is how an app routes the loss somewhere better
+(`Rails.error.report`). Or set `warn_on_data_loss = false`
+(`RAILWATCH_WARN_ON_DATA_LOSS=false`) and the gem goes back to saying
+nothing.
 
 Either way it is stderr, never `Rails.logger`, so gem-internal failures can
 never themselves become `log` records.

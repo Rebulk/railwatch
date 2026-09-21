@@ -367,7 +367,8 @@ module Railwatch
       if config.on_unrecoverable
         config.on_unrecoverable.call(error)
       elsif error.is_a?(Reporter::DeliveryError) && config.warn_on_data_loss
-        warn("[railwatch] #{error.message}. Register Railwatch.on_unrecoverable to route this elsewhere.")
+        warn("[railwatch] #{error.message}. Register Railwatch.on_unrecoverable to route this elsewhere, " \
+             "or set warn_on_data_loss = false to silence it.")
       else
         debug { "unrecoverable internal error: #{error.class}: #{error.message}" }
       end

@@ -392,7 +392,8 @@ module Railwatch
       # it for as long as it took. notify_unsent and delivery_rejected
       # already call out unlocked; this was the one that did not.
       Railwatch.notify_unrecoverable(
-        DeliveryError.new("Railwatch dropped #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} failed delivery attempts: " \
+        DeliveryError.new("Railwatch dropped #{batch.records.size} #{batch.records.size == 1 ? "record" : "records"} " \
+                          "after #{MAX_RETRY_ATTEMPTS + 1} failed delivery attempts: " \
                           "#{result.error || result.status}",
                           status: result.status, records: batch.records.size, bytes: batch.bytes,
                           dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
@@ -564,7 +565,8 @@ module Railwatch
       return unless should_notify
 
       Railwatch.notify_unrecoverable(
-        DeliveryError.new("Railwatch #{reason} with #{records} unsent records retained in memory (#{bytes} bytes)",
+        DeliveryError.new("Railwatch #{reason} with #{records} unsent #{records == 1 ? "record" : "records"} " \
+                          "retained in memory (#{bytes} bytes)",
                           records: records, bytes: bytes, dropped: dropped, dropped_bytes: dropped_bytes)
       )
     end
