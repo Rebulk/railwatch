@@ -807,6 +807,37 @@ RSpec.describe Railwatch::Reporter do
       Railwatch.config.on_unrecoverable = nil
     end
 
+    # @mutex was the inner lock. flush holds @flush_mutex around the whole of
+    # deliver_buffer, and retain/delivery_rejected/the rescue all report from
+    # inside it, so a callback that asks this same reporter to flush hit the
+    # same non-reentrant Mutex one level out -- same "deadlock; recursive
+    # locking", same silent half-run callback. Railwatch.flush is public and
+    # documented, so this is a callback an app can reasonably write.
+    it "runs on_unrecoverable outside the flush lock, so a callback that flushes completes" do
+      outcome = nil
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
+        Railwatch::Transport::Http::Result.new(ok: false, status: 503, error: "unavailable")
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      Railwatch.on_unrecoverable do |_error|
+        reporter.flush
+        outcome = :completed
+      rescue StandardError => e
+        outcome = "#{e.class}: #{e.message}"
+      end
+      reporter.buffer.push({ t: "log" })
+
+      (described_class::MAX_RETRY_ATTEMPTS + 1).times do
+        reporter.instance_variable_set(:@retry_at, nil)
+        reporter.flush
+      end
+
+      expect(outcome).to eq(:completed)
+    ensure
+      Railwatch.config.on_unrecoverable = nil
+    end
+
     # Loud by default on purpose. Losing telemetry silently is the failure that
     # looks exactly like having nothing to report, and an operator who is never
     # told cannot tell the two apart. One stderr line carries both ways out of

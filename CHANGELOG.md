@@ -33,6 +33,17 @@
   subscriber that raised, a flush that will be retried) stay debug-only
   either way: the gem carried on and there is nothing for an operator to do.
 
+- Report a lost batch outside the flush lock too. The fix above moved the
+  callback out of `@mutex`, the inner lock -- but `Reporter#flush` holds
+  `@flush_mutex` around the whole of `deliver_buffer`, and the give-up path,
+  the permanent-rejection path and the rescue all report from inside it. A
+  callback that asks this same reporter to flush (`Railwatch.flush` is public
+  and documented) hit the same non-reentrant `Mutex` one level out: the same
+  `ThreadError: deadlock; recursive locking`, rescued and hidden by
+  `notify_unrecoverable`, so the callback ran halfway and reported nothing.
+  The locked path now collects what it needs to report and `flush` hands it
+  over once the lock is released. Found by CodeRabbit on this pull request.
+
 - Report a given-up batch after releasing the reporter lock, not under it.
   `Reporter#retain` called `on_unrecoverable` inside `@mutex.synchronize`.
   The documented callback is `Rails.error.report`, whose subscriber records
