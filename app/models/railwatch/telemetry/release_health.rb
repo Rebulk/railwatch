@@ -36,13 +36,19 @@ module Railwatch
         }
       end
 
-      # Hourly points for the stacked sessions-by-status chart.
-      def self.series(deploy, from, to)
-        between(from, to).for_release(deploy).group(:bucket).order(:bucket)
-          .pluck(:bucket, Arel.sql("SUM(sessions)"), Arel.sql("SUM(sessions_errored)"), Arel.sql("SUM(sessions_crashed)"))
-          .map { |bucket, sessions, errored, crashed|
-            { t: bucket, sessions: sessions, ok: sessions - errored - crashed, errored: errored, crashed: crashed }
+      # Points for the stacked sessions-by-status chart, one per `step` across
+      # the window. The table is hourly and a session is counted once per hour
+      # it was seen, so a step under an hour is drawn at an hour: raw session
+      # rows would count a live session on every flush.
+      def self.series(deploy, from, to, step: nil)
+        step = [ Telemetry::Aggregations::STEPS.fetch(step || Telemetry::Aggregations.default_step(from, to)), 1.hour ].max
+        bucket = Telemetry::Aggregations.bucket_sql("bucket", step)
+        points = between(from, to).for_release(deploy).group(bucket).order(bucket)
+          .pluck(bucket, Arel.sql("SUM(sessions)"), Arel.sql("SUM(sessions_errored)"), Arel.sql("SUM(sessions_crashed)"))
+          .map { |b, sessions, errored, crashed|
+            { t: Time.at(b).utc, sessions: sessions, ok: sessions - errored - crashed, errored: errored, crashed: crashed }
           }
+        Telemetry::Aggregations.fill(points, from, to, step) { |t| { t: t, sessions: 0, ok: 0, errored: 0, crashed: 0 } }
       end
 
       # Each release's share of the window's sessions, as a percentage -- how

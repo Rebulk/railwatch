@@ -13,7 +13,7 @@ import type { GroupRow, SharedProps } from "@/types"
 interface Run {
   execution_id: string
   name: string
-  exit_code: number | null
+  status: number | null
   duration: number
   occurred_at: string
   server: string | null
@@ -109,8 +109,8 @@ export default function Commands(p: Props) {
             header: "Exit",
             cell: (r) => (
               <StatusBadge
-                label={String(r.exit_code ?? "?")}
-                outcome={r.exit_code ? "failed" : "processed"}
+                label={String(r.status ?? "?")}
+                outcome={r.status ? "failed" : "processed"}
               />
             ),
           },

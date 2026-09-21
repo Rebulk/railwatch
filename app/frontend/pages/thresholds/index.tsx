@@ -1,5 +1,6 @@
 import { Form, router, usePage } from "@inertiajs/react"
 import { Bell } from "lucide-react"
+import { useState } from "react"
 
 import InputError from "@/components/input-error"
 import { DataTable } from "@/components/railwatch/data-table"
@@ -41,13 +42,35 @@ interface Props {
   jobs: string[]
   kinds: string[]
   metrics: string[]
+  metrics_for_kind: Record<string, string[]>
+  units: Record<string, string>
+  llm_models: string[]
   anomaly_rules: AnomalyRule[]
   anomaly_target_kinds: string[]
   anomaly_metrics: string[]
+  anomaly_metrics_for_kind: Record<string, string[]>
 }
 
 export default function Thresholds(p: Props) {
   const { environment } = usePage<SharedProps>().props
+  // Spend and tokens only exist on llm_calls, so the metric list narrows
+  // with the kind rather than offering a rule the server would reject.
+  const [kind, setKind] = useState(p.kinds[0])
+  const [metric, setMetric] = useState(p.metrics[0])
+  const [anomalyKind, setAnomalyKind] = useState(p.anomaly_target_kinds[0])
+  const [anomalyMetric, setAnomalyMetric] = useState(p.anomaly_metrics[0])
+  const anomalyAvailable =
+    p.anomaly_metrics_for_kind[anomalyKind] ?? p.anomaly_metrics
+  const available = p.metrics_for_kind[kind] ?? p.metrics
+  const unit = p.units[metric] ?? "ms"
+  const limitLabel =
+    unit === "$"
+      ? "Limit (US$)"
+      : unit === "%"
+        ? "Limit (%)"
+        : unit === ""
+          ? "Limit (count)"
+          : "Limit (ms)"
   const a = environment!.application_id
   const e = environment!.id
   return (
@@ -74,6 +97,13 @@ export default function Thresholds(p: Props) {
                   <select
                     id="target_kind"
                     name="target_kind"
+                    value={kind}
+                    onChange={(e) => {
+                      setKind(e.target.value)
+                      const next =
+                        p.metrics_for_kind[e.target.value] ?? p.metrics
+                      if (!next.includes(metric)) setMetric(next[0])
+                    }}
                     className="border-input h-9 rounded-md border bg-transparent px-2 text-sm"
                   >
                     {p.kinds.map((k) => (
@@ -101,6 +131,9 @@ export default function Thresholds(p: Props) {
                     {p.jobs.map((j) => (
                       <option key={j} value={j} />
                     ))}
+                    {p.llm_models.map((m) => (
+                      <option key={m} value={m} />
+                    ))}
                   </datalist>
                   <InputError messages={errors.target} />
                 </div>
@@ -110,8 +143,10 @@ export default function Thresholds(p: Props) {
                     id="metric"
                     name="metric"
                     className="border-input h-9 rounded-md border bg-transparent px-2 text-sm"
+                    value={metric}
+                    onChange={(e) => setMetric(e.target.value)}
                   >
-                    {p.metrics.map((m) => (
+                    {available.map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>
@@ -119,7 +154,7 @@ export default function Thresholds(p: Props) {
                   </select>
                 </div>
                 <div className="grid gap-1">
-                  <Label htmlFor="limit">Limit (ms or %)</Label>
+                  <Label htmlFor="limit">{limitLabel}</Label>
                   <Input
                     id="limit"
                     name="limit"
@@ -209,6 +244,15 @@ export default function Thresholds(p: Props) {
                     id="anomaly_target_kind"
                     name="target_kind"
                     className="border-input h-9 rounded-md border bg-transparent px-2 text-sm"
+                    value={anomalyKind}
+                    onChange={(e) => {
+                      setAnomalyKind(e.target.value)
+                      const next =
+                        p.anomaly_metrics_for_kind[e.target.value] ??
+                        p.anomaly_metrics
+                      if (!next.includes(anomalyMetric))
+                        setAnomalyMetric(next[0])
+                    }}
                   >
                     {p.anomaly_target_kinds.map((k) => (
                       <option key={k} value={k}>
@@ -234,8 +278,10 @@ export default function Thresholds(p: Props) {
                     id="anomaly_metric"
                     name="metric"
                     className="border-input h-9 rounded-md border bg-transparent px-2 text-sm"
+                    value={anomalyMetric}
+                    onChange={(e) => setAnomalyMetric(e.target.value)}
                   >
-                    {p.anomaly_metrics.map((m) => (
+                    {anomalyAvailable.map((m) => (
                       <option key={m} value={m}>
                         {m}
                       </option>

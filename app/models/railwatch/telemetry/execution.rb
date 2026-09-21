@@ -63,6 +63,24 @@ module Railwatch
         duration / 1000.0
       end
 
+      def queue_latency_ms
+        queue_latency && (queue_latency / 1000.0).round(1)
+      end
+
+      # The row every list surface shows for an execution: what the kind has
+      # in common, then what it adds.
+      def as_row
+        row = { execution_id: execution_id, kind: kind, name: name, status: status, outcome: outcome, duration: duration_ms.round(2),
+                occurred_at: occurred_at, deploy: deploy, server: server, user_ref: user_ref, tenant: app_tenant,
+                exception_preview: exception_preview }
+        case kind
+        when "request" then row.merge(method: self[:method], inertia_component: inertia_component, queries: counters["queries"])
+        when "job_attempt" then row.merge(queue: queue, attempt: attempt, job_id: job_id, queue_latency: queue_latency_ms)
+        when "scheduled_task" then row.merge(task_key: task_key)
+        else row
+        end
+      end
+
       def children_count
         counters.values.sum
       end

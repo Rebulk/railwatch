@@ -77,6 +77,12 @@ module Railwatch
         def quote(term) = %("#{term.gsub('"', '""')}")
       end
 
+      def as_row
+        { id: id, level: level, message: message.first(2000), tags: tags, occurred_at: occurred_at, deploy: deploy,
+          execution_id: execution_id, execution_source: execution_source, execution_preview: execution_preview,
+          source: source, tenant: app_tenant, user_ref: user_ref, context: context }
+      end
+
       def timeline_label
         message.to_s.first(120)
       end

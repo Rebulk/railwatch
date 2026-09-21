@@ -6,14 +6,13 @@ module Railwatch
   module EnvironmentScoped
     extend ActiveSupport::Concern
 
-    WINDOWS = { "1h" => 1.hour, "6h" => 6.hours, "24h" => 24.hours, "7d" => 7.days, "30d" => 30.days }.freeze
-    MAX_CUSTOM_RANGE = 90.days
-
     included do
       before_action :set_environment
       inertia_share environment: -> { environment_props }
-      inertia_share window: -> { window_key }
-      inertia_share range: -> { from, to = window_range; { from: from.iso8601(6), to: to.iso8601(6) } }
+      inertia_share window: -> { window.key }
+      inertia_share range: -> { window.to_h }
+      inertia_share step: -> { step_key }
+      inertia_share steps: -> { Telemetry::Aggregations.steps_for(*window_range) }
       inertia_share saved_views: -> { SavedView.props_for(environment, Viewer.user) }
     end
 
@@ -25,38 +24,19 @@ module Railwatch
       @environment = Environment.find(params[:environment_id] || Environment::ID)
     end
 
-    def window_key
-      custom_range ? "custom" : (WINDOWS.key?(params[:window].to_s) ? params[:window].to_s : "24h")
+    def window
+      @window ||= Window.parse(window: params[:window], from: params[:from], to: params[:to])
     end
 
-    def window_range
-      return @window_range if defined?(@window_range)
-      @window_range = custom_range || begin
-        key = WINDOWS.key?(params[:window].to_s) ? params[:window].to_s : "24h"
-        to = Time.current
-        [ to - WINDOWS[key], to ]
-      end
-    end
+    def window_range = window.range
 
-    def custom_range
-      return @custom_range if defined?(@custom_range)
-      from = parse_time(params[:from])
-      to = from && (parse_time(params[:to]) || Time.current)
-      valid = from && to && to > from && (to - from) <= MAX_CUSTOM_RANGE
-      @custom_range = valid ? [ from, to ] : nil
-    end
-
-    def parse_time(value)
-      return nil if value.blank?
-      Time.zone.parse(value.to_s)
-    rescue ArgumentError, TypeError
-      nil
-    end
-
-    def previous_window_range
+    # The chart bucket width: ?step= when it is one the window offers, else the
+    # window's default (a minute for an hour, an hour for a day, and so on).
+    def step_key
+      return @step_key if defined?(@step_key)
       from, to = window_range
-      span = to - from
-      [ from - span, from ]
+      offered = Telemetry::Aggregations.steps_for(from, to)
+      @step_key = offered.include?(params[:step].to_s) ? params[:step].to_s : Telemetry::Aggregations.default_step(from, to)
     end
 
     def telemetry(&block) = environment.with_telemetry(&block)
@@ -79,9 +59,11 @@ module Railwatch
       environment.deploys.between(*window_range).recent.limit(50).map { |d| { deploy: d.deploy, ref: d.short_ref, at: d.deployed_at } }
     end
 
-    def series(record_type, group_hash: nil, name: nil)
+    # Time-bucketed series for charts, one point per step_key across the
+    # window: [{t, count, errors, client_errors, avg, p50, p95, p99}]
+    def series(record_type, group_hash: nil)
       from, to = window_range
-      Telemetry::Aggregations.series(environment, record_type, from: from, to: to, group_hash: group_hash, name: name)
+      Telemetry::Aggregations.series(environment, record_type, from: from, to: to, group_hash: group_hash, step: step_key)
     end
 
     def grouped(record_type, limit: 100, order: nil, dir: nil)
@@ -91,7 +73,7 @@ module Railwatch
 
     def summary_with_delta(record_type, group_hash: nil)
       from, to = window_range
-      previous_from, previous_to = previous_window_range
+      previous_from, previous_to = window.previous.range
       Telemetry::Aggregations.summary_with_delta(environment, record_type, from: from, to: to,
                                                   previous_from: previous_from, previous_to: previous_to, group_hash: group_hash)
     end

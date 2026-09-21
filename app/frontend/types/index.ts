@@ -77,6 +77,9 @@ export interface CursorMeta {
   has_more: boolean
 }
 
+// Chart bucket width; the server offers the subset that fits the window.
+export type Step = "1m" | "5m" | "15m" | "1h" | "6h" | "1d"
+
 export interface SharedProps {
   auth: Auth
   account: AccountSummary | null
@@ -90,6 +93,8 @@ export interface SharedProps {
   }
   window?: Window
   range?: WindowRange
+  step?: Step
+  steps?: Step[]
   flash: FlashData
   google_oauth: boolean
   embedded?: boolean
@@ -128,10 +133,10 @@ export interface SeriesPoint {
   count: number
   errors: number
   client_errors: number
-  avg: number
-  p50: number
-  p95: number
-  p99: number
+  avg: number | null
+  p50: number | null
+  p95: number | null
+  p99: number | null
 }
 
 export interface GroupRow {

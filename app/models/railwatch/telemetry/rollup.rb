@@ -54,7 +54,7 @@ module Railwatch
       # Aggregate a relation of rollups into one summary with merged percentiles.
       def self.summarize(relation)
         rows = relation.to_a
-        return { count: 0, errors: 0, client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0, max: 0 } if rows.empty?
+        return { count: 0, errors: 0, client_errors: 0, avg: 0, p50: 0, p95: 0, p99: 0, max: 0, extra: {} } if rows.empty?
         # merge! pushes the row's centroids into one accumulating digest.
         # `+` built a brand-new digest from both operands' centroids on every
         # row, so merging N rows re-pushed every earlier centroid N times:
@@ -70,8 +70,23 @@ module Railwatch
           p50: merged.percentile(0.5).to_i,
           p95: merged.percentile(0.95).to_i,
           p99: merged.percentile(0.99).to_i,
-          max: rows.map(&:duration_max).max
+          max: rows.map(&:duration_max).max,
+          # Everything a type puts in `extra` -- llm_call's cost_nanos and
+          # token counts, cache_event's hits and misses -- merged the way
+          # absorb! merges it: numbers add up, anything else is last-wins.
+          # Spend is a sum over a window rather than a percentile of
+          # durations, so a rule about money has nowhere else to read from.
+          extra: merge_extras(rows)
         }
+      end
+
+      def self.merge_extras(rows)
+        rows.each_with_object({}) do |row, out|
+          row.extra.each do |key, value|
+            existing = out[key]
+            out[key] = existing.is_a?(Numeric) && value.is_a?(Numeric) ? existing + value : value
+          end
+        end
       end
     end
   end

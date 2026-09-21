@@ -39,9 +39,33 @@ const config = {
   avg: { label: "avg", color: "var(--warning)" },
 } satisfies ChartConfig
 
-function tick(t: string) {
-  const d = new Date(t)
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+// Bucket width in ms, read off the data so the axis needs no page context:
+// a minute chart labels ticks by time, a day chart by date.
+function bucketWidth(data: { t: string }[]) {
+  if (data.length < 2) return 0
+  return new Date(data[1].t).getTime() - new Date(data[0].t).getTime()
+}
+
+const DAY = 24 * 60 * 60 * 1000
+
+function tickFormatter(data: { t: string }[]) {
+  const width = bucketWidth(data)
+  const span =
+    data.length > 1
+      ? new Date(data[data.length - 1].t).getTime() -
+        new Date(data[0].t).getTime()
+      : 0
+  if (width >= DAY || span > 2 * DAY)
+    return (t: string) =>
+      new Date(t).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      })
+  return (t: string) =>
+    new Date(t).toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    })
 }
 
 function stamp(t: string) {
@@ -55,6 +79,28 @@ function stamp(t: string) {
 }
 
 const axisTick = { fontSize: 10, fontFamily: "var(--font-mono)" }
+
+// A line only joins neighbouring points, so a bucket with data between two
+// quiet ones (common at a minute's width) would draw nothing. Mark those
+// lone points with a dot; everything else stays a plain line. Recharts can
+// call this with an index past the array it was built over (a live reload
+// swapping in a shorter series mid-render did, LC-43), so neighbours are
+// looked up defensively rather than assumed.
+export function loneDot(
+  data: Record<string, unknown>[],
+  key: string,
+  color: string,
+) {
+  const LoneDot = (props: { cx?: number; cy?: number; index?: number }) => {
+    const { cx, cy, index } = props
+    if (cx == null || cy == null || index == null) return <g key={index} />
+    const before = data[index - 1]?.[key] ?? null
+    const after = data[index + 1]?.[key] ?? null
+    if (before != null || after != null) return <g key={index} />
+    return <circle key={index} cx={cx} cy={cy} r={2} fill={color} />
+  }
+  return LoneDot
+}
 
 function markers(deploys: DeployMarker[] = []) {
   return deploys.map((d) => (
@@ -112,6 +158,7 @@ export function ThroughputChart({
 }) {
   const cfg = { ...config, count: { ...config.count, label } }
   const hover = useBucketHover()
+  const tick = tickFormatter(data)
   return (
     <div>
       <ChartContainer config={cfg} className={`${className} w-full`}>
@@ -189,6 +236,7 @@ export function SessionStatusChart({
   className?: string
 }) {
   const hover = useBucketHover()
+  const tick = tickFormatter(data)
   return (
     <div>
       <ChartContainer config={sessionConfig} className={`${className} w-full`}>
@@ -250,11 +298,13 @@ export function LatencyChart({
   className?: string
 }) {
   const hover = useBucketHover()
+  const tick = tickFormatter(data)
+  const points = data.map((d) => ({ ...d, t: new Date(d.t).toISOString() }))
   return (
     <div>
       <ChartContainer config={config} className={`${className} w-full`}>
         <LineChart
-          data={data.map((d) => ({ ...d, t: new Date(d.t).toISOString() }))}
+          data={points}
           onMouseMove={hover.onMouseMove}
           onMouseLeave={hover.onMouseLeave}
         >
@@ -278,21 +328,24 @@ export function LatencyChart({
             content={
               <ChartTooltipContent
                 labelFormatter={(v) => stamp(String(v))}
-                formatter={(value, name) => [ms(Number(value)), String(name)]}
+                formatter={(value, name) => [
+                  value == null ? "—" : ms(Number(value)),
+                  String(name),
+                ]}
               />
             }
           />
           <Line
             dataKey={percentile}
             stroke={`var(--color-${percentile})`}
-            dot={false}
+            dot={loneDot(points, percentile, `var(--color-${percentile})`)}
             strokeWidth={1.75}
             isAnimationActive={false}
           />
           <Line
             dataKey="avg"
             stroke="var(--color-avg)"
-            dot={false}
+            dot={loneDot(points, "avg", "var(--color-avg)")}
             strokeWidth={1.25}
             strokeOpacity={0.8}
             isAnimationActive={false}

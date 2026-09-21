@@ -28,6 +28,7 @@ export function useWindow() {
     url.searchParams.set("window", value)
     url.searchParams.delete("from")
     url.searchParams.delete("to")
+    url.searchParams.delete("step")
     router.visit(url.toString(), { preserveScroll: true, preserveState: true })
   }
 
@@ -37,6 +38,7 @@ export function useWindow() {
     url.searchParams.set("from", from)
     url.searchParams.set("to", to)
     url.searchParams.delete("window")
+    url.searchParams.delete("step")
     router.visit(url.toString(), { preserveScroll: true, preserveState: true })
   }
 

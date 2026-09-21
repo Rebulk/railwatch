@@ -44,6 +44,17 @@ an embedded install that has one configured still sends nothing.
 fails loudly if you ask for it and it cannot work. `railwatch:export:status`
 shows what is queued.
 
+## Railwatch Cloud runs the same models
+
+The hosted platform is this engine's telemetry layer plus what hosting adds
+(accounts, tokens, quotas, alert routing). It uses `Railwatch::Telemetry::*`,
+`Railwatch::Ingest::Batch`, `Railwatch::Telemetry::Aggregations` and the rest
+directly, with two seams: it tenants `Railwatch::TelemetryRecord` so each
+monitored environment gets its own database, and its `Environment` is an
+account-scoped Active Record row rather than the embedded singleton. Anything
+those models need from an environment is the surface `Railwatch::Environment`
+documents: `id`, `slug`, `name`, `with_telemetry`, and the display attributes.
+
 ## Install
 
 ```sh

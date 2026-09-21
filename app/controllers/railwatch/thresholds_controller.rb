@@ -8,7 +8,14 @@ module Railwatch
                         jobs: telemetry { Telemetry::Rollup.for_type("job_attempt").where("bucket > ?", 7.days.ago).distinct.pluck(:name).sort },
                         kinds: Threshold::TARGET_KINDS, metrics: Threshold::METRICS,
                         anomaly_rules: environment.anomaly_rules.order(:target_kind, :target).map { |r| r.slice(:id, :target_kind, :target, :metric, :deviation, :window_minutes, :baseline_days, :enabled, :last_fired_at).merge(description: r.description) },
-                        anomaly_target_kinds: AnomalyRule::TARGET_KINDS, anomaly_metrics: AnomalyRule::METRICS }
+                        # Spend and tokens only exist on llm_calls, so the form
+                        # narrows with the kind rather than offering a rule that
+                        # could never fire.
+                        metrics_for_kind: Threshold::TARGET_KINDS.index_with { |k| Threshold.metrics_for(k) },
+                        units: Threshold::UNITS,
+                        llm_models: telemetry { Telemetry::Rollup.for_type("llm_call").where("bucket > ?", 7.days.ago).distinct.pluck(:name).compact.sort },
+                        anomaly_target_kinds: AnomalyRule::TARGET_KINDS, anomaly_metrics: AnomalyRule::METRICS,
+                        anomaly_metrics_for_kind: AnomalyRule::TARGET_KINDS.index_with { |k| AnomalyRule.metrics_for(k) } }
     end
 
     def create
