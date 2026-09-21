@@ -1,5 +1,5 @@
 import { Link, usePage } from "@inertiajs/react"
-import { Check, ClipboardCopy, Copy } from "lucide-react"
+import { AlertTriangle, Check, ClipboardCopy, Copy } from "lucide-react"
 import { useState } from "react"
 
 import { DataTable } from "@/components/railwatch/data-table"
@@ -20,6 +20,7 @@ import { useClipboard } from "@/hooks/use-clipboard"
 import EnvLayout from "@/layouts/env-layout"
 import { executionPath } from "@/lib/execution-path"
 import { bytes, count, ms, when } from "@/lib/format"
+import { truncationNotice } from "@/lib/truncation"
 import * as R from "@/routes"
 import type { ExceptionDetail, SharedProps, TimelineEntry } from "@/types"
 
@@ -49,6 +50,8 @@ interface Execution {
   trace_id: string
   allocations: number | null
   peak_memory: number | null
+  dropped_records: number | null
+  dropped_bytes: number | null
   exception_preview: string | null
   profiled: boolean
   stages: Record<string, number>
@@ -195,6 +198,12 @@ function markdownReport(p: Props, x: Execution) {
   lines.push("")
   lines.push("## Counters")
   for (const [k, v] of Object.entries(x.counters)) lines.push(`- ${k}: ${v}`)
+  if (x.dropped_records) {
+    lines.push("")
+    lines.push(
+      `> ${truncationNotice(p.timeline.length, x.dropped_records, x.dropped_bytes)}`,
+    )
+  }
   if (p.exceptions.length > 0) {
     lines.push("")
     lines.push("## Exceptions")
@@ -364,6 +373,21 @@ export default function ExecutionShow(p: Props) {
           }
         />
       </StatStrip>
+      {x.dropped_records ? (
+        <p
+          role="status"
+          className="border-warning/40 bg-warning/10 flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+        >
+          <AlertTriangle className="text-warning mt-0.5 size-4 shrink-0" />
+          <span>
+            {truncationNotice(
+              p.timeline.length,
+              x.dropped_records,
+              x.dropped_bytes,
+            )}
+          </span>
+        </p>
+      ) : null}
       {p.trace.length > 1 && (
         <Card>
           <CardHeader>

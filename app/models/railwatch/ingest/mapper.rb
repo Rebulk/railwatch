@@ -295,6 +295,8 @@ module Railwatch
         attrs[:inertia_partial] = rec.dig("inertia", "partial_only").present?
         attrs[:allocations] = rec["allocations"]
         attrs[:peak_memory] = rec["peak_memory"]
+        attrs[:dropped_records] = rec["dropped_records"]
+        attrs[:dropped_bytes] = rec["dropped_bytes"]
         attrs[:exception_preview] = rec["exception_preview"]
         attrs[:stages] = rec["stages"] || {}
         attrs[:counters] = rec["counters"] || {}

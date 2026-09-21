@@ -66,6 +66,44 @@ RSpec.describe Railwatch::Execution do
     ensure
       Railwatch.config.execution_buffer_bytes = previous
     end
+
+    it "refuses at the gate once full, counting each refusal as a drop at the buffer's mean record weight" do
+      record = { message: "x" * 100 }
+      bytes = Railwatch::Record.buffered_bytes(record, limit: Float::INFINITY)
+      previous = Railwatch.config.execution_buffer_bytes
+      Railwatch.config.execution_buffer_bytes = (bytes * 2) + 10
+      exe = new_execution
+
+      2.times { exe.buffer(record.dup) }
+      expect(exe.recording?).to be(true)
+      expect(exe.full?).to be(false)
+
+      exe.buffer(record.dup)
+      expect(exe.full?).to be(true)
+      expect(exe.dropped_records).to eq(1)
+
+      3.times { expect(exe.recording?).to be(false) }
+      expect(exe.dropped_records).to eq(4)
+      expect(exe.dropped_bytes).to eq(bytes * 4)
+      expect(exe.records.size).to eq(2)
+    ensure
+      Railwatch.config.execution_buffer_bytes = previous
+    end
+
+    it "does not fill on a single record too heavy for the whole budget" do
+      previous = Railwatch.config.execution_buffer_bytes
+      Railwatch.config.execution_buffer_bytes = 500
+      exe = new_execution
+
+      exe.buffer({ message: "x" * 1_000 })
+
+      expect(exe.dropped_records).to eq(1)
+      expect(exe.full?).to be(false)
+      expect(exe.recording?).to be(true)
+      expect(exe.dropped_records).to eq(1)
+    ensure
+      Railwatch.config.execution_buffer_bytes = previous
+    end
   end
 
   describe "#envelope" do

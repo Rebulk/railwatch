@@ -114,6 +114,7 @@ module Railwatch
       @buffered_bytes = 0
       @dropped_records = 0
       @dropped_bytes = 0
+      @full = false
       @keep = false
       # Tail sampling keeps buffering child records for a head-sampled-out
       # execution so the ship/discard decision can be made at the end. Read
@@ -144,8 +145,28 @@ module Railwatch
       @paused_depth.positive?
     end
 
+    # The gate every subscriber asks before it builds a child record. Once
+    # the tree has overflowed (#buffer) the answer is no, and the record the
+    # caller was about to build is counted as dropped right here: building
+    # it -- SQL normalisation, redaction, a backtrace walk, weighing -- only
+    # to throw it away cost ~15us per query, and a job issuing 5,000 queries
+    # into an 8 MiB buffer drops most of them. A gate with a side effect,
+    # deliberately: each caller asks exactly once per record it would build,
+    # so the count stays exact. Bytes are estimated at the buffer's mean
+    # record weight (never zero: @full is only set once a record is held),
+    # so the usage page's dropped-bytes figure keeps meaning something.
     def recording?
-      (sampled? || @tail_buffering) && !paused?
+      return false unless (sampled? || @tail_buffering) && !paused?
+      return true unless @full
+
+      @dropped_records += 1
+      @dropped_bytes += @buffered_bytes / @records.size
+      false
+    end
+
+    # Whether the buffer has overflowed and #recording? is now refusing.
+    def full?
+      @full
     end
 
     # Ship this execution's whole tree regardless of the head sampling
@@ -221,13 +242,16 @@ module Railwatch
 
       # A failure-context ring keeps the LAST record_limit records: the ones
       # just before the exception are the ones worth having. Every other
-      # buffer keeps the earliest and rejects the overflow. Either way the
-      # loss is counted onto the parent's batch (Railwatch.finish_execution).
+      # buffer keeps the earliest and rejects the overflow -- and from the
+      # first rejection on, refuses at the gate (#recording?) so nothing
+      # else is built for it. Either way the loss is counted onto the parent
+      # record and its batch (Railwatch.finish_execution).
       if @failure_context
         drop_oldest while @records.any? && (@records.size >= @record_limit || @buffered_bytes + bytes > @byte_limit)
       elsif @records.size >= @record_limit || @buffered_bytes + bytes > @byte_limit
         @dropped_records += 1
         @dropped_bytes += bytes
+        @full = true
         return
       end
 

@@ -57,7 +57,7 @@ module Railwatch
         job_id: @exe.job_id, task_key: @exe.task_key, inertia_component: @exe.inertia_component,
         occurred_at: @exe.occurred_at, deploy: @exe.deploy, server: @exe.server, user_ref: @exe.user_ref, tenant: @exe.app_tenant,
         trace_id: @exe.trace_id, allocations: @exe.allocations, peak_memory: @exe.peak_memory, exception_preview: @exe.exception_preview,
-        profiled: profile.present?,
+        dropped_records: @exe.dropped_records, dropped_bytes: @exe.dropped_bytes, profiled: profile.present?,
         stages: @exe.stages.transform_values { |v| (v / 1000.0).round(3) }, counters: @exe.counters, detail: @exe.detail
       }
     end
