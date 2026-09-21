@@ -138,7 +138,7 @@ module Railwatch
         expected = Record::VERSIONS[rec["t"].to_sym]
         return if expected.nil? # unknown type: row_for answers nil and the batch rejects it as such
 
-        raise TypeError, "#{rec["t"]} v#{rec["v"].inspect} is not v#{expected}" unless rec["v"] == expected
+        raise TypeError, "#{rec["t"]} v#{rec["v"].inspect} is not v#{expected}" unless rec["v"].is_a?(Integer) && rec["v"] == expected
       end
 
       def validate_identifier!(rec, field, pattern, description)

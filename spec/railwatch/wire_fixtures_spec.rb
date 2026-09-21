@@ -67,20 +67,28 @@ RSpec.describe "wire fixtures", type: :request do
   NUMERIC = %w[duration db_runtime view_runtime queue_latency memory peak_memory gc_time drift boot_seconds
                started_at ended_at bytes cost interval samples stacks_bytes allocations
                middleware_before action render middleware_after].freeze
-  TOKEN = %w[job_id provider_job_id attempt_id id message_id key stacks data].freeze
+  TOKEN = %w[job_id provider_job_id attempt_id id message_id key].freeze
+  # profile.stacks and attachment.data are base64 gzip; the mapper decodes
+  # them and checks the size against stacks_bytes / bytes, which NUMERIC
+  # sets to 1. A gzip of one byte with a fixed header keeps both true.
+  GZIP_X = Base64.strict_encode64(Zlib.gzip("x", level: Zlib::BEST_COMPRESSION).tap { |g| g.setbyte(9, 3) }.then { |g| g[0, 4] + "\0\0\0\0" + g[8..] })
+  GZIPPED = %w[stacks data].freeze
 
   def stabilize(value, key = nil)
     case value
     when Hash then value.to_h { |k, v| [ k, stabilize(v, k.to_s) ] }
     when Array then key == "frames" ? value.select { |f| f["in_app"] || f[:in_app] }.map { |f| stabilize(f) } : value.map { |v| stabilize(v, key) }
     when Numeric then STABLE.fetch(key) { NUMERIC.include?(key) ? 1 : value }
-    when String then STABLE.fetch(key) { TOKEN.include?(key) ? "x" : stable_text(value) }
+    when String then STABLE.fetch(key) { TOKEN.include?(key) ? "x" : GZIPPED.include?(key) ? GZIP_X : stable_text(value) }
     else value
     end
   end
 
+  # Executions are opened and closed by hand where the dummy app has no
+  # real trigger; their groups are hashed the way the subscribers hash them.
   def finish!
-    Railwatch.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+    Railwatch.finish_execution(:command, group: Railwatch::Record.group_hash("demo"), class: "Rake::Task", name: "demo",
+                                          command: "rake demo", exit_code: 0)
   end
 
   def in_command
@@ -111,8 +119,8 @@ RSpec.describe "wire fixtures", type: :request do
     command: -> { in_command { Widget.create!(name: "from_command") } },
     channel_action: -> {
       Railwatch.start_execution(source: :channel_action, sample_kind: :requests)
-      Railwatch.finish_execution(:channel_action, group: "WidgetChannel#observed", channel: "WidgetChannel",
-                                 action: "observed", status: "processed", failed: false)
+      Railwatch.finish_execution(:channel_action, group: Railwatch::Record.group_hash("WidgetChannel#observed"),
+                                 channel: "WidgetChannel", action: "observed", status: "processed", failed: false)
     },
     query: -> { in_command { Widget.where(name: "x").to_a } },
     n_plus_one: -> {
@@ -214,6 +222,22 @@ RSpec.describe "wire fixtures", type: :request do
   after do
     Railwatch.config.n_plus_one_threshold = 5
     Railwatch.config.profile_sample = 0.0
+  end
+
+  it "maps every shipped fixture through the gem's own mapper" do
+    Railwatch.wire_fixtures.each do |type, record|
+      row = type == "user" ? Railwatch::Ingest::Mapper.person_record(record) : Railwatch::Ingest::Mapper.row_for(record)
+      expect(row).to be_present, "#{type} did not map"
+    end
+  end
+
+  it "ships compressed fields a receiver can decode" do
+    %w[profile attachment].each do |type|
+      record = Railwatch.wire_fixtures.fetch(type)
+      field = type == "profile" ? "stacks" : "data"
+      expect(Zlib.gunzip(Base64.strict_decode64(record.fetch(field)))).to eq("x")
+      expect(record.fetch(type == "profile" ? "stacks_bytes" : "bytes")).to eq(1)
+    end
   end
 
   it "covers every record type the gem can emit, at its current version" do

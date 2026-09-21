@@ -209,7 +209,7 @@
     "timestamp": 1767225600.0,
     "deploy": "3f9c2a1",
     "server": "web-1",
-    "_group": "g",
+    "_group": "fe01ce2a7fbac8fafaed7c982a04e229",
     "trace_id": "8f14e45f-ceea-4b8f-8ac2-9a6e0c9f1a11",
     "execution_source": "command",
     "execution_id": "5c3b1e2a-9d4f-4a2b-8e1c-2f6a7b9c0d3e",
@@ -256,7 +256,7 @@
     "timestamp": 1767225600.0,
     "deploy": "3f9c2a1",
     "server": "web-1",
-    "_group": "WidgetChannel#observed",
+    "_group": "8e51bcccf5ffe61f14f02e4f441add8b",
     "trace_id": "8f14e45f-ceea-4b8f-8ac2-9a6e0c9f1a11",
     "execution_source": "channel_action",
     "execution_id": "5c3b1e2a-9d4f-4a2b-8e1c-2f6a7b9c0d3e",
@@ -771,7 +771,7 @@
     "duration": 1,
     "samples": 1,
     "stacks_bytes": 1,
-    "stacks": "x"
+    "stacks": "H4sIAAAAAAACA6sAAIMW3IwBAAAA"
   },
   "attachment": {
     "v": 1,
@@ -783,7 +783,7 @@
     "name": "payload.json",
     "content_type": "application/json",
     "bytes": 1,
-    "data": "x",
+    "data": "H4sIAAAAAAACA6sAAIMW3IwBAAAA",
     "exception_group_hash": "a3c72e9137ec13baff1477ef6e001549"
   },
   "session": {

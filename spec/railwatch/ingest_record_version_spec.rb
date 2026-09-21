@@ -45,6 +45,8 @@ RSpec.describe "ingest record version" do
   it "rejects an untrusted record at another version before reading any field" do
     expect { Railwatch::Ingest::Mapper.validate_record!(wire(:log, v: 2)) }.to raise_error(TypeError, "log v2 is not v1")
     expect { Railwatch::Ingest::Mapper.validate_record!(wire(:log, v: nil)) }.to raise_error(TypeError, "log vnil is not v1")
+    expect { Railwatch::Ingest::Mapper.validate_record!(wire(:log, v: 1.0)) }.to raise_error(TypeError, "log v1.0 is not v1")
+    expect { Railwatch::Ingest::Mapper.validate_record!(wire(:log, v: "1")) }.to raise_error(TypeError, 'log v"1" is not v1')
   end
 
   it "still reports an unknown type as unknown, not as a version mismatch" do
