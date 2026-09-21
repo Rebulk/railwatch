@@ -48,9 +48,10 @@ module Railwatch
       end
 
       # The recurring task keys Solid Queue is running, from the newest live
-      # sample that carries a manifest (the gem sends one on every health
-      # sample). nil when no live process has reported one: an older gem, or
-      # nothing alive to ask.
+      # sample that carries a manifest. Most samples do not: the gem repeats
+      # the manifest only when it changes, and otherwise every five minutes,
+      # which is half this window -- so a live process always has one inside
+      # it. nil when none does: an older gem, or nothing alive to ask.
       def self.recurring_task_keys(since: LIVE_WINDOW.ago)
         manifest = where(sampled_at: since..).where("json_extract(detail, '$.recurring_tasks') IS NOT NULL")
           .recent.pick(Arel.sql("json_extract(detail, '$.recurring_tasks')"))
