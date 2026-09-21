@@ -179,14 +179,18 @@ Puma::Plugin.create do
   # shutdown_timeout: the same allowance this process gives its own
   # reporter, and deliberately NOT the writer's full theoretical exit time
   # (a sequential SHUTDOWN_DRAIN join per worker thread, its maintenance
-  # join, then its own reporter shutdown -- 13s at the defaults). Two
-  # reasons. This runs from at_exit inside the container's stop grace, which
-  # under Kamal with its proxy is Docker's default 10s from TERM to KILL,
-  # and the reporter shutdown that precedes this has already spent up to
-  # shutdown_timeout of it. And a writer killed mid-batch loses nothing:
-  # the transaction rolls back and the worker retries the batch by id
-  # against the next writer (Writer#serve says so), so waiting longer buys
-  # no data, only exit time. An idle writer is gone in well under a second.
+  # join, then its own reporter shutdown -- 13s at the defaults). Waiting
+  # that long would buy nothing: a writer killed mid-batch loses no data,
+  # because the transaction rolls back and the worker retries the batch by
+  # id against the next writer (Writer#serve says so). Exit time spent
+  # waiting for the drain is spent for nothing. An idle writer is gone in
+  # well under a second either way.
+  #
+  # This runs from at_exit, inside the container's TERM-to-KILL grace. Under
+  # Kamal that is Docker's 10s default for a proxied role that has not set
+  # `stop_timeout`, or whatever `stop_timeout` says when it has; an app that
+  # wants the writer given longer can raise RAILWATCH_SHUTDOWN_TIMEOUT to
+  # match its grace, and this bound rises with it.
   def stop_timeout
     [ ::Railwatch.config.shutdown_timeout.to_f, 0.0 ].max
   end

@@ -16,10 +16,10 @@
   reaps it, so a wedged writer costs a bounded 2s and never leaves a zombie.
   A writer killed mid-batch loses nothing -- the batch is retried by id
   against the next writer -- which is why the bound is not the writer's own
-  worst-case drain: the whole `at_exit` has to fit inside a container's stop
-  grace, 10s by default under Docker. A writer that exits on TERM is let go
-  the moment it does (measured ~50ms), and a pid the cluster has already
-  reaped is still treated as gone.
+  worst-case drain (13s at the defaults): waiting for it would buy no data,
+  only exit time, and that time counts against the container's stop grace.
+  A writer that exits on TERM is let go the moment it does (measured
+  ~50ms), and a pid the cluster has already reaped is still treated as gone.
 
 - Make one HTTP attempt per delivery. `Transport::Http#deliver` retried a
   raised error or a 5xx once on its own, inside a reporter that already owns
