@@ -1,0 +1,149 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Feasibility probe only: this does not enable PostgreSQL storage in Railwatch.
+# Starts a disposable local PostgreSQL cluster with no TCP listener. It never
+# reads DATABASE_URL, connects to an existing server, or changes a host app.
+require "fileutils"
+require "open3"
+require "tmpdir"
+
+class SharedPrimaryPostgresProbe
+  # PGHOSTADDR can override even an explicit Unix-socket --host. Clear every
+  # inherited libpq/PostgreSQL setting before supplying our private target.
+  CLEAN_ENV = ENV.keys.grep(/\APG/).to_h { |name| [ name, nil ] }.freeze
+
+  def run
+    %w[initdb pg_ctl psql].each do |binary|
+      raise "#{binary} must be installed and available on PATH" unless system("which", binary, out: File::NULL, err: File::NULL)
+    end
+    raise "Run this probe as an ordinary user; PostgreSQL refuses to initialize as root" if Process.uid.zero?
+
+    # Unix socket paths must remain short even in a deeply nested checkout.
+    Dir.mktmpdir("rw-pg-probe-", "/tmp") do |root|
+      @root = root
+      @data = File.join(root, "data")
+      @socket = File.join(root, "socket")
+      FileUtils.mkdir_p(@socket, mode: 0700)
+      begin
+        command!("initdb", "-D", @data, "-U", "railwatch_probe", "-A", "trust", "--no-locale", "--encoding=UTF8")
+        command!("pg_ctl", "-D", @data, "-l", File.join(root, "server.log"), "-o", "-h '' -k #{@socket} -p 55439", "-w", "start")
+        puts "Server: #{sql('SHOW server_version').strip} (disposable local cluster; TCP disabled)"
+        prove_isolation
+        prove_transaction_independence
+        prove_lease_claim
+        prove_missing_table_fails_closed
+        puts "PASS: schema isolation, separate ledgers, independent commits and atomic lease claims"
+        puts "This does not verify Railwatch ingest, rollups, search, retention or PostgreSQL adapter support."
+      ensure
+        # pg_ctl can time out after starting the server. Its private PID file
+        # also covers partial startup failures before the command returns.
+        if File.exist?(File.join(@data, "postmaster.pid"))
+          command!("pg_ctl", "-D", @data, "-m", "immediate", "-w", "stop")
+        end
+      end
+    end
+  end
+
+  private
+
+  def command!(*args, input: nil)
+    output, error, status = Open3.capture3(CLEAN_ENV, *args, stdin_data: input)
+    raise "#{args.first} failed: #{error.strip}" unless status.success?
+    output
+  end
+
+  def psql_args
+    [ "psql", "--no-psqlrc", "--host", @socket, "--port", "55439", "--username", "railwatch_probe",
+      "--dbname", "postgres", "--no-align", "--tuples-only", "--quiet", "--set", "ON_ERROR_STOP=1" ]
+  end
+
+  def sql(statement, schema: nil)
+    prefix = schema ? "SET search_path TO #{schema};\n" : ""
+    command!(*psql_args, input: prefix + statement)
+  end
+
+  def verify(condition, description)
+    raise "FAIL: #{description}" unless condition
+    puts "PASS: #{description}"
+  end
+
+  def prove_isolation
+    sql <<~SQL
+      CREATE TABLE public.queries (id integer PRIMARY KEY, content text NOT NULL);
+      INSERT INTO public.queries VALUES (1, 'host sentinel');
+      CREATE TABLE public.schema_migrations (version varchar PRIMARY KEY);
+      INSERT INTO public.schema_migrations VALUES ('20260909120000');
+      CREATE TABLE public.ar_internal_metadata (key varchar PRIMARY KEY, value varchar);
+      INSERT INTO public.ar_internal_metadata VALUES ('environment', 'host');
+      CREATE SCHEMA railwatch;
+      CREATE SCHEMA railwatch_telemetry;
+    SQL
+    %w[railwatch railwatch_telemetry].each do |schema|
+      sql <<~SQL, schema: schema
+        CREATE TABLE schema_migrations (version varchar PRIMARY KEY);
+        INSERT INTO schema_migrations VALUES ('20260909120000');
+        CREATE TABLE ar_internal_metadata (key varchar PRIMARY KEY, value varchar);
+        INSERT INTO ar_internal_metadata VALUES ('environment', 'probe');
+      SQL
+    end
+    sql <<~SQL, schema: "railwatch_telemetry"
+      CREATE TABLE queries (id integer PRIMARY KEY, content text NOT NULL);
+      INSERT INTO queries VALUES (1, 'telemetry sentinel');
+      DELETE FROM schema_migrations WHERE version = '20260909120000';
+    SQL
+    verify(sql("SELECT content FROM queries", schema: "railwatch_telemetry").strip == "telemetry sentinel", "unqualified telemetry SQL resolves within its owned schema")
+    verify(sql("SELECT content FROM public.queries").strip == "host sentinel", "same-named host table and rows are unchanged")
+    verify(sql("SELECT count(*) FROM public.schema_migrations").strip == "1" &&
+      sql("SELECT count(*) FROM railwatch.schema_migrations").strip == "1" &&
+      sql("SELECT count(*) FROM railwatch_telemetry.schema_migrations").strip == "0", "migration version deletion is isolated to one ledger")
+    verify(sql("SELECT value FROM public.ar_internal_metadata WHERE key = 'environment'").strip == "host", "host internal metadata is unchanged")
+  end
+
+  def prove_transaction_independence
+    sql("CREATE TABLE public.host_work (id integer PRIMARY KEY)")
+    sql("CREATE TABLE durable_records (id integer PRIMARY KEY)", schema: "railwatch_telemetry")
+    # Keep one real host session open while a second session commits telemetry.
+    Open3.popen3(CLEAN_ENV, *psql_args) do |input, output, error, waiter|
+      input.puts "BEGIN; INSERT INTO public.host_work VALUES (1); SELECT 'host transaction open';"
+      input.flush
+      verify(output.gets&.strip == "host transaction open", "host transaction is open on its own connection")
+      sql("INSERT INTO durable_records VALUES (1)", schema: "railwatch_telemetry")
+      input.puts "ROLLBACK;"
+      input.close
+      raise "Host session failed: #{error.read}" unless waiter.value.success?
+    end
+    verify(sql("SELECT count(*) FROM public.host_work").strip == "0" &&
+      sql("SELECT count(*) FROM durable_records", schema: "railwatch_telemetry").strip == "1", "host rollback does not roll back the separate writer's commit")
+  end
+
+  def prove_lease_claim
+    sql <<~SQL, schema: "railwatch"
+      CREATE TABLE probe_leases (name text PRIMARY KEY, owner text, expires_at timestamptz);
+      INSERT INTO probe_leases VALUES ('maintenance', NULL, '-infinity');
+    SQL
+    gate = Queue.new
+    claims = %w[node_a node_b].map do |owner|
+      Thread.new do
+        gate.pop
+        sql(<<~SQL, schema: "railwatch").strip
+          UPDATE probe_leases SET owner = '#{owner}', expires_at = clock_timestamp() + interval '1 minute'
+          WHERE name = 'maintenance' AND expires_at <= clock_timestamp() RETURNING owner;
+        SQL
+      end
+    end
+    2.times { gate << true }
+    winners = claims.map(&:value).reject(&:empty?)
+    verify(winners.size == 1, "two independent sessions yield exactly one atomic lease winner")
+  end
+
+  def prove_missing_table_fails_closed
+    sql("DROP TABLE queries", schema: "railwatch_telemetry")
+    _output, error, status = Open3.capture3(CLEAN_ENV, *psql_args,
+      stdin_data: "SET search_path TO railwatch_telemetry; SELECT * FROM queries;")
+    verify(!status.success? && error.include?('relation "queries" does not exist'), "missing telemetry table fails without falling back to public.queries")
+    verify(sql("SELECT content FROM public.queries").strip == "host sentinel", "host sentinel survives all probe operations")
+  end
+end
+
+SharedPrimaryPostgresProbe.new.run
