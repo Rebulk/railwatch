@@ -140,5 +140,10 @@ ledger verification, a controlled writer switch, and a rollback plan preserving
 the original files. Pointing today's configuration at existing primary tables
 is not a migration path.
 
+The [shared PostgreSQL primary proposal](shared-primary-storage.md) assesses an
+explicit opt-in for applications running on several servers. It describes the
+required isolation, adapter work and acceptance tests; it is not an enabled
+storage feature. The dedicated SQLite layout above remains the default.
+
 See [embedded operation](embedded.md) for writer processes, retention and disk
 reclamation, and [monitoring health](monitoring-health.md) for runtime status.
