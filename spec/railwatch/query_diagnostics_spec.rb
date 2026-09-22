@@ -94,6 +94,78 @@ RSpec.describe Railwatch::QueryDiagnostics do
     end
   end
 
+  it "accepts plain selected columns and qualified wildcards" do
+    [ "created_at", "events.created_at, events.tenant_id", "events.*", "public.events.*", "*, created_at" ].each do |projection|
+      result = analyze("SELECT #{projection} FROM events WHERE tenant_id = ? ORDER BY created_at")
+      expect(result[:status]).to eq("analyzed"), projection
+      expect(indexes(result).sole[:columns]).to eq(%w[tenant_id created_at])
+    end
+  end
+
+  it "does not mistake output aliases or selected expressions for source columns" do
+    %w[PostgreSQL SQLite Mysql2].each do |adapter|
+      [
+        "SELECT created_at AS sort_key FROM events ORDER BY sort_key",
+        "SELECT created_at sort_key FROM events ORDER BY sort_key",
+        "SELECT lower(email) AS email FROM users ORDER BY email",
+        "SELECT lower(email) FROM users ORDER BY lower",
+        "SELECT created_at AS sort_key FROM events WHERE sort_key > ?",
+        "SELECT *, lower(email) AS email FROM users WHERE tenant_id = ? ORDER BY email"
+      ].each do |sql|
+        result = analyze(sql, adapter: adapter)
+        expect(result[:status]).to eq("unsupported"), "#{adapter}: #{sql}"
+        expect(indexes(result)).to be_empty, "#{adapter}: #{sql}"
+      end
+    end
+    expect(analyze('SELECT created_at AS "SortKey" FROM events ORDER BY "SortKey"')[:status]).to eq("unsupported")
+    expect(analyze('SELECT created_at AS `sort_key` FROM events ORDER BY `sort_key`', adapter: "Mysql2")[:status]).to eq("unsupported")
+  end
+
+  it "preserves captured evidence when output aliases prevent SQL advice" do
+    result = analyze("SELECT created_at AS sort_key FROM events ORDER BY sort_key",
+      plan: { plan: "SCAN events\nUSE TEMP B-TREE FOR ORDER BY", adapter: "SQLite" },
+      n_plus_one: { count: 8, sql: "SELECT created_at AS sort_key FROM events ORDER BY sort_key", source: "app/models/event.rb:12" })
+    expect(result[:status]).to eq("unsupported")
+    expect(indexes(result)).to be_empty
+    expect(observations(result).map { |r| r[:kind] }).to eq(%w[scan sort])
+    expect(result[:recommendations].first[:kind]).to eq("n_plus_one")
+  end
+
+  it "declines aliases that a real SQLite query resolves to selected values" do
+    database = SQLite3::Database.new(":memory:")
+    database.execute("CREATE TABLE events (created_at INTEGER, email TEXT)")
+    database.execute("INSERT INTO events VALUES (1, 'Zed'), (2, 'alpha')")
+    {
+      "SELECT created_at AS sort_key FROM events ORDER BY sort_key" => [ [ 1 ], [ 2 ] ],
+      "SELECT lower(email) AS email FROM events ORDER BY email" => [ [ "alpha" ], [ "zed" ] ]
+    }.each do |sql, rows|
+      expect(database.execute(sql)).to eq(rows)
+      result = analyze(sql, adapter: "SQLite")
+      expect(result[:status]).to eq("unsupported")
+      expect(indexes(result)).to be_empty
+    end
+  ensure
+    database&.close
+  end
+
+  it "does not infer PostgreSQL columns from ambiguous whole-row references" do
+    [
+      "SELECT events FROM public.events ORDER BY events",
+      "SELECT e FROM public.events e ORDER BY e",
+      "SELECT * FROM public.events ORDER BY events",
+      "SELECT * FROM public.events e WHERE e > ?",
+      'SELECT "Event" FROM public.events AS "Event" ORDER BY "Event"'
+    ].each do |sql|
+      result = analyze(sql)
+      expect(result[:status]).to eq("unsupported"), sql
+      expect(indexes(result)).to be_empty, sql
+    end
+    result = analyze("SELECT e.events FROM public.events e WHERE e.e = ? ORDER BY e.events")
+    expect(result[:status]).to eq("analyzed")
+    expect(indexes(result).sole[:columns]).to eq(%w[e events])
+    expect(analyze("SELECT * FROM events ORDER BY events", adapter: "SQLite")[:status]).to eq("analyzed")
+  end
+
   it "fails closed on complex, ambiguous or unsafe shapes" do
     [
       "SELECT * FROM events WHERE tenant_id = ? OR public = ?",
