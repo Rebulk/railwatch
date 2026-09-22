@@ -103,7 +103,9 @@ export function DiagnosticsPanel({
                         ? "Stored plan"
                         : evidence.source === "source"
                           ? "Captured source"
-                          : "Captured SQL shape"}
+                          : evidence.source === "n_plus_one"
+                            ? "Captured N+1 repetition"
+                            : "Captured SQL shape"}
                       {evidence.line && ` · line ${evidence.line}`}
                       {evidence.truncated && " · excerpt truncated"}
                     </p>

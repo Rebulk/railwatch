@@ -51,7 +51,7 @@ module Railwatch
       analyze_repetition
       @limitations << "Only the first #{MAX_FINDINGS} findings are shown." if @recommendations.size > MAX_FINDINGS
       { status: status, adapter: @adapter, connection: @connection, source: @source,
-        limitations: @limitations.uniq, recommendations: @recommendations.sort_by { |r| %w[capture plan sql].index(r[:basis]) }.first(MAX_FINDINGS) }
+        limitations: @limitations.uniq, recommendations: @recommendations.sort_by.with_index { |r, index| [ %w[capture plan sql].index(r[:basis]), index ] }.first(MAX_FINDINGS) }
     end
 
     private
