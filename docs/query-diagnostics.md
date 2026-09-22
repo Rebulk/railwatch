@@ -24,10 +24,13 @@ Each finding identifies its evidence:
 The index analyzer accepts a conservative subset of SELECT statements for
 PostgreSQL and compatible adapters, SQLite, and MySQL/Trilogy. It handles quoted
 identifiers, schema-qualified table names, explicit table aliases, bound values,
-AND predicates, `IS NULL` filters and plain ordering columns. Expressions,
-subqueries, CTEs, disjunctions, self-joins, ambiguous columns, executable MySQL
-comments and unsupported adapters are left for manual review. A normalized
-`IN` list does not establish single-valued equality, so it is not used to claim
+AND predicates, `IS NULL` filters and plain ordering columns. Selected columns
+must be plain references or wildcards; output aliases and selected expressions
+are not treated as source columns. Unqualified PostgreSQL names matching a table
+or its alias are also ambiguous because they can refer to the whole row.
+Expressions, subqueries, CTEs, disjunctions, self-joins, ambiguous columns,
+executable MySQL comments and unsupported adapters are left for manual review.
+A normalized `IN` list does not establish single-valued equality, so it is not used to claim
 that a following index column satisfies ordering. A range on one column is not
 assumed to support sorting on another. No findings does not establish that a
 query is optimal.

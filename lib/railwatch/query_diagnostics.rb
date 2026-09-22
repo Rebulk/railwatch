@@ -230,6 +230,7 @@ module Railwatch
         return if @tokens.any? { |t| t[:raw] == ";" || %w[WITH UNION EXCEPT INTERSECT GROUP HAVING DISTINCT FOR WINDOW OR NOT COLLATE].include?(t[:word]) }
         from = @tokens.index { |t| t[:word] == "FROM" }
         return unless from && from > 1
+        return unless plain_projection?(@tokens[1...from])
         @cursor = from + 1
         return unless table_reference
         predicates = []
@@ -303,6 +304,23 @@ module Railwatch
         [ parts, cursor ]
       end
 
+      def plain_projection?(tokens)
+        # Output aliases can shadow source columns in ORDER BY (and SQLite
+        # predicates). Infer indexes only when the SELECT list cannot do so.
+        parts = [ [] ]
+        tokens.each { |token| token[:raw] == "," ? parts << [] : parts.last << token }
+        parts.all? do |part|
+          wildcard = part.last&.dig(:raw) == "*"
+          if wildcard
+            next true if part.one?
+            next false unless part[-2]&.dig(:raw) == "."
+            part = part[...-2]
+          end
+          parsed = reference(part)
+          parsed && parsed.last == part.size && (!wildcard || parsed.first.size <= 2)
+        end
+      end
+
       def table_reference
         parsed = reference(@tokens, @cursor)
         return unless parsed
@@ -360,6 +378,9 @@ module Railwatch
         parsed = reference(tokens)
         return unless parsed && parsed.last == tokens.size
         parts = parsed.first
+        # PostgreSQL can resolve a bare relation name to its composite row.
+        # Without schema evidence, only a qualified column is unambiguous.
+        return if @family == :postgres && parts.one? && @aliases.key?([ parts.first[:key] ])
         table = parts.one? ? (@tables.first if @tables.one?) : @aliases[parts[0...-1].map { |p| p[:key] }]
         return unless table
         [ table, { column: parts.last[:raw], name: parts.last[:name], key: parts.last[:key] } ]
