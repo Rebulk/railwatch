@@ -208,8 +208,9 @@ Run `ruby script/probe_shared_primary_postgres` as an ordinary user with `initdb
 `pg_ctl` and `psql` available. The [probe](../script/probe_shared_primary_postgres)
 passed on PostgreSQL 18.6 in a disposable Unix-socket-only cluster. It ignores
 `DATABASE_URL` and never connects to an existing database. It proves owned-schema
-lookup, isolated ledgers/host metadata, an independent commit during host rollback,
-one lease winner from two contenders, and failure without public-table fallback.
+lookup with the proposed catalog-first search path, isolated ledgers/host metadata,
+an independent commit during host rollback, one lease winner from two contenders,
+and qualified reads that cannot fall back to public or temporary tables.
 It does **not** test Rails aliases/migrations, Railwatch ingest, rollups, search,
 retention, timeouts, privileges, poolers, lease recovery, or production throughput.
 
