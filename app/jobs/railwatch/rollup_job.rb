@@ -13,7 +13,9 @@ module Railwatch
   # fold themselves into the current hour as they land.
   class RollupJob < ApplicationJob
     queue_as :rollups
-    limits_concurrency to: 1, key: ->(environment, bucket) { "#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
+    if respond_to?(:limits_concurrency)
+      limits_concurrency to: 1, key: ->(environment, bucket) { "#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
+    end
 
     SOURCES = {
       "request" => [ Telemetry::Execution, ->(r) { r.requests }, ->(row) { row.name } ],

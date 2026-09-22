@@ -44,7 +44,7 @@ module Railwatch
       end
 
       def call(env)
-        return @app.call(env) unless Railwatch.enabled?
+        return @app.call(env) unless Railwatch.capturing?
         return @app.call(env) if ignored_request?(env)
 
         trace_id, parent_id, upstream_sampled = self.class.traceparent(env["HTTP_TRACEPARENT"])

@@ -15,6 +15,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useWindow } from "@/hooks/use-window"
 import EnvLayout from "@/layouts/env-layout"
 import { ago, count, ms, pct } from "@/lib/format"
+import {
+  type Attention,
+  NeedsAttention,
+} from "@/pages/overview/needs-attention"
 import { crashFreeTone, rate } from "@/pages/releases/release-health"
 import * as R from "@/routes"
 import type {
@@ -27,6 +31,7 @@ import type {
 } from "@/types"
 
 interface Props {
+  attention: Attention
   totals: { requests: SummaryWithDelta; jobs: SummaryWithDelta }
   request_series: SeriesPoint[]
   job_series: SeriesPoint[]
@@ -123,8 +128,9 @@ export default function Overview(p: Props) {
           />
           <Stat
             label="Open issues"
-            value={p.issues.length}
-            tone={p.issues.length ? "destructive" : "success"}
+            value={p.attention.open_issue_count}
+            hint="Across all time"
+            tone={p.attention.open_issue_count ? "destructive" : undefined}
           />
           {p.release_health && (
             <Stat
@@ -135,6 +141,11 @@ export default function Overview(p: Props) {
             />
           )}
         </StatStrip>
+        <NeedsAttention
+          attention={p.attention}
+          applicationId={a}
+          environmentId={e}
+        />
         <div className="grid gap-4 lg:grid-cols-2">
           <VolumePanel
             label="Requests"
@@ -211,7 +222,7 @@ export default function Overview(p: Props) {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Open issues</CardTitle>
+              <CardTitle>Recent open issues · all time</CardTitle>
             </CardHeader>
             <CardContent>
               <DataTable
@@ -253,9 +264,19 @@ export default function Overview(p: Props) {
                   {
                     key: "n",
                     hideOnMobile: true,
-                    header: "Count",
+                    header: "Lifetime count",
                     align: "right",
-                    cell: (x) => count(x.occurrences),
+                    cell: (x) => (
+                      <span
+                        title={
+                          x.kind === "exception"
+                            ? "Recorded occurrences"
+                            : "Breached evaluation windows"
+                        }
+                      >
+                        {count(x.occurrences)}
+                      </span>
+                    ),
                   },
                   {
                     key: "last",

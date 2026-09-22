@@ -29,6 +29,7 @@ module Railwatch
     # Runs before anything reads telemetry; a host that authenticates in its
     # base controller or a routes constraint turns it off.
     before_action :authenticate_by_http_basic
+    around_action :with_compatible_railwatch_schema
     before_action { Viewer.user = Railwatch.config.resolve_dashboard_user(request) }
 
     inertia_share auth: -> { { user: Viewer.user.as_json, session: { id: "embedded", recently_authenticated: true } } },
@@ -43,6 +44,36 @@ module Railwatch
                   embedded: true
 
     private
+
+    def with_compatible_railwatch_schema
+      schema = RuntimeSchema.status(local: true)
+      return render_schema_unavailable(schema) unless schema.ready?
+
+      yield
+    rescue ActiveRecord::ActiveRecordError, Railwatch::DatabaseNotConfigured
+      # A restore or migration may have changed the files since the cached
+      # check. Recheck only Railwatch's databases before interpreting a query
+      # failure as a schema problem; unrelated application errors still raise.
+      schema = RuntimeSchema.status(force: true, local: true)
+      raise if schema.ready?
+
+      render_schema_unavailable(schema)
+    end
+
+    def render_schema_unavailable(schema)
+      response.set_header("Retry-After", RuntimeSchema::INTERVAL.to_s)
+      response.set_header("Cache-Control", "no-store")
+      details = schema.databases.reject(&:ready?).flat_map do |database|
+        [ database.message,
+          ("Pending migrations: #{database.pending_versions.join(', ')}" if database.pending_versions.any?),
+          ("Missing tables: #{database.missing_tables.join(', ')}" if database.missing_tables.any?),
+          ("Missing columns: #{database.missing_columns.map { |table, columns| "#{table}: #{columns.join(', ')}" }.join('; ')}" if database.missing_columns.any?),
+          ("Missing unique indexes: #{database.missing_indexes.map { |table, indexes| "#{table}: #{indexes.join('; ')}" }.join('; ')}" if database.missing_indexes.any?) ]
+      end.compact
+      body = [ "Railwatch local capture and persistence are paused.", *details,
+               *schema.migration_commands, "Railwatch checks again within #{RuntimeSchema::INTERVAL} seconds after the databases are repaired." ].join("\n\n")
+      render plain: body, status: :service_unavailable
+    end
 
     def authenticate_by_http_basic
       config = Railwatch.config

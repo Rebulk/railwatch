@@ -29,8 +29,12 @@ module Railwatch
         # be captured as one of the application's own exceptions and opened
         # as an issue about Railwatch, by Railwatch.
         Rails.application.executor.wrap do
+          schema = RuntimeSchema.status(local: true)
+          next Result.new(ok: false, status: 503, error: schema.message, retryable_error: true) unless schema.ready?
+
           write(wire, records.size, dropped: dropped, backpressure_factor: backpressure_factor, batch_id: batch_id)
         rescue StandardError => e
+          RuntimeSchema.invalidate! if e.is_a?(ActiveRecord::ActiveRecordError)
           Railwatch.debug { "local ingest failed: #{e.class}: #{e.message}" }
           # With a batch id the reporter can safely retry: the ledger says
           # whether the write committed, and the unique execution_id index
@@ -42,7 +46,7 @@ module Railwatch
         end
       end
 
-      def ping = true
+      def ping = RuntimeSchema.status(local: true).ready?
       def unauthorized? = false
       def reset_after_fork! = self
 

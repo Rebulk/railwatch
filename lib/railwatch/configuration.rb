@@ -68,7 +68,7 @@ module Railwatch
     attr_accessor :export_enabled, :export_policy, :export_url, :export_token, :export_max_bytes,
                   :export_max_deliveries, :export_max_age
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
-                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
+                  :issue_prefix, :repository_url, :dashboard_user, :writer_socket,
                   :http_basic_auth_enabled, :http_basic_auth_user, :http_basic_auth_password, :base_controller_class,
                   :dashboard_open,
                   :sample, :log_level, :capture_request_payload,
@@ -94,7 +94,8 @@ module Railwatch
                   :capture_llm_content
 
     attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
-                :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
+                :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water,
+                :retention_days, :telemetry_storage_budget_bytes
 
     def initialize
       @enabled = env_bool("RAILWATCH_ENABLED", true)
@@ -103,7 +104,9 @@ module Railwatch
       # Embedded dashboard settings; ignored when transport is :http.
       @issue_prefix = ENV["RAILWATCH_ISSUE_PREFIX"]
       @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
-      @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
+      self.retention_days = ENV.fetch("RAILWATCH_RETENTION_DAYS", "7")
+      # Advisory data-file + WAL budget. Never changes admission or retention.
+      self.telemetry_storage_budget_bytes = ENV["RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES"]
       @dashboard_user = nil
       # Mirroring an embedded install's telemetry to a remote receiver. Off
       # unless asked for: an embedded install's promise is that nothing leaves
@@ -478,6 +481,18 @@ module Railwatch
       end
     end
 
+    # Parse byte budgets strictly: a typo, a fractional value or zero does
+    # not become a tiny limit. An invalid/unset optional budget stays off.
+    def telemetry_storage_budget_bytes=(value)
+      @telemetry_storage_budget_bytes = positive_integer(value)
+    end
+
+    # Retention feeds destructive pruning. Invalid values must not move the
+    # cutoff forward and remove recent telemetry; retain the seven-day default.
+    def retention_days=(value)
+      @retention_days = positive_integer(value) || 7
+    end
+
     def environment_name
       @environment || (defined?(Rails) ? Rails.env.to_s : "production")
     end
@@ -506,6 +521,11 @@ module Railwatch
     end
 
     private
+
+    def positive_integer(value)
+      parsed = value.is_a?(String) ? Integer(value, 10, exception: false) : value
+      parsed if parsed.is_a?(Integer) && parsed.positive?
+    end
 
     def detect_release
       @deploy_source = nil

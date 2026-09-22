@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "railwatch/query_diagnostics"
+
 module Railwatch
     class QueriesController < DashboardController
     def index
@@ -27,9 +29,13 @@ module Railwatch
       summary = telemetry { Telemetry::Rollup.summarize(Telemetry::Rollup.for_type("query").where(group_hash: group_hash).between(*window_range)) }
       sources = rows.filter_map(&:source).tally.sort_by { |_s, c| -c }.first(10)
       callers = rows.map(&:execution_preview).compact.tally.sort_by { |_s, c| -c }.first(10)
+      plan = explain_sample(group_hash)
+      sample = rows.first
+      diagnostics = QueryDiagnostics.call(sql: sample&.sql, adapter: sample&.adapter, connection: sample&.connection,
+        source: sample&.source, plan: plan, n_plus_one: repetition_sample(group_hash))
       render inertia: { group_hash: group_hash, sql: rows.first&.sql, summary: summary, series: series("query", group_hash: group_hash),
                         sources: sources, callers: callers, roles: rows.filter_map(&:role).tally.sort_by { |_r, c| -c },
-                        explain: explain_sample(group_hash), samples: rows.first(50).map { |q| query_row(q) } }
+                        explain: plan, diagnostics: diagnostics, samples: rows.first(50).map { |q| query_row(q) } }
     end
 
     private
@@ -48,7 +54,17 @@ module Railwatch
     def explain_sample(group_hash)
       q = telemetry { Telemetry::Query.where(group_hash: group_hash).between(*window_range).where.not(explain: nil).recent.with_sql.first }
       return nil if q.nil?
-      { plan: q.explain, occurred_at: q.occurred_at, duration: q.duration_ms.round(3), execution_id: q.execution_id }
+      QueryDiagnostics.bounded_plan(q.explain).merge(
+        occurred_at: q.occurred_at, duration: q.duration_ms.round(3), execution_id: q.execution_id,
+        adapter: QueryDiagnostics.text(q.adapter, 80).presence, connection: QueryDiagnostics.text(q.connection, 160).presence)
+    end
+
+    def repetition_sample(group_hash)
+      q = telemetry { Telemetry::NPlusOne.where(group_hash: group_hash).between(*window_range).recent.first }
+      return nil unless q
+      sql = QueryDiagnostics.text(q.sql, QueryDiagnostics::MAX_SQL_BYTES)
+      source = QueryDiagnostics.text(q.source, 500)
+      { sql: sql, source: source, count: q.count, suggestion: Telemetry::NPlusOne.new(sql: sql, source: source).suggestion }
     end
 
     def query_row(q)

@@ -596,9 +596,10 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
       %w[development test production].each do |env|
+        suffix = env == "test" ? ENV["TEST_ENV_NUMBER"].to_s : ""
         expect(yml[env]["railwatch"]["adapter"]).to eq("sqlite3")
         expect(yml[env]["railwatch_telemetry"]["adapter"]).to eq("sqlite3")
-        expect(yml[env]["railwatch_telemetry"]["database"]).to eq("storage/#{env}_railwatch_telemetry.sqlite3")
+        expect(yml[env]["railwatch_telemetry"]["database"]).to eq("storage/#{env}#{suffix}_railwatch_telemetry.sqlite3")
       end
       expect(yml["development"]["primary"]["adapter"]).to eq("postgresql")
     end

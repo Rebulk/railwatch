@@ -6,6 +6,42 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Add [query diagnostics](docs/query-diagnostics.md) to query detail pages.
+  Conservative index candidates show the captured SQL clauses behind them;
+  stored plan observations and recorded N+1 evidence are labeled separately.
+  Analysis is bounded, unsupported statements remain explicit, and opening
+  the page never executes application SQL or applies schema changes. The
+  embedded dashboard and Railwatch Cloud share the analyzer.
+
+- Add [Monitoring health](docs/monitoring-health.md) with bounded checks for
+  ingest and process freshness, reported client drops, rejected records,
+  backpressure, pending follow-ups, retention backlog, maintenance and export.
+  SQLite data/WAL sizes and reusable pages use metadata reads. Cloud reuses
+  the reader with tenant isolation and explicit differences from embedded
+  maintenance, writer and export capabilities.
+
+- Add an optional `telemetry_storage_budget_bytes` setting, also available
+  as `RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES`. Monitoring health warns at
+  80% of telemetry data plus WAL usage and requests action at 100%. The default
+  is unset; this advisory budget never stops ingest or deletes recent data.
+  Embedded retention now honors `retention_days` instead of always using seven
+  days. Review an existing override before upgrading: it now affects pruning.
+  Invalid or nonpositive retention values keep the seven-day default.
+
+- Guard the [embedded storage schema](docs/storage.md) before capture and
+  persistence. Missing configuration, unsupported storage, pending migrations,
+  incompatible tables/columns or required unique indexes, and unavailable
+  connections have distinct states. Unsafe local schemas pause new capture,
+  local/writer ingest, export and maintenance while application requests keep
+  working. Authenticated dashboard requests show HTTP 503 repair guidance.
+  Read-only checks resume after repair within 30 seconds and clear stale
+  schema caches; HTTP collectors open no local database for these checks.
+
+- Add [Needs attention](docs/needs-attention.md) to the overview, combining
+  ranked persisted issues with current monitoring health findings and links
+  to details. Unknown monitoring evidence remains visible; the overview does
+  not run issue detectors or scan raw telemetry to generate advice.
+
 - Bound how long Puma waits for the embedded writer to stop. The plugin sent
   the writer TERM and then called `Process.wait` on it, which has no timeout:
   a writer that did not exit -- stuck in a SQLite write, on a full disk --

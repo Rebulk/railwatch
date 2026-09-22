@@ -91,6 +91,8 @@ module Railwatch
       # Hand the lease back rather than making the next process wait out its
       # TTL for a holder that has politely finished.
       def release_lease
+        return unless RuntimeSchema.ready?
+
         Railwatch.ignore do
           environment = Environment.current
           outbox = Outbox.new(Railwatch.config, environment)
@@ -106,6 +108,8 @@ module Railwatch
 
       # One delivery, start to finish. Returns true when there may be more.
       def drain_one
+        return false unless RuntimeSchema.ready?
+
         Railwatch.ignore do
           environment = Environment.current
           outbox = Outbox.new(Railwatch.config, environment)

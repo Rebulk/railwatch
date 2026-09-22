@@ -51,10 +51,12 @@ module Railwatch
           connection.select_rows(sql).to_h
         end
 
-        # Postgres telemetry databases (SCOPE.md keeps them supported) have no
-        # logs_fts, and neither does a database created before the index was
-        # added. Every telemetry database is built from the same schema, so
-        # this is a process-wide fact rather than a per-environment one.
+        def reset_fts_cache!
+          remove_instance_variable(:@fts_available) if defined?(@fts_available)
+        end
+
+        # The optional full-text index may be absent in a restored Railwatch
+        # database. Schema recovery clears this cached capability as well.
         def fts_available?
           return @fts_available if defined?(@fts_available)
           @fts_available = connection.adapter_name.match?(/sqlite/i) &&

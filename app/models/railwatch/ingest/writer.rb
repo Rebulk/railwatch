@@ -7,8 +7,9 @@ module Railwatch
     #
     # On SQLite, binds straight into a prepared statement per (table, column
     # set) instead of going through Active Record's insert machinery — this is
-    # the fast path the platform is tuned for. On any other adapter (Postgres
-    # stays supported per SCOPE.md), falls back to Active Record's insert_all.
+    # the fast path Railwatch is tuned for. The generic insert_all path alone
+    # does not make other adapters supported local storage: migrations,
+    # search, aggregation and retention must support them as well.
     class Writer
       # Classes whose new rowids we need after the insert: exception ids go
       # back to the caller for grouping, log ids into the full-text index.

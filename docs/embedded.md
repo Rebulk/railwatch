@@ -74,6 +74,9 @@ without it (`rails new --minimal`) the pages refresh on navigation.
 
 ## Your application's own database
 
+See [Railwatch storage](storage.md) for named database configuration, schema
+upgrade recovery, and the constraints on sharing application storage.
+
 Embedded mode does not care what your application runs on. The two
 databases it adds are SQLite files either way, so the generated entries
 name `adapter: sqlite3` themselves rather than inheriting your default
@@ -138,8 +141,7 @@ and the MCP server.
 ## Authentication
 
 The dashboard shows every query, log line and exception your app
-produced, so it works the way Mission Control Jobs does: **HTTP Basic
-authentication is on and closed by default**. With no credentials
+produced. **HTTP Basic authentication is on and closed by default**. With no credentials
 configured every dashboard request is 401, and `railwatch:doctor` says
 so. Set them with
 
@@ -163,7 +165,7 @@ credentials (the browser sends them on the WebSocket handshake).
 
 ### Your own authentication
 
-Two ways, both from Mission Control's playbook. Either lets an admin of
+Railwatch supports two approaches. Either lets an admin of
 your app in with no second password. Turn Basic off when you use one,
 or both gates apply.
 
@@ -380,6 +382,7 @@ Railwatch.configure do |c|
   c.issue_prefix = "SHOP"         # RAILWATCH_ISSUE_PREFIX; keys like SHOP-12
   c.repository_url = "https://github.com/you/shop"  # RAILWATCH_REPOSITORY_URL
   c.retention_days = 7            # RAILWATCH_RETENTION_DAYS
+  c.telemetry_storage_budget_bytes = nil # RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES; optional advisory budget
   c.http_basic_auth_enabled = true    # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; credentials from Rails credentials or env
   c.base_controller_class = "ActionController::Base"  # RAILWATCH_BASE_CONTROLLER_CLASS
   c.dashboard_open = false            # RAILWATCH_DASHBOARD_OPEN; "yes, public, on purpose"
@@ -391,9 +394,13 @@ Every other option (sampling, redaction, ignored record types) applies
 unchanged. The default samples every execution; set `c.sample` lower on
 a busy app.
 
+[Monitoring health](monitoring-health.md) shows freshness, capture loss,
+maintenance, export and SQLite storage. An optional storage budget warns about
+data plus WAL growth at 80% and 100%; it never silently deletes recent telemetry.
+
 ## Deploys
 
-`bin/rails railwatch:deploy` records the marker in the app's own
+`bin/rails railwatch:deploy` records the marker in the separate `railwatch`
 database instead of posting it, and the Kamal post-deploy hook does the
 same when `RAILWATCH_TRANSPORT=local` is set on the deployer.
 

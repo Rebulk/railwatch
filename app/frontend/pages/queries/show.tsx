@@ -1,6 +1,5 @@
 import { Link, usePage } from "@inertiajs/react"
 import { Database } from "lucide-react"
-import { useMemo } from "react"
 
 import { DurationPanel, VolumePanel } from "@/components/railwatch/chart-panel"
 import { Mono } from "@/components/railwatch/code"
@@ -11,11 +10,13 @@ import { PageHeader } from "@/components/railwatch/page-header"
 import { Stat, StatStrip } from "@/components/railwatch/stat"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import EnvLayout from "@/layouts/env-layout"
-import { explainWarnings } from "@/lib/explain"
 import { count, ms, when } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import * as R from "@/routes"
 import type { SeriesPoint, SharedProps, Summary } from "@/types"
+
+import { DiagnosticsPanel } from "./diagnostics-panel"
+import type { QueryDiagnostics } from "./diagnostics-types"
 
 interface Sample {
   id: number
@@ -35,6 +36,9 @@ interface Explain {
   occurred_at: string
   duration: number
   execution_id: string | null
+  adapter: string | null
+  connection: string | null
+  truncated?: boolean
 }
 interface Props {
   group_hash: string
@@ -45,6 +49,7 @@ interface Props {
   callers: [string, number][]
   roles: [string, number][]
   explain: Explain | null
+  diagnostics: QueryDiagnostics
   samples: Sample[]
 }
 
@@ -54,7 +59,9 @@ export default function QueryShow(p: Props) {
   const e = environment!.id
   const s = p.summary
   const plan = p.explain?.plan ?? ""
-  const warnings = useMemo(() => explainWarnings(plan), [plan])
+  const observations = p.diagnostics.recommendations.filter(
+    (r) => r.basis === "plan",
+  )
   return (
     <EnvLayout
       title="Query"
@@ -88,6 +95,7 @@ export default function QueryShow(p: Props) {
         />
         <Stat label="Max" value={ms(s.max / 1000, 2)} />
       </StatStrip>
+      <DiagnosticsPanel diagnostics={p.diagnostics} />
       <Card>
         <CardHeader>
           <CardTitle>Query plan</CardTitle>
@@ -97,6 +105,10 @@ export default function QueryShow(p: Props) {
             <>
               <div className="text-muted-foreground mb-2 font-mono text-[11px]">
                 {when(p.explain.occurred_at)} · {ms(p.explain.duration, 2)}
+                {" · "}
+                {p.explain.connection ?? "Connection not captured"}
+                {" · "}
+                {p.explain.adapter ?? "Adapter not captured"}
                 {p.explain.execution_id && (
                   <>
                     {" · "}
@@ -113,9 +125,18 @@ export default function QueryShow(p: Props) {
                   </>
                 )}
               </div>
+              {p.explain.truncated && (
+                <p className="text-muted-foreground mb-2 text-xs">
+                  The stored plan exceeds the display limit; this is an excerpt.
+                </p>
+              )}
               <div className="bg-muted/60 overflow-x-auto rounded-lg p-3 font-mono text-xs">
                 {plan.split("\n").map((row, i) => {
-                  const hits = warnings.filter((w) => w.line === i + 1)
+                  const hits = observations.filter((observation) =>
+                    observation.evidence.some(
+                      (evidence) => evidence.line === i + 1,
+                    ),
+                  )
                   return (
                     <div
                       key={i}
@@ -134,10 +155,10 @@ export default function QueryShow(p: Props) {
                       </div>
                       {hits.map((w) => (
                         <div
-                          key={w.message}
+                          key={w.id}
                           className="text-warning/80 mt-0.5 text-[11px] whitespace-normal"
                         >
-                          {w.message}
+                          {w.title}
                         </div>
                       ))}
                     </div>

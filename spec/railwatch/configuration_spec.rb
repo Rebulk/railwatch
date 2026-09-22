@@ -28,6 +28,8 @@ RSpec.describe Railwatch::Configuration do
       "RAILWATCH_BUFFER_BYTES" => [ :buffer_bytes, "999999", 999_999, 16 * 1024 * 1024 ],
       "RAILWATCH_EXECUTION_BUFFER_BYTES" => [ :execution_buffer_bytes, "777777", 777_777, 8 * 1024 * 1024 ],
       "RAILWATCH_BATCH_BYTES" => [ :batch_bytes, "555555", 555_555, 8 * 1024 * 1024 ],
+      "RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES" => [ :telemetry_storage_budget_bytes, "2147483648", 2_147_483_648, nil ],
+      "RAILWATCH_RETENTION_DAYS" => [ :retention_days, "14", 14, 7 ],
       "RAILWATCH_BACKPRESSURE" => [ :backpressure, "0", false, true ],
       "RAILWATCH_BACKPRESSURE_HIGH_WATER" => [ :backpressure_high_water, "0.6", 0.6, 0.8 ],
       "RAILWATCH_FLUSH_INTERVAL" => [ :flush_interval, "7.5", 7.5, 2.0 ],
@@ -158,6 +160,40 @@ RSpec.describe Railwatch::Configuration do
       end
       %w[0 false no off garbage].each do |value|
         with_env("RAILWATCH_IGNORE_QUERIES" => value) { |c| expect(c.ignored?(:queries)).to be(false) }
+      end
+    end
+  end
+
+  describe "telemetry storage policy" do
+    it "leaves malformed or nonpositive byte budgets unset without changing retention" do
+      [ "", "2 GB", "1.5", "-1", "0" ].each do |raw|
+        with_env("RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES" => raw) do |config|
+          expect(config.telemetry_storage_budget_bytes).to be_nil
+          expect(config.retention_days).to eq(7)
+        end
+      end
+    end
+
+    it "accepts positive integer initializer budgets and lets nil disable the advisory policy" do
+      config = described_class.new
+      config.telemetry_storage_budget_bytes = 1 << 30
+      expect(config.telemetry_storage_budget_bytes).to eq(1 << 30)
+      [ nil, 0, -1, 1.5, Float::INFINITY, true ].each do |invalid|
+        config.telemetry_storage_budget_bytes = invalid
+        expect(config.telemetry_storage_budget_bytes).to be_nil
+      end
+    end
+
+    it "keeps the safe retention default for invalid input" do
+      [ "0", "-4", "1.5", "never" ].each do |raw|
+        with_env("RAILWATCH_RETENTION_DAYS" => raw) { |config| expect(config.retention_days).to eq(7) }
+      end
+      config = described_class.new
+      config.retention_days = 14
+      expect(config.retention_days).to eq(14)
+      [ nil, 0, -1, 1.5 ].each do |invalid|
+        config.retention_days = invalid
+        expect(config.retention_days).to eq(7)
       end
     end
   end

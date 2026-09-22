@@ -70,6 +70,13 @@ module Railwatch
 
       module_function
 
+      def reset_schema_cache!
+        COLUMN_CACHE_MUTEX.synchronize do
+          COLUMN_CACHE.clear
+          SERIALIZATION_COLUMN_CACHE.clear
+        end
+      end
+
       # column name (String) => [type, limit, null, default], built once per
       # class and reused for every row of that class.
       def columns_for(klass)
