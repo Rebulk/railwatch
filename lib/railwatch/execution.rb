@@ -23,6 +23,10 @@ module Railwatch
     attr_accessor :sampled, :exception_preview, :paused_depth,
                   :peak_memory, :allocations_start, :gc_time_start,
                   :queue_latency, :drift, :exception_sampled, :parent_execution
+    # Local schema outages suppress this execution through completion. These
+    # are separate from the user's nested pause/resume depth and are assigned
+    # only when local persistence is in use or a schema outage was observed.
+    attr_accessor :schema_generation, :schema_paused
     # Set by Subscribers::Exceptions.capture at the moment it actually writes
     # an unhandled exception for this execution -- not when it rolls the
     # exceptions sample -- so it is the one signal that promotes a
@@ -145,7 +149,7 @@ module Railwatch
     end
 
     def recording?
-      (sampled? || @tail_buffering) && !paused?
+      (sampled? || @tail_buffering) && !paused? && !@schema_paused
     end
 
     # Ship this execution's whole tree regardless of the head sampling

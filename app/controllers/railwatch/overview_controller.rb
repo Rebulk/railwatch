@@ -5,7 +5,10 @@ module Railwatch
     def show
       requests = grouped("request", limit: 8, order: :p95)
       jobs = grouped("job_attempt", limit: 8)
+      from, to = window_range
+      attention = Railwatch::Attention.new(environment, from: from, to: to, health: Railwatch::MonitoringHealth.new(environment, host: :embedded).summary).to_h
       render inertia: {
+        attention: attention,
         totals: { requests: summary_with_delta("request"), jobs: summary_with_delta("job_attempt") },
         request_series: series("request"),
         job_series: series("job_attempt"),

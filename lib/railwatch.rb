@@ -13,6 +13,7 @@ require "active_support/parameter_filter"
 
 require "railwatch/version"
 require "railwatch/clock"
+require "railwatch/runtime_schema"
 require "railwatch/release_detector"
 require "railwatch/configuration"
 require "railwatch/secret_safety"
@@ -78,6 +79,7 @@ module Railwatch
     # reported anything yet has nothing to correct, and the reporter is
     # built on first use for a reason.
     def adopt_final_config!
+      RuntimeSchema.invalidate!
       # The redactor snapshots redact_headers when it is built. Today nothing
       # redacts before this point, so it is built later and already correct --
       # but an early one would quietly stop hiding the headers an app asked it
@@ -105,12 +107,17 @@ module Railwatch
       config.enabled?
     end
 
+    def capturing?
+      enabled? && RuntimeSchema.execution_ready?(Current.execution)
+    end
+
     # Reset for tests and after reconfiguration.
     def reset!
       @reporter&.shutdown
       @config = nil
       @reporter = nil
       @redactor = nil
+      RuntimeSchema.invalidate!
     end
 
     # Runs in every forked child (ActiveSupport::ForkTracker, registered by
@@ -119,6 +126,7 @@ module Railwatch
     # alongside it; the health sampler and session flusher restart last, so
     # they emit into the child's reporter, not the parent's.
     def restart_after_fork!
+      RuntimeSchema.restart_after_fork!
       Profiler.restart_after_fork!
       @reporter&.restart_after_fork!
       Subscribers::Users.restart_after_fork!
@@ -138,6 +146,7 @@ module Railwatch
     def start_execution(source:, sample_kind: source, trace_id: nil, parent_id: nil, preview: nil)
       exe = Execution.new(source: source, sampled: Sampler.decide(sample_kind),
                           trace_id: trace_id, parent_id: parent_id, preview: preview)
+      RuntimeSchema.execution_ready?(exe)
       exe.tenant = Context.current_tenant
       # A job (or command) can run inline, nested inside a request's own
       # execution -- e.g. ActiveJob::TestHelper's inline test adapter, or a
@@ -149,7 +158,7 @@ module Railwatch
       # Profiling is off by default, and then this costs one Float
       # comparison per execution: the rest sits behind the short circuit,
       # and tail_buffering? is a bare ivar read the Execution already made.
-      start_profile(exe) if config.profile_sample > 0.0 || (exe.tail_buffering? && config.profile_slow_ms)
+      start_profile(exe) if !exe.schema_paused && !exe.paused? && (config.profile_sample > 0.0 || (exe.tail_buffering? && config.profile_slow_ms))
       exe
     end
 
@@ -172,13 +181,14 @@ module Railwatch
 
       exe.capture_memory
       tail = !exe.sampled? && tail_keep?(exe)
-      shipping = exe.sampled? || tail
+      capturing = RuntimeSchema.execution_ready?(exe)
+      shipping = capturing && (exe.sampled? || tail)
       # The profile is a child record of this execution, so it has to be
       # buffered before the parent is built and the tree is shipped. Stopped
       # either way: a profiler left running would outlive the execution.
       profiled = exe.profiler_handle && ship_profile(exe, shipping)
       parent = nil
-      if parent_type && (shipping || exe.exception_sampled)
+      if parent_type && capturing && (shipping || exe.exception_sampled)
         fields.merge!(yield) if block_given?
         group ||= fields.delete(:group)
         fields[:tail_sampled] = true if tail
@@ -217,7 +227,7 @@ module Railwatch
     # subscribers assemble one hash literal instead of packing kwargs, then
     # hand it here). Same enabled/ignored/recording/redact checks as record.
     def push(type, rec)
-      return unless enabled?
+      return unless capturing?
 
       exe = Current.execution
       return unless recordable?(type, exe)
@@ -228,7 +238,7 @@ module Railwatch
     # Write a child record for the current execution. Silently no-ops when
     # disabled, sampled out, paused, or the type is ignored.
     def record(type, group: nil, timestamp: nil, **fields)
-      return unless enabled?
+      return unless capturing?
 
       exe = Current.execution
       return unless recordable?(type, exe)
@@ -246,7 +256,7 @@ module Railwatch
     end
 
     def record_now(type, group: nil, **fields)
-      return unless enabled?
+      return unless capturing?
 
       rec = Record.build(type, Current.execution, group: group, **fields)
       rec = run_redactors(type, rec) or return

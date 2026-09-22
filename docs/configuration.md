@@ -888,6 +888,7 @@ c.transport = :local        # RAILWATCH_TRANSPORT; default "http"
 c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
 c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
 c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
+c.telemetry_storage_budget_bytes = nil # RAILWATCH_TELEMETRY_STORAGE_BUDGET_BYTES; advisory, data + WAL
 c.http_basic_auth_enabled = true      # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; on and closed until credentials exist
 c.http_basic_auth_user = "ops"        # RAILWATCH_HTTP_BASIC_AUTH_USER, or credentials railwatch.http_basic_auth_user
 c.http_basic_auth_password = "..."    # RAILWATCH_HTTP_BASIC_AUTH_PASSWORD, or credentials railwatch.http_basic_auth_password
@@ -904,6 +905,12 @@ by default and answers 401 until `bin/rails
 railwatch:authentication:configure` has written credentials; a host with
 its own admin auth turns Basic off and sets `base_controller_class` or a
 routes constraint. Full walkthrough: [Embedded mode](embedded.md).
+
+`retention_days` accepts positive integer days; invalid values keep the
+seven-day default. The optional storage budget accepts positive integer bytes
+and is disabled when unset or invalid. It warns at 80% and 100% of telemetry
+data plus WAL usage, without stopping ingest or deleting recent data. See
+[Monitoring health](monitoring-health.md) for the readings and budget policy.
 
 ## Rake tasks
 

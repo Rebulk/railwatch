@@ -30,7 +30,7 @@ module Railwatch
     def telemetry_exists? = true
     def paused? = false
     def token_prefix = "embedded"
-    def retention_days = 7
+    def retention_days = Railwatch.config.retention_days
     # Deliberately read from the telemetry database rather than held in this
     # process. A deployed embedded install ingests in the writer process and
     # renders the dashboard in a web one, so a value set during ingest is

@@ -1034,6 +1034,16 @@ export const applicationEnvironmentMailsPath = /*#__PURE__*/ __route({"applicati
 
 /**
  * Generates rails route to
+ * /apps/:application_id/envs/:environment_id/monitoring_health(.:format)
+ * @param {any} applicationId
+ * @param {any} environmentId
+ * @param {object | undefined} options
+ * @returns {string} route path
+ */
+export const applicationEnvironmentMonitoringHealthPath = /*#__PURE__*/ __route({"application_id":{"r":true},"environment_id":{"r":true},"format":{}}, [2,[7,"/"],[2,[6,"apps"],[2,[7,"/"],[2,[3,"application_id"],[2,[7,"/"],[2,[6,"envs"],[2,[7,"/"],[2,[3,"environment_id"],[2,[7,"/"],[2,[6,"monitoring_health"],[1,[2,[8,"."],[3,"format"]]]]]]]]]]]]]);
+
+/**
+ * Generates rails route to
  * /apps/:application_id/envs/:environment_id/notifications(.:format)
  * @param {any} applicationId
  * @param {any} environmentId

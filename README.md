@@ -50,6 +50,13 @@ gem "railwatch", github: "Rebulk/railwatch"
   and browser errors ([Getting started](docs/getting-started.md)).
 - RSpec and Minitest matchers that turn a query budget into a CI gate
   ([Testing](docs/testing.md)).
+- Query diagnostics that distinguish SQL suggestions from stored plan and
+  N+1 evidence, with links to the captured samples
+  ([Query diagnostics](docs/query-diagnostics.md)).
+- An overview **Needs attention** list and a dedicated **Monitoring health**
+  page for freshness, recorded loss, backlogs, storage and maintenance
+  ([Needs attention](docs/needs-attention.md),
+  [Monitoring health](docs/monitoring-health.md)).
 - An MCP server so Claude Code, Cursor, VS Code, or Zed can read your
   production data ([AI assistants and MCP](docs/ai-and-mcp.md)).
 
@@ -93,6 +100,12 @@ would rather use their own session hand it a `dashboard_user` resolver
 instead. [Embedded mode](docs/embedded.md) covers all of it, including
 upgrades and what it costs to store.
 
+The [storage guide](docs/storage.md) explains the separate SQLite databases
+and runtime schema checks. Pending or incompatible schemas pause local
+capture and show authenticated repair guidance while application requests
+continue. The health page's optional storage budget is advisory; it does
+not delete recent telemetry.
+
 ## Documentation
 
 - [Getting started](docs/getting-started.md) — five-minute install for a
@@ -104,6 +117,14 @@ upgrades and what it costs to store.
   attribute on it, sourced from the code that builds it.
 - [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
   performance gate.
+- [Query diagnostics](docs/query-diagnostics.md) — bounded analysis of
+  captured SQL, stored plans and N+1 evidence, with explicit limitations.
+- [Needs attention](docs/needs-attention.md) — prioritizing existing issues
+  and current monitoring health findings from the overview.
+- [Monitoring health](docs/monitoring-health.md) — freshness, loss,
+  backpressure, retention, SQLite usage and the advisory storage budget.
+- [Railwatch storage](docs/storage.md) — isolated SQLite configuration,
+  schema compatibility, repair and supported storage boundaries.
 - [AI assistants and MCP](docs/ai-and-mcp.md) — connecting Claude Code,
   Cursor, VS Code, or Zed to your production data.
 - [Replacing Sentry](docs/replacing-sentry.md) — a step-by-step migration,

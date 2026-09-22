@@ -45,6 +45,7 @@ Railwatch::Engine.routes.draw do
       resources :releases, only: [ :index, :show ]
       resources :visits, only: [ :index ]
       resources :processes, only: [ :index ]
+      resource :monitoring_health, only: :show, controller: :monitoring_health
       resources :tenants, only: [ :index, :show ]
       resources :saved_views, only: [ :create, :update, :destroy ]
       resources :thresholds, only: [ :index, :create, :update, :destroy ]

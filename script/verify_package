@@ -72,6 +72,8 @@ begin
     lib/generators/railwatch/install/install_generator.rb
     lib/generators/railwatch/install/templates/initializer.rb.tt
     lib/railwatch.rb
+    lib/railwatch/runtime_schema.rb
+    lib/railwatch/runtime_schema.json
     lib/railwatch/version.rb
     lib/railwatch/wire_fixtures.json
     llms.txt

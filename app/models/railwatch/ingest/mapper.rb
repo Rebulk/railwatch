@@ -61,19 +61,34 @@ module Railwatch
       }.freeze
 
       COLUMN_CACHE = {}
-      SERIALIZATION_COLUMN_CACHE = {}
       COLUMN_CACHE_MUTEX = Mutex.new
       TIME_PREFIX_CACHE_KEY = :railwatch_ingest_time_prefixes
       TIME_PREFIX_CACHE_LIMIT = 64
-      private_constant :COLUMN_CACHE, :SERIALIZATION_COLUMN_CACHE, :COLUMN_CACHE_MUTEX,
+      private_constant :COLUMN_CACHE, :COLUMN_CACHE_MUTEX,
         :TIME_PREFIX_CACHE_KEY, :TIME_PREFIX_CACHE_LIMIT
 
       module_function
 
+      def reset_schema_cache!
+        COLUMN_CACHE_MUTEX.synchronize do
+          COLUMN_CACHE.clear
+        end
+      end
+
       # column name (String) => [type, limit, null, default], built once per
       # class and reused for every row of that class.
       def columns_for(klass)
-        COLUMN_CACHE[klass] ||= COLUMN_CACHE_MUTEX.synchronize do
+        cached_columns_for(klass).first
+      end
+
+      def serialization_columns_for(klass)
+        cached_columns_for(klass).last
+      end
+      private_class_method :serialization_columns_for
+
+      # A reader retains both views even if schema recovery clears the cache.
+      def cached_columns_for(klass)
+        COLUMN_CACHE[klass] || COLUMN_CACHE_MUTEX.synchronize do
           COLUMN_CACHE[klass] ||= begin
             columns = {}
             serialization_columns = []
@@ -82,17 +97,12 @@ module Railwatch
               columns[column.name] = metadata
               serialization_columns << [ column.name.to_sym, *metadata ].freeze
             end
-            SERIALIZATION_COLUMN_CACHE[klass] = serialization_columns.freeze
-            columns.freeze
+            [ columns.freeze, serialization_columns.freeze ].freeze
           end
         end
       end
 
-      def serialization_columns_for(klass)
-        columns_for(klass)
-        SERIALIZATION_COLUMN_CACHE.fetch(klass)
-      end
-      private_class_method :serialization_columns_for
+      private_class_method :cached_columns_for
 
       # trusted: this record was produced by the gem in this process (an
       # embedded batch), not parsed from an HTTP body. Validation and the

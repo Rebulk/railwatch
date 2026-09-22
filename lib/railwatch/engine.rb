@@ -66,8 +66,17 @@ module Railwatch
     # Dashboard controllers also reference model constants in their class
     # bodies. The beacon is the only controller a cloud install needs.
     initializer "railwatch.embedded_eager_loading", after: :load_config_initializers, before: :setup_main_autoloader do
-      next if Railwatch.config.local?
+      if Railwatch.config.local?
+        configs = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, include_hidden: true)
+        configured = Railwatch::RuntimeSchema::DATABASES.keys.all? do |name|
+          configs.any? { |database| database.name == name && database.adapter == "sqlite3" }
+        end
+        next if configured && Gem.loaded_specs.key?("sqlite3")
+      end
 
+      # A local install with missing entries or adapter must also reach boot
+      # and its authenticated repair page. Lazy loading stays available; only
+      # the framework's eager schema-cache connection probes are avoided.
       Rails.autoloaders.main.do_not_eager_load(root.join("app/models"))
       Rails.autoloaders.main.do_not_eager_load(root.join("app/jobs"))
       root.glob("app/controllers/railwatch/*.rb").each do |path|
@@ -119,6 +128,16 @@ module Railwatch
     # app's own configuration is final.
     initializer "railwatch.adopt_final_config", after: :load_config_initializers do
       Railwatch.adopt_final_config!
+    end
+
+    initializer "railwatch.runtime_schema", after: :load_config_initializers do
+      ActiveSupport.on_load(:active_record) do
+        ActiveRecord::Migration.singleton_class.prepend(Railwatch::RuntimeSchema::HostMigrationCheck)
+      end
+      config.to_prepare { Railwatch::RuntimeSchema.invalidate! }
+      config.after_initialize do
+        Railwatch::RuntimeSchema.status if Railwatch.config.local?
+      end
     end
 
     initializer "railwatch.transport_security", after: :load_config_initializers do

@@ -700,6 +700,20 @@ export const applicationEnvironmentMailsPath: ((
 
 /**
  * Generates rails route to
+ * /apps/:application_id/envs/:environment_id/monitoring_health(.:format)
+ * @param {any} applicationId
+ * @param {any} environmentId
+ * @param {object | undefined} options
+ * @returns {string} route path
+ */
+export const applicationEnvironmentMonitoringHealthPath: ((
+  applicationId: RequiredRouteParameter,
+  environmentId: RequiredRouteParameter,
+  options?: {format?: OptionalRouteParameter} & RouteOptions
+) => string) & RouteHelperExtras;
+
+/**
+ * Generates rails route to
  * /apps/:application_id/envs/:environment_id/notifications(.:format)
  * @param {any} applicationId
  * @param {any} environmentId

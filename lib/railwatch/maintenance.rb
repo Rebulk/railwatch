@@ -155,6 +155,7 @@ module Railwatch
     # but there is no reason to run a second one).
     def tick(now: Time.current)
       return [] if !Writer.running? && Writer.listening?
+      return [] unless RuntimeSchema.ready?
 
       ran = []
       Rails.application.executor.wrap do

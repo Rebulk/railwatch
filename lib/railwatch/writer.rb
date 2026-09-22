@@ -183,6 +183,11 @@ module Railwatch
     # running in a process of its own.
     def write_batch(request)
       Rails.application.executor.wrap do
+        schema = RuntimeSchema.status(local: true)
+        unless schema.ready?
+          next Transport::Local::Result.new(ok: false, status: 503, error: schema.message, retryable_error: true)
+        end
+
         environment = Environment.current
         batch_id = request["batch_id"]
         if (ledger = environment.with_telemetry { Ingest::Batch.committed(batch_id) })
@@ -195,6 +200,7 @@ module Railwatch
         Transport::Local::Result.new(ok: true, status: 200, accepted: result.accepted, rejected: result.rejected,
                                      rejections: result.rejections.first(10))
       rescue StandardError => e
+        RuntimeSchema.invalidate! if e.is_a?(ActiveRecord::ActiveRecordError)
         Railwatch.debug { "writer batch failed: #{e.class}: #{e.message}" }
         Transport::Local::Result.new(ok: false, error: "#{e.class}: #{e.message}", retryable_error: true)
       end

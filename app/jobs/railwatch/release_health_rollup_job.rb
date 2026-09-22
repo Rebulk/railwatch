@@ -13,7 +13,9 @@ module Railwatch
   # rather than a record count.
   class ReleaseHealthRollupJob < ApplicationJob
     queue_as :rollups
-    limits_concurrency to: 1, key: ->(environment, bucket) { "release_health:#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
+    if respond_to?(:limits_concurrency)
+      limits_concurrency to: 1, key: ->(environment, bucket) { "release_health:#{environment.id}:#{bucket.to_i}" }, duration: 10.minutes, on_conflict: :discard
+    end
 
     RANKS = { "started" => 0, "ok" => 1, "errored" => 2, "crashed" => 3 }.freeze
     CRASHED = RANKS["crashed"]
