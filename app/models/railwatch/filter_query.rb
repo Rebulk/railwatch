@@ -132,11 +132,20 @@ module Railwatch
       # "(pruned)" under the SolidQueue::Pruned group -- so the window's
       # rollups supply any other group recorded under the name, and the last
       # FRESH_NAMES, which rollups have not caught up with, match by name.
+      #
+      # A class with many attempts in the window is the opposite case: the
+      # newest page is in the first rows of the walk (2 ms), while the seek
+      # gathers and sorts every attempt (10 s for 93,000 RollupJobs over 30
+      # days). The rollups say how many there are, so a common class walks.
       if fields["class"].present?
         name = fields["class"]
-        groups = [ Record.group_hash(name) ] |
-                 Telemetry::Rollup.for_type("job_attempt").between(range.begin, range.end).where(name: name).distinct.pluck(:group_hash)
-        scope = scope.merge(Telemetry::Execution.in_groups_or_fresh("job_attempt", groups, range)).where(name: name)
+        rollups = Telemetry::Rollup.for_type("job_attempt").between(range.begin, range.end).where(name: name)
+        scope = if rollups.sum(:count) >= Telemetry::Execution::DENSE_MATCHES
+          scope.where(name: name)
+        else
+          groups = [ Record.group_hash(name) ] | rollups.distinct.pluck(:group_hash)
+          scope.merge(Telemetry::Execution.in_groups_or_fresh("job_attempt", groups, range)).where(name: name)
+        end
       end
       scope = scope.where(job_id: fields["job_id"]) if fields["job_id"].present?
       return scope unless text.present?

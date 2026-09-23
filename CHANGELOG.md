@@ -6,6 +6,12 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- A `class:` filter for a job class with many attempts in the window
+  walks the window again, where the newest page comes first. 0.8.3
+  gathered and sorted every attempt of the class through its group:
+  10 s for the platform's 93,000 RollupJob attempts over 30 days, 2 ms by
+  walking.
+
 ## 0.8.3 (2026-09-23)
 
 - Filtering jobs by `class:` seeks the class's group (a job's group is
