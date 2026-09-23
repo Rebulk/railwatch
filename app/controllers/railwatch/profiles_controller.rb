@@ -13,7 +13,7 @@ module Railwatch
       rows, count, avg_samples, profiled, executions = telemetry do
         scope = Telemetry::Profile.between(from, to)
         [ scope.recent.limit(SCAN_LIMIT).select(:id, :group_hash, :execution_preview, :duration, :samples, :occurred_at).to_a,
-          scope.count, scope.average(:samples), scope.distinct.count(:execution_id), Telemetry::Execution.between(from, to).count ]
+          scope.count, scope.average(:samples), scope.distinct.count(:execution_id), executions_in(from, to) ]
       end
       render inertia: { profiles: groups(rows),
                         summary: { profiles: count, executions: executions, profiled: profiled, avg_samples: avg_samples.to_f.round(0) } }
@@ -28,6 +28,15 @@ module Railwatch
     end
 
     private
+
+    # How many executions the window holds, as the profiled share's
+    # denominator. Every kind is rolled up, so this sums a few hundred
+    # rollup rows rather than counting every execution (1.2 s over a week
+    # of the platform's own). Rollups round `from` down to its hour, which
+    # a percentage does not notice.
+    def executions_in(from, to)
+      Telemetry::Rollup.for_type(Telemetry::Execution::KINDS).between(from, to).sum(:count)
+    end
 
     # Rows arrive newest-first, so the head of each group is the profile the
     # page links to.

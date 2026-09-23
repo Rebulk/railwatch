@@ -6,6 +6,16 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The Tenants page reads only through the tenant-led indexes. Sparklines
+  are drawn for the tenants already found, by name. The untagged share is
+  the window's requests less the tagged ones, and the tagged ones are
+  counted per tenant. Both used to read every request in the window: over
+  a week, 11 s on an app with no tenants and 24 s on one with them.
+- A partial covering index serves the People page: 4 s over 30 days,
+  now 18 ms, from under a megabyte.
+- The Profiles page takes the window's execution count from rollups
+  instead of counting every execution (1.2 s over a week).
+
 ## 0.8.0 (2026-09-23)
 
 - Percentiles merged across hours are about ten times faster. Each

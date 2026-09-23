@@ -35,7 +35,7 @@ module Railwatch
         absorb_counts(rows, filtered(Telemetry::Exception.between(from, to), q), :exceptions)
         absorb_counts(rows, filtered(Telemetry::Log.between(from, to), q), :logs)
         absorb_last_seen(rows, from, to, q)
-        absorb_sparklines(rows, from, to, q)
+        absorb_sparklines(rows, from, to)
         absorb_p95s(rows.values.max_by(P95_TENANTS) { |r| r[:requests] }, from, to)
         sorted(rows.values, sort, dir)
       end
@@ -43,18 +43,29 @@ module Railwatch
       # Headline numbers for the index page, computed from the rows it shows
       # (so the top-tenant share is a share of the listed tenants' requests)
       # plus the share of requests in the window that carry no tenant at all.
+      #
+      # The untagged count is the window's requests less the tagged ones,
+      # and the tagged ones are counted per tenant in app_tenant's index.
+      # Counting either side with app_tenant IS [NOT] NULL read every request
+      # in the window instead: 1 s on an untagged app, 24 s on a tagged one.
       def self.overview(rows, from, to)
         requests = Telemetry::Execution.requests.between(from, to)
         total = requests.count
-        untagged = requests.where(app_tenant: nil).count
+        tagged_total = requests.group(:app_tenant).where(app_tenant: tagged_tenants(from, to)).count.values.sum
         tagged = rows.sum { |r| r[:requests] }
         top = rows.max_by { |r| r[:requests] }
         {
           tenants: rows.size, top_tenant: top && top[:tenant],
           top_share: tagged.zero? ? 0.0 : (top[:requests] * 100.0 / tagged).round(1),
           with_errors: rows.count { |r| r[:errors].positive? },
-          untagged_share: total.zero? ? 0.0 : (untagged * 100.0 / total).round(1)
+          untagged_share: total.zero? ? 0.0 : ((total - tagged_total) * 100.0 / total).round(1)
         }
+      end
+
+      # Every tenant that sent anything in the window, from the tenant-led
+      # index (a skip-scan over distinct values, not the window's rows).
+      def self.tagged_tenants(from, to)
+        Telemetry::Execution.between(from, to).where.not(app_tenant: nil).distinct.pluck(:app_tenant)
       end
 
       # Window totals for one tenant. Durations in milliseconds, like the rest
@@ -129,9 +140,17 @@ module Railwatch
           .each { |tenant, at| rows[tenant][:last_seen_at] = at }
       end
 
-      def self.absorb_sparklines(rows, from, to, q)
+      # Only for the tenants already found, by name: grouped by tenant and a
+      # time expression SQLite would not seek the app_tenant index and read
+      # every request in the window instead -- 11 s over a week on an app
+      # with no tenants at all, to draw nothing.
+      def self.absorb_sparklines(rows, from, to)
+        tenants = rows.keys.compact
+        return if tenants.empty?
+
         width = bucket_width(from, to, SPARKLINE_BUCKETS)
-        counts = filtered(Telemetry::Execution.requests.between(from, to), q).group(:app_tenant, bucket_sql(from, width)).count
+        counts = Telemetry::Execution.requests.between(from, to).where(app_tenant: tenants)
+          .group(:app_tenant, bucket_sql(from, width)).count
         counts.each do |(tenant, index), count|
           rows[tenant][:sparkline][[ index.to_i, SPARKLINE_BUCKETS - 1 ].min] += count
         end
