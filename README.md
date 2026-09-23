@@ -6,25 +6,31 @@ outgoing HTTP, storage, views, and logs, and links them into one trace
 per execution, for about half a millisecond per request plus tens of
 microseconds per query, with zero writes to your database.
 
-Send that to Railwatch Cloud, or keep all of it inside the app:
-[embedded mode](docs/embedded.md) serves the same dashboard at
+By default all of it stays inside the app:
+[embedded mode](docs/embedded.md) serves the full dashboard at
 `/railwatch` out of two SQLite files your app owns, with no token, no
-Node, no Redis and no job worker.
+Node, no Redis and no job worker. Railwatch Cloud is optional, for
+alerts that arrive when the app is down, MCP for your AI assistant, and
+many apps and servers in one place.
 
 ## Install
 
 ```sh
-bundle add railwatch            # 1. add the public gem
-bin/rails generate railwatch:install --prompt-token  # 2. hidden token input plus app wiring
-bin/rails railwatch:doctor                    # 3. check every piece is wired up after restart
+bundle add railwatch                  # 1. add the public gem
+bin/rails generate railwatch:install  # 2. embedded: databases, Puma writer, dashboard at /railwatch
 ```
 
-Or keep everything inside your app, with the full dashboard at
-`/railwatch` and no token ([Embedded mode](docs/embedded.md)):
+Restart and open `/railwatch`. It is open in development; before you
+deploy, give it a password with
+`RAILS_ENV=production bin/rails railwatch:authentication:configure`
+(it answers 401 in production until you do).
+
+Or send everything to Railwatch Cloud instead:
 
 ```sh
 bundle add railwatch
-bin/rails generate railwatch:install --local
+bin/rails generate railwatch:install --prompt-token  # hidden token input plus app wiring
+bin/rails railwatch:doctor                          # check every piece is wired up after restart
 ```
 
 Getting the token, the generator's flags, and deploying with Kamal,
@@ -73,7 +79,7 @@ expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 
 ## Embedded mode
 
-`--local` keeps everything inside the application. Telemetry goes to two
+The default install keeps everything inside the application. Telemetry goes to two
 SQLite files it owns -- `railwatch` for issues, comments and saved views,
 `railwatch_telemetry` for what the app reports -- and the dashboard is
 served at `/railwatch` from a bundle shipped inside the gem. Nothing
@@ -86,9 +92,11 @@ runs the maintenance clock too, so exception grouping, rollups, retention
 and threshold scans happen without a queue.
 
 That dashboard reads every query, log line and exception the app
-produced, so it is closed by default the way Mission Control Jobs is:
-HTTP Basic is on with no credentials, and every request is 401 until you
-set them with `bin/rails railwatch:authentication:configure`. Apps that
+produced, so outside development it is closed by default the way
+Mission Control Jobs is: HTTP Basic is on with no credentials, and every
+request is 401 until you set them with
+`bin/rails railwatch:authentication:configure`. In development, with no
+credentials set, it is open. Apps that
 would rather use their own session hand it a `dashboard_user` resolver
 instead. [Embedded mode](docs/embedded.md) covers all of it, including
 upgrades and what it costs to store.

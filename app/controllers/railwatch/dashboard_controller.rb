@@ -47,6 +47,7 @@ module Railwatch
     def authenticate_by_http_basic
       config = Railwatch.config
       return unless config.http_basic_auth_enabled
+      return if config.http_basic_auth_waived?
 
       if config.http_basic_auth_configured?
         http_basic_authenticate_or_request_with(name: config.http_basic_auth_user, password: config.http_basic_auth_password,

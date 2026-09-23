@@ -888,7 +888,7 @@ c.transport = :local        # RAILWATCH_TRANSPORT; default "http"
 c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
 c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
 c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
-c.http_basic_auth_enabled = true      # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; on and closed until credentials exist
+c.http_basic_auth_enabled = true      # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; on, and closed outside development until credentials exist
 c.http_basic_auth_user = "ops"        # RAILWATCH_HTTP_BASIC_AUTH_USER, or credentials railwatch.http_basic_auth_user
 c.http_basic_auth_password = "..."    # RAILWATCH_HTTP_BASIC_AUTH_PASSWORD, or credentials railwatch.http_basic_auth_password
 c.base_controller_class = "AdminController"  # RAILWATCH_BASE_CONTROLLER_CLASS; default ActionController::Base
@@ -900,7 +900,7 @@ With `transport = :local` the reporter writes each batch into the app's
 own `railwatch_telemetry` database instead of POSTing it, and the engine
 serves the dashboard at its mount. `enabled?` no longer needs a token.
 The others only matter in that mode. The dashboard is behind HTTP Basic
-by default and answers 401 until `bin/rails
+by default and, outside development, answers 401 until `bin/rails
 railwatch:authentication:configure` has written credentials; a host with
 its own admin auth turns Basic off and sets `base_controller_class` or a
 routes constraint. Full walkthrough: [Embedded mode](embedded.md).

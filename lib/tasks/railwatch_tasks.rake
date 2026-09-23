@@ -235,7 +235,7 @@ namespace :railwatch do
       %w[railwatch railwatch_telemetry].each do |name|
         configured = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
         check.call(!configured.nil?, "#{name} database",
-                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install --local)",
+                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install)",
                    fatal: true)
       end
       { "railwatch_telemetry" => Railwatch::TelemetryRecord, "railwatch" => Railwatch::ApplicationRecord }.each do |name, base|
@@ -326,12 +326,19 @@ namespace :railwatch do
       # HTTP Basic is on and closed until credentials exist; a deploy that
       # forgot gets a 401, not a public page, and this says so first.
       gate = config.dashboard_gate
-      check.call(gate != :undeclared && !(gate == :basic && !config.http_basic_auth_configured?), "dashboard access",
+      check.call(gate != :undeclared && !(gate == :basic && !config.http_basic_auth_configured? && !config.http_basic_auth_waived?),
+                 "dashboard access",
                  case gate
                  when :basic
-                   config.http_basic_auth_configured? ? "HTTP Basic, user #{config.http_basic_auth_user}" :
+                   if config.http_basic_auth_configured?
+                     "HTTP Basic, user #{config.http_basic_auth_user}"
+                   elsif config.http_basic_auth_waived?
+                     "open in development. Production stays closed until you run " \
+                       "`RAILS_ENV=production bin/rails railwatch:authentication:configure`"
+                   else
                      "closed: HTTP Basic is on with no credentials, so every dashboard request is 401. " \
-                     "Run `bin/rails railwatch:authentication:configure`"
+                       "Run `bin/rails railwatch:authentication:configure`"
+                   end
                  when :controller then "your own: c.base_controller_class = #{config.base_controller_class}"
                  when :resolver then "your own: c.dashboard_user decides, and live updates follow it"
                  when :open then "deliberately open: anyone who can reach the mount can read it (c.dashboard_open)"

@@ -4,12 +4,16 @@
 > requests, jobs, scheduled tasks, rake/runner commands, database queries and
 > N+1s, exceptions, cache, mail, notifications, broadcasts, outgoing HTTP,
 > Active Storage, view renders, and logs — links every one of them into a
-> single execution tree by `execution_id`/`trace_id`, and ships them to
-> Railwatch Cloud from a background thread. It replaces a separate APM and a
+> single execution tree by `execution_id`/`trace_id`, and writes them from a
+> background thread into the app's own SQLite files (embedded, the default) or
+> to Railwatch Cloud. It replaces a separate APM and a
 > separate error tracker with one gem and one configuration block, costs
 > under a millisecond of CPU per request, and never writes to the
 > application's own database. Install is `bundle add railwatch` followed by
-> `bin/rails generate railwatch:install`, which writes the initializer, mounts
+> `bin/rails generate railwatch:install`, which by default keeps everything in
+> the app (two SQLite databases, the dashboard at `/railwatch`); with
+> `--cloud` or a token option it ships to Railwatch Cloud instead. It writes
+> the initializer, mounts
 > the beacon engine, adds a Kamal post-deploy hook and the Inertia browser
 > client where the app has them, wires the test matchers, and then runs
 > `bin/rails railwatch:doctor` to print a ✓/✗ line for every piece.

@@ -378,12 +378,21 @@ module Railwatch
       http_basic_auth_user.to_s.strip != "" && http_basic_auth_password.to_s.strip != ""
     end
 
+    # Development with Basic on and nothing configured is open, so a first
+    # run is `rails g railwatch:install` and a page, not a password step
+    # first. Rails already shows full error pages there. Every other
+    # environment stays closed until credentials exist.
+    def http_basic_auth_waived?
+      http_basic_auth_enabled && !http_basic_auth_configured? && defined?(Rails) && Rails.env.development?
+    end
+
     # Whether the request carries the configured HTTP Basic credentials.
     # False when Basic is on and nothing is configured (closed), true when
     # Basic is off (the host's base controller or routes constraint is the
     # gate then). Shared by the dashboard controller and the live channel.
     def http_basic_auth_ok?(request)
       return true unless http_basic_auth_enabled
+      return true if http_basic_auth_waived?
       return false unless http_basic_auth_configured?
 
       ActionController::HttpAuthentication::Basic.authenticate(request) do |user, password|

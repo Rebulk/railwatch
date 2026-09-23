@@ -37,7 +37,7 @@ export function Onboarding({
           <li>
             Run the generator
             <CopyBlock
-              code="bin/rails generate railwatch:install"
+              code="bin/rails generate railwatch:install --cloud"
               className="mt-1.5"
             />
           </li>

@@ -14,10 +14,14 @@ render, exception, and span is a child of one, linked by
 
 ```sh
 bundle add railwatch
-bin/rails generate railwatch:install --prompt-token --kamal-secrets
+bin/rails generate railwatch:install                                 # embedded: dashboard at /railwatch
+bin/rails generate railwatch:install --prompt-token --kamal-secrets  # or: Railwatch Cloud
 ```
 
-The generator writes `config/initializers/railwatch.rb`, mounts `Railwatch::Engine`
+With no flags the install is embedded (see [Embedded mode](docs/embedded.md)):
+telemetry stays in two SQLite databases the app owns and the dashboard is served
+at `/railwatch`. `--cloud`, or any of `--prompt-token`, `--token-stdin`, `--url`,
+`--kamal-secrets`, sends it to Railwatch Cloud instead. For the cloud install the generator writes `config/initializers/railwatch.rb`, mounts `Railwatch::Engine`
 at `/railwatch`, adds the Kamal `post-deploy` hook and the Inertia browser client
 where the app has them, requires `railwatch/rspec` (or `railwatch/minitest`) in the
 test helper, and then runs `railwatch:doctor`. A prompted/stdin/environment token

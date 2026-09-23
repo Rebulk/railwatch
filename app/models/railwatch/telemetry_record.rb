@@ -18,7 +18,7 @@ module Railwatch
       # No `railwatch_telemetry` entry in this environment's database.yml, or an entry
       # whose adapter gem is not in the bundle yet (LoadError). A cloud-transport
       # app has none and still eager-loads this class in production, and so
-      # does the --local installer's own boot, before it has written the
+      # does the installer's own boot, before it has written the
       # entry -- so loading must not raise. Using it must, though: without
       # connects_to this class would inherit ActiveRecord::Base's PRIMARY
       # connection, and its tables are unprefixed, so a query would read and
@@ -28,7 +28,7 @@ module Railwatch
       def self.connection_pool
         raise Railwatch::DatabaseNotConfigured,
               "the `railwatch_telemetry` database (everything the app reports) is not configured for the " \
-              "#{Rails.env} environment; run `bin/rails generate railwatch:install --local` " \
+              "#{Rails.env} environment; run `bin/rails generate railwatch:install` " \
               "or add it to config/database.yml (docs/embedded.md)"
       end
     end

@@ -199,6 +199,30 @@ RSpec.describe "embedded dashboard", type: :request do
       expect(response.body).to include("railwatch:authentication:configure")
     end
 
+    it "is open in development with no credentials, so a first run needs no password step" do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("development"))
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:ok)
+      expect(Railwatch.config.http_basic_auth_ok?(ActionDispatch::Request.new(Rack::MockRequest.env_for("/cable")))).to be(true)
+    end
+
+    it "is closed in production with no credentials, even though development is open" do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:unauthorized)
+    end
+
+    it "asks for the password in development once credentials are configured" do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("development"))
+      Railwatch.config.http_basic_auth_user = "ops"
+      Railwatch.config.http_basic_auth_password = "s3cret"
+
+      get "/railwatch/apps/1/envs/1", headers: inertia_headers
+      expect(response).to have_http_status(:unauthorized)
+    end
+
     it "challenges for and accepts the configured credentials" do
       Railwatch.config.http_basic_auth_user = "ops"
       Railwatch.config.http_basic_auth_password = "s3cret"

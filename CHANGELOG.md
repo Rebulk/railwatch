@@ -6,6 +6,27 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Embedded is now the installer's default. `bin/rails generate
+  railwatch:install` with no flags writes what `--local` used to: the
+  `railwatch` and `railwatch_telemetry` SQLite databases, `plugin
+  :railwatch` in `config/puma.rb`, and `c.transport = :local`, so two
+  commands give a working dashboard at `/railwatch` with no account and no
+  token. The cloud install is `--cloud`, and any option that only means
+  something there (`--prompt-token`, `--token-stdin`, `--url`,
+  `--kamal-secrets`) implies it, so existing cloud instructions keep
+  working. An exported `RAILWATCH_TOKEN` on its own does not pick the
+  cloud: a token in the shell is not a decision about where data goes.
+  `--local` is gone (it is the default); the gem's runtime default when no
+  initializer sets a transport is unchanged. The embedded next steps now
+  end with how to mirror to Railwatch Cloud (`c.export_enabled`).
+
+- The embedded dashboard is open in development when HTTP Basic has no
+  credentials, so the first run needs no password step. Every other
+  environment is unchanged: closed, 401, until credentials exist. That
+  case now also logs a boot warning outside development and test (it was
+  only in the doctor), since a 401 on a deployed dashboard otherwise looks
+  like a broken install. Configured credentials apply in development too.
+
 - Bound how long Puma waits for the embedded writer to stop. The plugin sent
   the writer TERM and then called `Process.wait` on it, which has no timeout:
   a writer that did not exit -- stuck in a SQLite write, on a full disk --

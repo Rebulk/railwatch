@@ -3,7 +3,7 @@
 # Railwatch: first-class monitoring for Rails. Every option here can also be
 # set by the RAILWATCH_* env var named in the comment.
 Railwatch.configure do |c|
-<% if options[:local] -%>
+<% if local? -%>
   # Telemetry stays in this app's own railwatch_telemetry database and the
   # dashboard is served at /railwatch. No token, no cloud. Put the mount
   # behind your own authentication; this only names who is looking.
@@ -13,9 +13,9 @@ Railwatch.configure do |c|
   # c.repository_url = "https://github.com/you/app" # RAILWATCH_REPOSITORY_URL; source links from stack traces
   # c.retention_days = 7                            # RAILWATCH_RETENTION_DAYS; PruneTelemetryJob keeps this much
   # Access. The dashboard shows every query, log line and exception this app
-  # records, so pick one of these. Out of the box it is HTTP Basic, on and
-  # closed until credentials exist:
-  #   bin/rails railwatch:authentication:configure   (writes Rails credentials)
+  # records, so pick one of these. Out of the box it is HTTP Basic: open in
+  # development, closed everywhere else until credentials exist:
+  #   RAILS_ENV=production bin/rails railwatch:authentication:configure
   # or RAILWATCH_HTTP_BASIC_AUTH_USER / _PASSWORD.
   #
   # Using your own admin auth instead? Turn Basic off and say which, so the

@@ -91,15 +91,26 @@ module Railwatch
       config.http_basic_auth_password ||= app.credentials.dig(:railwatch, :http_basic_auth_password)
     end
 
-    # Two things worth one line in the log at boot, because both are
+    # Three things worth one line in the log at boot, because all are
     # invisible until something is already wrong: a Rails/json pair that
-    # cannot decode, and an embedded dashboard with nothing declared in
-    # front of it.
+    # cannot decode, an embedded dashboard with nothing declared in front of
+    # it, and one that is closed to everyone because Basic has no
+    # credentials outside development.
     initializer "railwatch.warnings", after: :load_config_initializers do
       config.after_initialize do
         next unless Railwatch.enabled?
 
         Rails.logger.warn("[railwatch] #{Railwatch::JsonCompat.advice}") if Railwatch::JsonCompat.broken?
+
+        if Railwatch.config.local? && Railwatch.config.dashboard_gate == :basic &&
+           !Railwatch.config.http_basic_auth_configured? && !Rails.env.local?
+          Rails.logger.warn(
+            "[railwatch] the dashboard is closed: HTTP Basic is on and no credentials are configured for " \
+            "#{Rails.env}, so every request to it is 401. Run `RAILS_ENV=#{Rails.env} bin/rails " \
+            "railwatch:authentication:configure`, or gate it with your own auth and set " \
+            "`c.http_basic_auth_enabled = false` (docs/embedded.md)."
+          )
+        end
 
         if Railwatch.config.local? && Railwatch.config.dashboard_gate == :undeclared && !Rails.env.local?
           Rails.logger.warn(
