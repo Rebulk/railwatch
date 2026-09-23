@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.0 (2026-09-23)
+
 - Percentiles merged across hours are about ten times faster. Each
   rollup's stored t-digest is read straight from its bytes and the
   centroids are sorted once, instead of being pushed one at a time into
