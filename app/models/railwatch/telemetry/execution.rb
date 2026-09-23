@@ -17,6 +17,53 @@ module Railwatch
       scope :between, ->(from, to) { where(occurred_at: from..to) }
       scope :failed, -> { where("status >= 500 OR outcome = 'failed'") }
 
+      # Executions of `kind` in [from, to] whose name contains `text`, or
+      # (with previews: true) whose exception preview does. A LIKE on the rows
+      # themselves reads every execution in the window until it has a page:
+      # 32 s for a week of the platform's own requests when the text is rare.
+      # Names come from a few hundred groups, so the text is matched against
+      # the window's rollups and the rows are fetched by group_hash. Rollups
+      # trail ingest by up to a minute, so the last FRESH_NAMES are matched on
+      # the rows themselves. Only failures carry a preview, and a partial
+      # index holds just those rows.
+      #
+      # Each branch names its index and the outer lookup is by rowid, so the
+      # plan does not depend on planner statistics (an embedded install's are
+      # sampled, and sampled statistics make kind look selective). When the
+      # text is common the old walk is the fast one -- a page of matches
+      # turns up in the first few thousand rows -- so a text the rollups say
+      # matches DENSE_MATCHES rows or more keeps it. On a copy of the
+      # platform's own tenant, a week of job attempts: a text matching
+      # nothing took 657 ms walking and 27 ms here; one matching 32,766 took
+      # 11 ms walking and 215 ms here.
+      FRESH_NAMES = 5.minutes
+      DENSE_MATCHES = 1_000
+
+      # `range` is used as given, so an exclusive or empty one (FilterQuery's
+      # after:/before: can narrow a window to nothing) stays that way.
+      def self.named_like(kind, text, range, previews: false)
+        from, to = range.begin, range.end
+        pattern = "%#{sanitize_sql_like(text)}%"
+        window = where(kind: kind, occurred_at: range)
+        groups = Rollup.for_type(kind).between(from, to).where("name LIKE ? ESCAPE '\\'", pattern)
+        if !TelemetryRecord.sqlite? || groups.sum(:count) >= DENSE_MATCHES
+          like = previews ? "name LIKE :pattern ESCAPE '\\' OR exception_preview LIKE :pattern ESCAPE '\\'" : "name LIKE :pattern ESCAPE '\\'"
+          return window.where(like, pattern: pattern)
+        end
+
+        by_group = indexed_by("index_executions_on_group_hash_and_occurred_at")
+          .where(group_hash: groups.distinct.select(:group_hash), occurred_at: range, kind: kind)
+        fresh = where(kind: kind, occurred_at: [ from, to - FRESH_NAMES ].max..to).where("name LIKE ? ESCAPE '\\'", pattern)
+        ids = [ by_group, fresh ]
+        ids << indexed_by("idx_executions_with_preview").where(kind: kind, occurred_at: range)
+          .where.not(exception_preview: nil).where("exception_preview LIKE ? ESCAPE '\\'", pattern) if previews
+        from("#{quoted_table_name} NOT INDEXED").where(kind: kind, occurred_at: range)
+          .where(ids.map { |branch| "#{quoted_table_name}.id IN (#{branch.select(:id).to_sql})" }.join(" OR "))
+      end
+
+      def self.indexed_by(index) = unscoped.from("#{quoted_table_name} INDEXED BY #{index}")
+      private_class_method :indexed_by
+
       # Servers that reported an execution since `time`. Asked once per kind:
       # there is no index led by occurred_at alone, so the obvious
       # `where(occurred_at: time..).distinct.pluck(:server)` scans the whole
