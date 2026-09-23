@@ -8,6 +8,14 @@ module Railwatch
     # Mirrors Railwatch::BROWSER_CLIENT; the gemspec loads only version.rb.
     BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
 
+    # The dashboard's frontend source ships alongside its build: a host needs
+    # only the build (public/railwatch) and no Node, while Railwatch Cloud
+    # compiles its own bundle from this source plus its hosting pages, so the
+    # dashboard has one author. Tests stay in the repository.
+    def self.frontend_source?(path)
+      path.start_with?("app/frontend/") && !path.match?(/\.test\.tsx?\z/) && path != "app/frontend/test-setup.ts"
+    end
+
     module_function
 
     def specification(name: PUBLIC_NAME)
@@ -34,10 +42,8 @@ module Railwatch
           # Installed gems carry the runtime and public reference material,
           # while repository-only tests, scripts, and release machinery stay
           # out of customer applications.
-          # app/frontend is the dashboard's source; the gem ships its build
-          # (public/railwatch) so a host needs no Node.
           Dir["{app,config,db,lib,docs,public}/**/*", "README.md", "CHANGELOG.md", "MIT-LICENSE", "llms.txt", "AGENTS.md"]
-            .select { |path| File.file?(path) && (!path.start_with?("app/frontend/") || path == BROWSER_CLIENT) }
+            .select { |path| File.file?(path) && (!path.start_with?("app/frontend/") || Packaging.frontend_source?(path)) }
         end
 
         spec.add_dependency "rails", ">= 8.1", "< 9"

@@ -88,11 +88,14 @@ begin
   allowed = %r{\A(?:app/|config/|db/|lib/|docs/|public/railwatch/|README\.md\z|CHANGELOG\.md\z|MIT-LICENSE\z|llms\.txt\z|AGENTS\.md\z)}
   forbidden = package_spec.files.reject { |path| allowed.match?(path) }
   assert!(forbidden.empty?, "package contains files outside the allowlist: #{forbidden.sort.join(', ')}")
-  explicitly_forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|tmp|node_modules|app/frontend)/|\A(?:Gemfile\.lock|land\.sh|CLAUDE\.md|package\.json|pnpm-lock\.yaml|vite\.config\.ts)\z})
-  # The dashboard ships built, never as source: a host has no Node. The one
-  # exception is the browser client, which a host's own build imports.
-  explicitly_forbidden -= [ Railwatch::Packaging::BROWSER_CLIENT ]
+  explicitly_forbidden = package_spec.files.grep(%r{\A(?:\.github|bench|script|spec|tmp|node_modules)/|\.test\.tsx?\z|\Aapp/frontend/test-setup\.ts\z|\A(?:Gemfile\.lock|land\.sh|CLAUDE\.md|package\.json|pnpm-lock\.yaml|vite\.config\.ts)\z})
+  # The dashboard ships built for hosts (no Node) and as source for Railwatch
+  # Cloud's own build; frontend tests never ship.
   assert!(package_spec.files.include?(Railwatch::Packaging::BROWSER_CLIENT), "package is missing the browser client")
+  frontend = package_spec.files.grep(%r{\Aapp/frontend/})
+  %w[app/frontend/entrypoints/inertia.tsx app/frontend/entrypoints/application.css app/frontend/pages/overview/show.tsx].each do |path|
+    assert!(frontend.include?(path), "package is missing frontend source #{path}")
+  end
   entries = package_spec.files.grep(%r{\Apublic/railwatch/assets/.*\.js\z})
   assert!(entries.any?, "package has no built dashboard bundle; run rake dashboard:build")
   assert!(explicitly_forbidden.empty?, "package contains internal files: #{explicitly_forbidden.sort.join(', ')}")

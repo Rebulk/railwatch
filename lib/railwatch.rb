@@ -634,13 +634,18 @@ module Railwatch
   end
 
   # The one browser client, relative to the gem root. The dashboard bundle
-  # is built from it, the install generator copies it, the gem ships it (the
-  # only app/frontend file it does), and a host with its own frontend build
-  # (Railwatch Cloud) imports it from browser_client_path.
+  # is built from it and the install generator copies it into a host.
   BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
 
   def self.browser_client_path
     File.expand_path("../#{BROWSER_CLIENT}", __dir__)
+  end
+
+  # The dashboard's frontend source. Railwatch Cloud builds its bundle from
+  # this directory plus its own hosting pages, so there is one copy of every
+  # dashboard page and component.
+  def self.frontend_path
+    File.expand_path("../app/frontend", __dir__)
   end
 
   # One realistic wire record per record type, exactly as the gem's own
