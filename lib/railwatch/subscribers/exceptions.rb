@@ -86,6 +86,10 @@ module Railwatch
 
       def capture(error, handled:, severity:, context: {}, source: nil, fingerprint: nil)
         return unless Railwatch.enabled?
+        # Railwatch's own work reporting to Rails.error (a broadcast that
+        # failed while writing a batch, say). Captured, it would be the next
+        # batch, and fail the same way.
+        return if Railwatch::Current.internal?
         return if ignored?(error)
         # Solid Queue re-raises a failed job's error out of the worker thread,
         # where its executor reports it to Rails.error a second time

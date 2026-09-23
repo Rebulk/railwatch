@@ -21,7 +21,7 @@ module Railwatch
   # and never writes the host's queue adapter.
   #
   # A task must never be visible to the app it is maintaining: each body runs
-  # inside Railwatch.ignore and rescues everything.
+  # inside Railwatch.internal and rescues everything.
   module Maintenance
     ROLES = %w[web worker writer].freeze
     TICK = 30
@@ -164,13 +164,15 @@ module Railwatch
 
           succeeded = false
           begin
-            Railwatch.ignore { body.call(env) }
+            # internal, not ignore: this thread has no execution for ignore
+            # to pause, and a body that performs a job inline would open one.
+            Railwatch.internal { body.call(env) }
             succeeded = true
             ran << name
           rescue StandardError => e
-            # Not Rails.error: this thread has no execution for Railwatch.ignore
-            # to pause, so a report there would be captured by Railwatch's own
-            # subscriber and opened as an application issue about Railwatch.
+            # Not Rails.error: this is outside Railwatch.internal, so a report
+            # there would be captured by Railwatch's own subscriber and opened
+            # as an application issue about Railwatch.
             Railwatch.debug { "maintenance #{name} failed: #{e.class}: #{e.message}" }
             Railwatch.notify_unrecoverable(TaskError.new("maintenance task #{name} failed: #{e.class}: #{e.message}"))
           ensure

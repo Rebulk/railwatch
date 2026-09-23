@@ -182,6 +182,10 @@ module Railwatch
     # Exactly what Transport::Local#write does; the writer is that code
     # running in a process of its own.
     def write_batch(request)
+      Railwatch.internal { write_batch_now(request) }
+    end
+
+    def write_batch_now(request)
       Rails.application.executor.wrap do
         environment = Environment.current
         batch_id = request["batch_id"]

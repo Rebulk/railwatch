@@ -516,9 +516,16 @@ module Railwatch
                         dropped_bytes: batch.dropped_bytes + dropped_bytes, prepared: true)
     end
 
+    # Internal: writing a batch (Transport::Local) runs queries, the live
+    # broadcast and whatever the host's cable adapter does inline for it,
+    # and any of that recorded would be the next batch. Railwatch.flush
+    # called from inside a request must not attribute it to the request
+    # either.
     def deliver(batch)
-      @transport.deliver(batch.records, dropped: batch.dropped, batch_id: batch.id,
-                         dropped_bytes: batch.dropped_bytes, backpressure_factor: @backpressure_factor)
+      Railwatch.internal do
+        @transport.deliver(batch.records, dropped: batch.dropped, batch_id: batch.id,
+                           dropped_bytes: batch.dropped_bytes, backpressure_factor: @backpressure_factor)
+      end
     end
 
     def update_backpressure

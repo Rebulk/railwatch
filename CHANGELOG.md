@@ -6,6 +6,19 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Railwatch no longer records telemetry about its own work. Delivering a
+  batch, the writer process serving one, the export sender and the
+  maintenance clock now run inside `Railwatch.internal`: nothing in them
+  opens an execution that ships, writes a record, or reports an exception.
+  Before, an embedded install whose Action Cable adapter did work inline
+  on broadcast (Solid Cable's default autotrim runs
+  `SolidCable::TrimJob.perform_now`) recorded that job for every batch
+  it wrote, and the job attempt was the next batch: a feedback loop that
+  multiplied batches, broadcasts and export deliveries several times
+  over. `Railwatch.ignore` could not prevent it, and still cannot: it
+  pauses the current execution's children, and a job performed inline
+  opens an execution of its own.
+
 ## 0.6.0 (2026-09-22)
 
 - Embedded is now the installer's default. `bin/rails generate

@@ -136,8 +136,13 @@ module Railwatch
     end
 
     def start_execution(source:, sample_kind: source, trace_id: nil, parent_id: nil, preview: nil)
-      exe = Execution.new(source: source, sampled: Sampler.decide(sample_kind),
+      # Railwatch's own work (see #internal) still gets an execution object,
+      # because the instrumentation that opened it will close it, but one
+      # that records nothing and that finish_execution ships nothing for.
+      internal = Current.internal?
+      exe = Execution.new(source: source, sampled: !internal && Sampler.decide(sample_kind),
                           trace_id: trace_id, parent_id: parent_id, preview: preview)
+      exe.paused_depth = 1 if internal
       exe.tenant = Context.current_tenant
       # A job (or command) can run inline, nested inside a request's own
       # execution -- e.g. ActiveJob::TestHelper's inline test adapter, or a
@@ -146,6 +151,8 @@ module Railwatch
       # clearing the thread-local outright and losing the outer parent.
       exe.parent_execution = Current.execution
       Current.execution = exe
+      return exe if internal
+
       # Profiling is off by default, and then this costs one Float
       # comparison per execution: the rest sits behind the short circuit,
       # and tail_buffering? is a bare ivar read the Execution already made.
@@ -169,6 +176,10 @@ module Railwatch
     def finish_execution(parent_type = nil, group: nil, **fields)
       exe = Current.execution
       return Current.clear unless exe
+      # Checked here as well as at the start: an unhandled exception inside
+      # internal work still rolls exception_sampled, which would otherwise
+      # ship a lone parent for it.
+      return nil if Current.internal?
 
       exe.capture_memory
       tail = !exe.sampled? && tail_keep?(exe)
@@ -247,6 +258,7 @@ module Railwatch
 
     def record_now(type, group: nil, **fields)
       return unless enabled?
+      return if Current.internal?
 
       rec = Record.build(type, Current.execution, group: group, **fields)
       rec = run_redactors(type, rec) or return
@@ -294,6 +306,28 @@ module Railwatch
 
     def paused?
       Current.execution&.paused? || false
+    end
+
+    # Railwatch's own work: delivering a batch (and everything that writing
+    # it does synchronously -- the live broadcast, and whatever the host's
+    # Action Cable adapter runs inline for it, such as Solid Cable's
+    # TrimJob.perform_now), the writer process serving a batch, the export
+    # sender, and the maintenance clock.
+    #
+    # Not Railwatch.ignore, which pauses the CURRENT execution's children and
+    # nothing else: a job performed inline inside it still opens an execution
+    # of its own, and on a thread with no execution -- every one of those
+    # above -- ignore does nothing at all. Telemetry about delivering
+    # telemetry is delivered as another batch, which does the same work
+    # again, so any of that escaping is a loop, not an extra record.
+    #
+    # Inside the block nothing executes as far as Railwatch is concerned:
+    # the caller's execution is set aside (and restored), an execution
+    # opened inside ships nothing, and a record with no parent -- an
+    # exception reported to Rails.error, say -- is dropped. Deliberately not
+    # a way to hide application work; that is what ignore is for.
+    def internal
+      Current.with(nil) { Current.internal { yield } }
     end
 
     # --- errors ----------------------------------------------------------------
@@ -567,7 +601,9 @@ module Railwatch
 
     # Shared by push and record: is this type allowed to be written right now?
     def recordable?(type, exe)
-      return false if exe.nil? && !STANDALONE_TYPES.include?(type)
+      # Only reached with no execution, so the hot path (a child record of a
+      # running execution) never pays for the internal check.
+      return false if exe.nil? && (!STANDALONE_TYPES.include?(type) || Current.internal?)
       return false if exe && !exe.recording?
       !config.ignored?(type_plural(type))
     end

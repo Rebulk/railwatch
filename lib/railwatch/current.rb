@@ -6,6 +6,7 @@ module Railwatch
   # Queue fiber workers and Puma threads both work.
   module Current
     KEY = :railwatch_execution
+    INTERNAL_KEY = :railwatch_internal
 
     module_function
 
@@ -27,6 +28,24 @@ module Railwatch
 
     def clear
       ActiveSupport::IsolatedExecutionState.delete(KEY)
+    end
+
+    # True while this thread (or fiber) is doing Railwatch's own work: see
+    # Railwatch.internal. A depth, not a boolean, so nesting unwinds cleanly.
+    def internal?
+      ActiveSupport::IsolatedExecutionState[INTERNAL_KEY].to_i.positive?
+    end
+
+    def internal
+      depth = ActiveSupport::IsolatedExecutionState[INTERNAL_KEY].to_i
+      ActiveSupport::IsolatedExecutionState[INTERNAL_KEY] = depth + 1
+      yield
+    ensure
+      if depth.zero?
+        ActiveSupport::IsolatedExecutionState.delete(INTERNAL_KEY)
+      else
+        ActiveSupport::IsolatedExecutionState[INTERNAL_KEY] = depth
+      end
     end
   end
 end
