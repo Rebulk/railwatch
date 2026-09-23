@@ -6,6 +6,18 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.6.1 (2026-09-23)
+
+- The docs describe embedded as the default install throughout: two
+  commands, then optional Railwatch Cloud. They correct what 0.6.0 left
+  stale: an embedded install needs no token; the PostgreSQL and MySQL
+  steps; export needs a token first; a `dashboard_user` resolver names
+  the operator but does not gate pages; the Puma plugin line must be
+  unconditional; an embedded app's test databases need one
+  `RAILS_ENV=test bin/rails db:prepare`. MCP is marked as a Railwatch
+  Cloud feature. LLM calls are listed.
+- The installer's embedded next steps say to get a token before turning
+  on export.
 - Draw the Trend sparklines. Recharts pads every side of a chart by 5px,
   which left the 32x10 table-cell sparkline a plot area 0px tall, so every
   Trend column on every page was blank.
