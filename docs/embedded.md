@@ -63,7 +63,8 @@ bundle add railwatch
 bin/rails generate railwatch:install
 ```
 
-Restart the app and open `/railwatch`. Then `bin/rails railwatch:doctor`
+Restart the app and open `/railwatch`; in development it is open with no
+password (see [Authentication](#authentication) for production). Then `bin/rails railwatch:doctor`
 checks the wiring. The generator creates and migrates both databases
 itself; `bin/rails db:prepare`, which a deploy already runs, migrates
 them after every gem update.
@@ -141,15 +142,22 @@ and the MCP server.
 The dashboard shows every query, log line and exception your app
 produced, so it works the way Mission Control Jobs does: **HTTP Basic
 authentication is on and closed by default**. With no credentials
-configured every dashboard request is 401, and `railwatch:doctor` says
-so. Set them with
+configured every dashboard request is 401, the app logs a warning at
+boot, and `railwatch:doctor` says so. Set them with
 
 ```sh
 bin/rails railwatch:authentication:configure
 RAILS_ENV=production bin/rails railwatch:authentication:configure
 ```
 
-which writes them to that environment's Rails credentials:
+The one exception is development. There, with Basic on and no
+credentials set, the dashboard is open, so a first run is the install and
+a page rather than a password step first; Rails already shows full error
+pages in development for the same reason. Set credentials there too and
+development asks for them like everywhere else. Test, staging and
+production are closed until you do.
+
+`railwatch:authentication:configure` writes them to that environment's Rails credentials:
 
 ```yml
 railwatch:

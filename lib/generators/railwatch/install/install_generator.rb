@@ -247,11 +247,11 @@ module Railwatch
           say <<~STEPS, :green
 
             Next steps
-              1. Set the dashboard's HTTP Basic credentials (it is closed until
-                 you do):  bin/rails railwatch:authentication:configure
+              1. Restart the app and open /railwatch. In development it is open.
+              2. Before production, give it a password (it is closed there until
+                 you do):  RAILS_ENV=production bin/rails railwatch:authentication:configure
                  Using your own admin auth instead? See docs/embedded.md,
                  Authentication (base_controller_class or a routes constraint).
-              2. Restart the app and open /railwatch.
               3. #{@prepared ? "Nothing else to run. Both databases were created just now and" : "Create the two databases:  bin/rails db:prepare\n     Then"}
                  `bin/rails db:prepare` (which a deploy already runs) migrates
                  them after every gem update. With `plugin :railwatch` in

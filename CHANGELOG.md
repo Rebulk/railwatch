@@ -20,6 +20,13 @@
   initializer sets a transport is unchanged. The embedded next steps now
   end with how to mirror to Railwatch Cloud (`c.export_enabled`).
 
+- The embedded dashboard is open in development when HTTP Basic has no
+  credentials, so the first run needs no password step. Every other
+  environment is unchanged: closed, 401, until credentials exist. That
+  case now also logs a boot warning outside development and test (it was
+  only in the doctor), since a 401 on a deployed dashboard otherwise looks
+  like a broken install. Configured credentials apply in development too.
+
 - Bound how long Puma waits for the embedded writer to stop. The plugin sent
   the writer TERM and then called `Process.wait` on it, which has no timeout:
   a writer that did not exit -- stuck in a SQLite write, on a full disk --
