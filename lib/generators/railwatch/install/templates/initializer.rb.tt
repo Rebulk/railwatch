@@ -5,8 +5,8 @@
 Railwatch.configure do |c|
 <% if local? -%>
   # Telemetry stays in this app's own railwatch_telemetry database and the
-  # dashboard is served at /railwatch. No token, no cloud. Put the mount
-  # behind your own authentication; this only names who is looking.
+  # dashboard is served at /railwatch. No token, no cloud. Who can open the
+  # dashboard is the Access block below.
   c.transport = :local                              # RAILWATCH_TRANSPORT
   c.ignored_request_paths += ["/railwatch", %r{\A/railwatch/}]
   # c.issue_prefix = "APP"                          # RAILWATCH_ISSUE_PREFIX; issue keys like APP-12
