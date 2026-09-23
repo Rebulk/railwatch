@@ -74,11 +74,12 @@ module Railwatch
       resource = resource.to_sym
       parsed = parse(query)
       fields = parsed[:fields].except(*Array(except).map(&:to_s))
-      scope = scope.where(occurred_at: bounded_time_range(fields, from, to))
+      range = bounded_time_range(fields, from, to)
+      scope = scope.where(occurred_at: range)
       scope = apply_common(scope, fields)
 
       case resource
-      when :jobs then apply_jobs(scope, fields, parsed[:text])
+      when :jobs then apply_jobs(scope, fields, parsed[:text], range)
       when :exceptions then apply_exceptions(scope, fields, parsed[:text])
       when :logs then apply_logs(scope, fields, parsed[:text])
       when :queries then apply_queries(scope, fields, parsed[:text])
@@ -120,15 +121,14 @@ module Railwatch
     end
     private_class_method :apply_common
 
-    def self.apply_jobs(scope, fields, text)
+    def self.apply_jobs(scope, fields, text, range)
       outcome = fields["outcome"].presence || fields["status"].presence
       scope = scope.where(queue: fields["queue"]) if fields["queue"].present?
       scope = scope.where(outcome: outcome) if outcome
       scope = scope.where(name: fields["class"]) if fields["class"].present?
       scope = scope.where(job_id: fields["job_id"]) if fields["job_id"].present?
       return scope unless text.present?
-      pattern = "%#{Telemetry::Execution.sanitize_sql_like(text)}%"
-      scope.where("name LIKE :pattern OR exception_preview LIKE :pattern", pattern: pattern)
+      scope.merge(Telemetry::Execution.named_like("job_attempt", text, range.begin, range.end, previews: true))
     end
     private_class_method :apply_jobs
 

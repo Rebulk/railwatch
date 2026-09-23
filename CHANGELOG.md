@@ -6,6 +6,27 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Percentiles merged across hours are about ten times faster. Each
+  rollup's stored t-digest is read straight from its bytes and the
+  centroids are sorted once, instead of being pushed one at a time into
+  a new digest. A week of the platform's own query rollups (15,000 rows)
+  went from 1.6 s to 157 ms. Every page that shows a p50, p95 or p99
+  over a window reads this. The percentile is now nearest rank over the
+  centroids, the same rule the sub-hour charts use, so the two agree.
+- A new migration adds four indexes. Covering indexes serve the Jobs
+  page's per-queue breakdown and the Processes page's health series
+  (38 s and 19 s over a week of a 30 GB telemetry file, now 335 ms and
+  370 ms). There is an `occurred_at` index on broadcasts, the one
+  windowed table without one. A partial index covers executions that
+  carry an exception preview. The migration takes about 15 s on a
+  30 GB file.
+- Free-text search over jobs (and `Execution.named_like`, which MCP's
+  request search uses) matches names through the window's rollups and
+  fetches rows by `group_hash`, instead of reading every execution in
+  the window. A search matching nothing over a week took 657 ms and
+  takes 27 ms. A common text still takes the old path, which finds a
+  page within the first few thousand rows.
+
 ## 0.7.0 (2026-09-23)
 
 - The gem ships the dashboard's frontend source (`app/frontend`, without
