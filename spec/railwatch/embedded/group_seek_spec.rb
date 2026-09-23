@@ -1,0 +1,44 @@
+# frozen_string_literal: true
+
+require "spec_helper"
+
+# A job's group is the digest of its class name and a scheduled task's the
+# digest of its key, so lookups by class or key seek group_hash's index
+# instead of walking every execution of the kind (49 s for a week through
+# MCP's class: filter; 10 s for the scheduled tasks page's schedules).
+RSpec.describe "Lookups that seek an execution's group" do
+  around do |example|
+    Railwatch.config.transport = :local
+    example.run
+  ensure
+    Railwatch.config.transport = :http
+  end
+
+  before { Railwatch::Environment.current }
+
+  let(:execution) { Railwatch::Telemetry::Execution }
+
+  def run(kind, name, at:, task_key: nil, schedule: nil)
+    execution.create!(kind: kind, name: name, group_hash: Railwatch::Record.group_hash(task_key || name), task_key: task_key,
+      duration: 1_000, occurred_at: at, detail: schedule ? { "schedule" => schedule } : {})
+  end
+
+  it "filters jobs by class through the class's group" do
+    billing = run("job_attempt", "BillingJob", at: 1.hour.ago)
+    run("job_attempt", "MailerJob", at: 1.hour.ago)
+
+    found = Railwatch::FilterQuery.apply(execution.jobs, resource: :jobs, query: "class:BillingJob", from: 1.day.ago, to: Time.current)
+    expect(found).to contain_exactly(billing)
+    expect(found.to_sql).to include(Railwatch::Record.group_hash("BillingJob"))
+  end
+
+  it "reads each task's newest schedule, and skips keys that never ran" do
+    run("scheduled_task", "cleanup", task_key: "cleanup", at: 2.hours.ago, schedule: "every hour")
+    run("scheduled_task", "cleanup", task_key: "cleanup", at: 1.hour.ago, schedule: "every 5 minutes")
+    run("scheduled_task", "digest", task_key: "digest", at: 1.hour.ago, schedule: "every monday at 8am")
+
+    expect(execution.latest_schedules(%w[cleanup digest never_ran]))
+      .to eq("cleanup" => "every 5 minutes", "digest" => "every monday at 8am")
+    expect(execution.latest_schedules([])).to eq({})
+  end
+end

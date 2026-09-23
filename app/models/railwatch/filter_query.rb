@@ -125,7 +125,10 @@ module Railwatch
       outcome = fields["outcome"].presence || fields["status"].presence
       scope = scope.where(queue: fields["queue"]) if fields["queue"].present?
       scope = scope.where(outcome: outcome) if outcome
-      scope = scope.where(name: fields["class"]) if fields["class"].present?
+      # A job's group is the digest of its class name, and group_hash is
+      # indexed with occurred_at; name is not, so class: alone walked every
+      # job in the window (49 s for a week through MCP).
+      scope = scope.where(group_hash: Record.group_hash(fields["class"]), name: fields["class"]) if fields["class"].present?
       scope = scope.where(job_id: fields["job_id"]) if fields["job_id"].present?
       return scope unless text.present?
       scope.merge(Telemetry::Execution.named_like("job_attempt", text, range, previews: true))

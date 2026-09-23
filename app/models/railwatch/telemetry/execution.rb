@@ -74,14 +74,17 @@ module Railwatch
         KINDS.flat_map { |kind| where(kind: kind, occurred_at: time..).distinct.pluck(:server) }.uniq
       end
 
-      # The schedule string each task key last ran with, in one query: the
-      # newest scheduled_task row per key carries it in detail. The scheduled
-      # tasks page and CheckScheduledTasksJob both used to look it up per key.
+      # The schedule string each task key last ran with: the newest
+      # scheduled_task row per key carries it in detail. A task's runs share
+      # its group (the digest of its key), so that row is the last entry of
+      # its group_hash index -- one seek per key, a few dozen keys. A single
+      # MAX(id) GROUP BY task_key read every scheduled run ever kept instead:
+      # 10 s on the platform's own tenant.
       def self.latest_schedules(keys)
-        return {} if keys.empty?
-        latest = scheduled.where(task_key: keys).group(:task_key).select(:task_key, Arel.sql("MAX(id) AS id"))
-        scheduled.where(id: latest.map(&:id))
-          .pluck(:task_key, Arel.sql("json_extract(detail, '$.schedule')")).to_h
+        keys.index_with do |key|
+          scheduled.where(group_hash: Record.group_hash(key), task_key: key).order(occurred_at: :desc)
+            .pick(Arel.sql("json_extract(detail, '$.schedule')"))
+        end.compact
       end
 
       CHILDREN = {
