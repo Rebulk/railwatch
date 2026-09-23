@@ -21,6 +21,17 @@
 - Jobs: the recent runs card keeps the job name readable. The exception
   truncates, and the origin user and tenant columns appear from 2xl up
   (the job class page shows them at every width).
+- The Puma plugin now replaces an embedded writer that is alive but not
+  listening. Its supervisor only asked whether the writer's pid still
+  existed, so a writer that hung in the fork child before binding its
+  socket (it inherited a lock another Puma thread held at fork) was kept
+  for as long as Puma ran. That happened in production: one hung writer
+  left for ~3 hours, every process falling back to in-process writes after
+  `WRITER_GRACE`, and roughly 3x the telemetry volume. Now a writer that
+  has not bound within 15s of its fork, or that bound and then misses
+  three consecutive checks, is KILLed (a thread blocked on a native lock
+  never runs a TERM trap), reaped, and respawned, with a log line naming
+  the pid and the reason. Healthy writers are never touched.
 
 ## 0.6.0 (2026-09-22)
 
