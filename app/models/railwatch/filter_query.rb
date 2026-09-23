@@ -128,7 +128,7 @@ module Railwatch
       scope = scope.where(name: fields["class"]) if fields["class"].present?
       scope = scope.where(job_id: fields["job_id"]) if fields["job_id"].present?
       return scope unless text.present?
-      scope.merge(Telemetry::Execution.named_like("job_attempt", text, range.begin, range.end, previews: true))
+      scope.merge(Telemetry::Execution.named_like("job_attempt", text, range, previews: true))
     end
     private_class_method :apply_jobs
 

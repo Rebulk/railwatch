@@ -39,9 +39,12 @@ module Railwatch
       FRESH_NAMES = 5.minutes
       DENSE_MATCHES = 1_000
 
-      def self.named_like(kind, text, from, to, previews: false)
+      # `range` is used as given, so an exclusive or empty one (FilterQuery's
+      # after:/before: can narrow a window to nothing) stays that way.
+      def self.named_like(kind, text, range, previews: false)
+        from, to = range.begin, range.end
         pattern = "%#{sanitize_sql_like(text)}%"
-        window = where(kind: kind, occurred_at: from..to)
+        window = where(kind: kind, occurred_at: range)
         groups = Rollup.for_type(kind).between(from, to).where("name LIKE ? ESCAPE '\\'", pattern)
         if !TelemetryRecord.sqlite? || groups.sum(:count) >= DENSE_MATCHES
           like = previews ? "name LIKE :pattern ESCAPE '\\' OR exception_preview LIKE :pattern ESCAPE '\\'" : "name LIKE :pattern ESCAPE '\\'"
@@ -49,12 +52,12 @@ module Railwatch
         end
 
         by_group = indexed_by("index_executions_on_group_hash_and_occurred_at")
-          .where(group_hash: groups.distinct.select(:group_hash), occurred_at: from..to, kind: kind)
+          .where(group_hash: groups.distinct.select(:group_hash), occurred_at: range, kind: kind)
         fresh = where(kind: kind, occurred_at: [ from, to - FRESH_NAMES ].max..to).where("name LIKE ? ESCAPE '\\'", pattern)
         ids = [ by_group, fresh ]
-        ids << indexed_by("idx_executions_with_preview").where(kind: kind, occurred_at: from..to)
+        ids << indexed_by("idx_executions_with_preview").where(kind: kind, occurred_at: range)
           .where.not(exception_preview: nil).where("exception_preview LIKE ? ESCAPE '\\'", pattern) if previews
-        from("#{quoted_table_name} NOT INDEXED").where(kind: kind, occurred_at: from..to)
+        from("#{quoted_table_name} NOT INDEXED").where(kind: kind, occurred_at: range)
           .where(ids.map { |branch| "#{quoted_table_name}.id IN (#{branch.select(:id).to_sql})" }.join(" OR "))
       end
 
