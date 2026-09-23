@@ -30,12 +30,16 @@ module Railwatch
     private
 
     # How many executions the window holds, as the profiled share's
-    # denominator. Every kind is rolled up, so this sums a few hundred
-    # rollup rows rather than counting every execution (1.2 s over a week
-    # of the platform's own). Rollups round `from` down to its hour, which
-    # a percentage does not notice.
+    # denominator. Every kind is rolled up, so the whole hours come from a
+    # few hundred rollup rows rather than counting every execution (1.2 s
+    # over a week of the platform's own); only the part of the first hour
+    # inside the window is counted from the rows.
     def executions_in(from, to)
-      Telemetry::Rollup.for_type(Telemetry::Execution::KINDS).between(from, to).sum(:count)
+      whole = from.beginning_of_hour == from ? from : from.beginning_of_hour + 1.hour
+      return Telemetry::Execution.between(from, to).count if whole >= to
+
+      Telemetry::Execution.where(occurred_at: from...whole).count +
+        Telemetry::Rollup.for_type(Telemetry::Execution::KINDS).between(whole, to).sum(:count)
     end
 
     # Rows arrive newest-first, so the head of each group is the profile the

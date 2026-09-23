@@ -18,6 +18,9 @@ module Railwatch
       # aggregate), so only the busiest tenants get one; the rest report 0.
       P95_TENANTS = 50
       SPARKLINE_BUCKETS = 12
+      # Tenant names are bound one variable each, and SQLite allows 32,766
+      # per statement; an app with more tenants than that is asked in slices.
+      TENANT_SLICE = 1_000
       SORTS = { "requests" => :requests, "errors" => :errors, "p95" => :p95, "users" => :users }.freeze
 
       ERRORS_SQL = Arel.sql("SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END)")
@@ -51,7 +54,7 @@ module Railwatch
       def self.overview(rows, from, to)
         requests = Telemetry::Execution.requests.between(from, to)
         total = requests.count
-        tagged_total = requests.group(:app_tenant).where(app_tenant: tagged_tenants(from, to)).count.values.sum
+        tagged_total = tagged_tenants(from, to).each_slice(TENANT_SLICE).sum { |slice| requests.where(app_tenant: slice).count }
         tagged = rows.sum { |r| r[:requests] }
         top = rows.max_by { |r| r[:requests] }
         {
@@ -149,8 +152,10 @@ module Railwatch
         return if tenants.empty?
 
         width = bucket_width(from, to, SPARKLINE_BUCKETS)
-        counts = Telemetry::Execution.requests.between(from, to).where(app_tenant: tenants)
-          .group(:app_tenant, bucket_sql(from, width)).count
+        counts = tenants.each_slice(TENANT_SLICE).flat_map do |slice|
+          Telemetry::Execution.requests.between(from, to).where(app_tenant: slice)
+            .group(:app_tenant, bucket_sql(from, width)).count.to_a
+        end
         counts.each do |(tenant, index), count|
           rows[tenant][:sparkline][[ index.to_i, SPARKLINE_BUCKETS - 1 ].min] += count
         end
