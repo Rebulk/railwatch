@@ -42,6 +42,7 @@ module Railwatch
         interpret(result)
       end
 
+      # The parent's connections are the parent's: forget them, never close.
       def reset_after_fork!
         @transports = {}
         self
@@ -50,8 +51,13 @@ module Railwatch
       # Drops any latch the transports have picked up. After a credential
       # problem is fixed, the next send must be an actual send.
       def reset!
+        close
         @transports = {}
         self
+      end
+
+      def close
+        @transports.each_value(&:close)
       end
 
       private
@@ -66,7 +72,10 @@ module Railwatch
         @transports[key] ||= begin
           credentialed = @config.dup
           credentialed.token = token
-          Transport::Http.new(credentialed, endpoint: claim.url)
+          # One connection per destination, reused across deliveries: the
+          # sender is one thread, and a handshake per delivery was most of
+          # what a small one cost.
+          Transport::Http.new(credentialed, endpoint: claim.url, persistent: true)
         end
       end
 

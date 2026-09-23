@@ -1,5 +1,10 @@
 # frozen_string_literal: true
 
+require "zlib"
+require "stringio"
+require "json"
+require "digest"
+
 module Railwatch
   module Export
     # The durable queue. Every state change a delivery can undergo lives here,
@@ -75,7 +80,7 @@ module Railwatch
           enabled: true, producer_id: destination.producer_id, url: destination.url,
           state: destination.state, reason: destination.reason,
           queued_deliveries: destination.queued_deliveries, queued_bytes: destination.queued_bytes,
-          oldest_queued_at: destination.export_deliveries.live.oldest_first.pick(:enqueued_at),
+          oldest_queued_at: destination.export_deliveries.queued.oldest_first.pick(:enqueued_at),
           sendable: destination.sendable?(now: now), counters: destination.counters
         }
       end
@@ -107,13 +112,67 @@ module Railwatch
         end
       end
 
+      # How much one coalesced delivery may carry. Well inside what the
+      # receiver accepts in a request (20,000 records, 32 MB), and about what
+      # an ordinary reporter batch already sends it, so a merged delivery
+      # costs the receiver no more time than the batches it is used to --
+      # the request still has to answer inside config.timeout.
+      COALESCE_MAX_RECORDS = 500
+      COALESCE_MAX_BYTES = 1024 * 1024
+      COALESCE_MAX_DELIVERIES = 500
+
+      # Folds the queue's oldest due deliveries into the first of them, so one
+      # request carries what would otherwise have taken one round trip each.
+      # Returns how many deliveries were folded in (0 when nothing was done).
+      #
+      # A backlog is almost entirely small deliveries -- one per source batch,
+      # a median of one record -- and a round trip costs the same whatever it
+      # carries, so sending them one at a time capped the drain at the round
+      # trip rate. Merging only when two or more are due makes this
+      # self-regulating: a queue that keeps up sends each delivery as it
+      # comes, and one that has fallen behind catches up in large steps.
+      #
+      # Only deliveries that have never been claimed (attempts == 0) are
+      # touched. Their ids have never been on the wire, so the receiver has
+      # no receipt for them and rewriting their bytes cannot turn a retry
+      # into a conflict or a double count. Anything that has been attempted
+      # stays byte for byte as it was sent. The merge takes the first run of
+      # consecutive untouched deliveries in claim order: never across an
+      # attempted one, so no record is carried ahead of one queued before it.
+      #
+      # The first delivery keeps its row, its id and its delivery id, so
+      # order and age are those of the oldest data in it. The rest are
+      # finished as "merged" in the same transaction, keeping their selection
+      # keys so a replayed batch is still recognised. Decoding and encoding
+      # happen before that transaction, which then takes the lease (only its
+      # holder merges, as only its holder sends), checks that nothing it read
+      # has changed -- expiry and discard run in other processes -- and
+      # writes. Call it with no claim of your own in flight: taking the lease
+      # moves its generation on, which fences out any claim made under the
+      # old one.
+      def coalesce!(owner:, now: Time.current)
+        destination = binding_row
+        return 0 unless destination&.sendable?(now: now) && lease_open_to?(destination, owner, now)
+
+        rows = coalescible(destination, now)
+        return 0 if rows.size < 2
+
+        merged = merge(rows) or return 0
+        Telemetry::ExportDelivery.transaction do
+          Lease.acquire(destination.id, owner: owner, now: now) or next 0
+          next 0 unless unchanged?(rows)
+
+          absorb(destination.id, rows, merged, now)
+        end
+      end
+
       # Given up voluntarily, so the next process does not wait out the TTL.
       # Only ever our own: the generation check means a lease we already lost
       # is not ours to release.
       def release_lease!(owner:, now: Time.current)
         destination = binding_row or return false
         return false unless destination.lease_owner == owner
-        return false if destination.export_deliveries.exists?(state: "sending")
+        return false if destination.export_deliveries.sending.exists?
 
         Lease.release(destination.id, owner: owner, generation: destination.lease_generation, now: now)
       end
@@ -209,11 +268,121 @@ module Railwatch
 
       private
 
+      # A cheap look before doing the merge work; Lease.acquire decides.
+      def lease_open_to?(destination, owner, now)
+        destination.lease_owner.nil? || destination.lease_owner == owner ||
+          destination.lease_expires_at.nil? || destination.lease_expires_at < now
+      end
+
+      COALESCE_COLUMNS = %i[id body body_sha256 body_bytes ndjson_bytes record_count wire_metadata
+                            expires_at attempts].freeze
+
+      # The first run of consecutive due deliveries, in the order claim! takes
+      # them, that can travel as one. Attempted deliveries ahead of the run
+      # are stepped over (they go first anyway, claimed oldest first); one
+      # after it ends it.
+      def coalescible(destination, now)
+        limit = [ COALESCE_MAX_BYTES, @config.batch_bytes ].min
+        rows = []
+        records = 0
+        bytes = 0
+        destination.export_deliveries.due(now).where(expires_at: now..).oldest_first
+          .limit(COALESCE_MAX_DELIVERIES).select(*COALESCE_COLUMNS).each do |row|
+          untouched = row.attempts.zero? && row.body
+          next if rows.empty? && !untouched
+          break unless untouched
+          break unless rows.empty? || same_wire?(rows.first.wire_metadata, row.wire_metadata)
+          break if records + row.record_count > COALESCE_MAX_RECORDS || bytes + row.ndjson_bytes > limit
+
+          rows << row
+          records += row.record_count
+          bytes += row.ndjson_bytes
+        end
+        rows
+      end
+
+      # The receiver digests these with the body, and they describe how the
+      # bytes were built; deliveries built differently are not merged.
+      def same_wire?(first, other)
+        first["policy"] == other["policy"] && first["version"] == other["version"]
+      end
+
+      Merged = Struct.new(:body, :body_sha256, :ndjson_bytes, :record_count, :wire_metadata, keyword_init: true)
+
+      # One gzip member holding every row's NDJSON in queue order. The bodies
+      # are decoded rather than concatenated as they stand: a multi-member
+      # gzip stream is valid, but a reader that stops after the first member
+      # (Ruby's Zlib::GzipReader does) would see only the first delivery.
+      def merge(rows)
+        io = StringIO.new
+        gz = Zlib::GzipWriter.new(io, Zlib::DEFAULT_COMPRESSION, Zlib::DEFAULT_STRATEGY)
+        gz.mtime = 0
+        rows.each { |row| gz.write(Zlib.gunzip(row.body)) }
+        gz.close
+        body = io.string.b
+        Merged.new(body: body, body_sha256: Digest::SHA256.hexdigest(body),
+                   ndjson_bytes: rows.sum(&:ndjson_bytes), record_count: rows.sum(&:record_count),
+                   wire_metadata: merged_metadata(rows))
+      rescue Zlib::Error => e
+        # A body we cannot read will fail on its own when it is sent; it is
+        # not a reason to stop draining everything behind it.
+        Railwatch.debug { "export coalesce skipped: #{e.class}: #{e.message}" }
+        nil
+      end
+
+      # Losses add up: a delivery that stands for batches that dropped 3 and
+      # 4 records lost 7. Backpressure is a rate the receiver reports as a
+      # peak, so the merged delivery carries the highest it was under.
+      def merged_metadata(rows)
+        wire = rows.first.wire_metadata.dup
+        wire["dropped"] = rows.sum { |row| row.wire_metadata.fetch("dropped", 0).to_i }
+        wire["dropped_bytes"] = rows.sum { |row| row.wire_metadata.fetch("dropped_bytes", 0).to_i }
+        factor = rows.map { |row| row.wire_metadata.fetch("backpressure_factor", 1.0).to_f }.max
+        wire["backpressure_factor"] = factor.to_s
+        wire
+      end
+
+      # Every row read is still pending, never claimed, and holds the bytes
+      # that were merged.
+      def unchanged?(rows)
+        current = Telemetry::ExportDelivery.where(id: rows.map(&:id))
+          .pluck(:id, :state, :attempts, :claim_token, :body_sha256).to_h { |id, *rest| [ id, rest ] }
+        rows.all? { |row| current[row.id] == [ "pending", 0, nil, row.body_sha256 ] }
+      end
+
+      def absorb(destination_id, rows, merged, now)
+        head, *rest = rows
+        delivery_id = Telemetry::ExportDelivery.where(id: head.id).pick(:delivery_id)
+        Telemetry::ExportDelivery.where(id: head.id).update_all(
+          body: merged.body, body_sha256: merged.body_sha256, body_bytes: merged.body.bytesize,
+          ndjson_bytes: merged.ndjson_bytes, record_count: merged.record_count,
+          wire_metadata: merged.wire_metadata,
+          metadata_sha256: Digest::SHA256.hexdigest(JSON.generate(merged.wire_metadata.sort.to_h)),
+          expires_at: rows.map(&:expires_at).min, updated_at: now
+        )
+        Telemetry::ExportDelivery.where(id: rest.map(&:id)).update_all(
+          state: "done", disposition: "merged", finished_at: now, body: nil,
+          last_reason: "merged into #{delivery_id}"[0, 64], updated_at: now
+        )
+        freed = rows.sum(&:body_bytes) - merged.body.bytesize
+        Telemetry::ExportDestination.where(id: destination_id).update_all([
+          "queued_bytes = MAX(queued_bytes - ?, 0), queued_deliveries = MAX(queued_deliveries - ?, 0), updated_at = ?",
+          freed, rest.size, now
+        ])
+        bump(Telemetry::ExportDestination.find(destination_id), "merged", rest.size)
+        rest.size
+      end
+
       # A holder that vanished leaves its delivery claimed. Once the claim has
       # expired the row goes back in the queue; the fence stops the vanished
       # holder from finishing it later.
+      #
+      # Runs inside every claim, so it must cost nothing when there is nothing
+      # to reclaim -- which is nearly always. index_export_deliveries_sending
+      # holds only the rows in flight (one at most), so this reads that entry
+      # rather than every row the destination has ever had.
       def reclaim_abandoned(destination, now)
-        destination.export_deliveries.where(state: "sending")
+        destination.export_deliveries.sending
           .where(claim_expires_at: ...now)
           .update_all([ "state = 'pending', claim_token = NULL, claim_generation = NULL, claim_expires_at = NULL, updated_at = ?", now ])
       end

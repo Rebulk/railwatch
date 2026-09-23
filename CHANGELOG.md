@@ -6,6 +6,23 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The export queue drains a backlog hundreds of times faster. It was
+  capped at roughly two deliveries a second, one small delivery per round
+  trip, which in production was barely above an ordinary install's
+  enqueue rate, so any burst built a backlog that took hours to clear.
+  Three changes. When more than one delivery is due, the sender first
+  folds the oldest into one of up to 500 records / 1 MiB (never touching
+  a delivery that has already been attempted, so a retry is still the
+  same id and the same bytes); the others finish as `merged`. The export
+  client keeps its connection open between deliveries instead of paying
+  a TCP and TLS handshake for each, still one attempt per delivery. And
+  the queries inside every claim no longer read every row the
+  destination has ever sent: a new partial index covers the abandoned-
+  claim sweep (`db:prepare` adds it), and the queue reads are pinned to
+  the existing live-rows index. Local benchmark with 300,000 finished rows
+  and 2,000 queued one-record deliveries: 692 deliveries a minute before,
+  ~700,000 after.
+
 - Draw the Trend sparklines. Recharts pads every side of a chart by 5px,
   which left the 32x10 table-cell sparkline a plot area 0px tall, so every
   Trend column on every page was blank.

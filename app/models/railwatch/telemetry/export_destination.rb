@@ -8,7 +8,7 @@ module Railwatch
     # to send them.
     class ExportDestination < TelemetryRecord
       STATES = %w[ready deferred unauthorized inactive].freeze
-      COUNTERS = %w[acked rejected expired discarded shed].freeze
+      COUNTERS = %w[acked rejected expired discarded shed merged].freeze
 
       has_many :export_deliveries, dependent: :delete_all
 

@@ -86,6 +86,7 @@ module Railwatch
           wait(IDLE) unless sent || @stopping
         end
         release_lease
+        @client&.close
       end
 
       # Hand the lease back rather than making the next process wait out its
@@ -105,10 +106,16 @@ module Railwatch
       end
 
       # One delivery, start to finish. Returns true when there may be more.
+      #
+      # When more than one delivery is due, the oldest are first folded into
+      # one (Outbox#coalesce!), so a backlog drains in large requests rather
+      # than one small one per round trip. Nothing is in flight at that
+      # point, which is what coalesce! requires.
       def drain_one
         Railwatch.ignore do
           environment = Environment.current
           outbox = Outbox.new(Railwatch.config, environment)
+          environment.with_telemetry { outbox.coalesce!(owner: @owner) }
           claim = environment.with_telemetry { outbox.claim!(owner: @owner) } or return false
 
           outcome = client.deliver(claim, producer_id: claim.producer_id)

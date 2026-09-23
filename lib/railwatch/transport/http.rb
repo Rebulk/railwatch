@@ -50,11 +50,21 @@ module Railwatch
         status.nil? || RETRYABLE_STATUSES.include?(status) || (500..599).cover?(status)
       end
 
-      def initialize(config, endpoint: nil)
+      # persistent: keep one connection open between deliveries instead of a
+      # TCP and TLS handshake for each (measured ~240 ms from a production
+      # box, about half of what a small export delivery cost). Only for a
+      # caller that sends from a single thread -- the export sender -- since
+      # a Net::HTTP session is not safe to share. Still exactly one attempt
+      # per call: a request that fails on a reused connection is reported
+      # like any other failure and the connection is dropped, never silently
+      # re-sent (max_retries stays 0).
+      def initialize(config, endpoint: nil, persistent: false)
         @config = config
         @uri = endpoint ? URI.parse(endpoint) : URI.join(config.ingest_url, "/ingest")
         @unauthorized = false
         @encoder = WireEncoder.new(batch_bytes: config.batch_bytes)
+        @persistent = persistent
+        @session = nil
       end
 
       def unauthorized?
@@ -65,7 +75,19 @@ module Railwatch
       # state belongs to the parent that observed those responses.
       def reset_after_fork!
         @unauthorized = false
+        # The parent's socket, TLS state included. Closing it here would
+        # shut the parent's connection too; forget it and open our own.
+        @session = nil
         self
+      end
+
+      # Closes a persistent connection, if one is open.
+      def close
+        session = @session
+        @session = nil
+        session&.finish if session&.started?
+      rescue StandardError
+        nil
       end
 
       def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
@@ -178,17 +200,45 @@ module Railwatch
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
         options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
-        Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
-          http.request(req) do |response|
-            body = String.new(encoding: Encoding::BINARY)
-            response.read_body do |chunk|
-              if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
-                raise ResponseTooLarge, "ingest response is larger than #{MAX_RESPONSE_BYTES} bytes"
-              end
-              body << chunk
+        return Net::HTTP.start(@uri.host, @uri.port, **options) { |http| bounded_request(http, req) } unless @persistent
+
+        # Net::HTTP itself reconnects when the far end has closed an idle
+        # connection or answered "Connection: close"; it just never re-sends.
+        begin
+          response = bounded_request(session(options), req)
+        rescue StandardError
+          # Whatever state the connection is in, it is not one to send the
+          # next delivery on.
+          close
+          raise
+        end
+        response
+      end
+
+      def session(options)
+        return @session if @session&.started?
+
+        http = Net::HTTP.new(@uri.host, @uri.port)
+        options.each { |name, value| http.public_send(:"#{name}=", value) }
+        # Our side gives up on an idle connection before a typical proxy
+        # does, so a reused socket is rarely one the far end already closed.
+        http.keep_alive_timeout = KEEP_ALIVE_TIMEOUT
+        http.start
+        @session = http
+      end
+
+      KEEP_ALIVE_TIMEOUT = 30
+
+      def bounded_request(http, req)
+        http.request(req) do |response|
+          body = String.new(encoding: Encoding::BINARY)
+          response.read_body do |chunk|
+            if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
+              raise ResponseTooLarge, "ingest response is larger than #{MAX_RESPONSE_BYTES} bytes"
             end
-            response.body = body
+            body << chunk
           end
+          response.body = body
         end
       end
 
