@@ -1,5 +1,9 @@
 # Self-hosting
 
+This page is for sending telemetry to a Railwatch Cloud you run
+yourself. An [embedded](embedded.md) install keeps everything inside
+your app and needs none of it.
+
 Railwatch Cloud is a Rails app you can run yourself. The gem doesn't care
 which install it talks to — point it at yours and everything works the
 same.
@@ -17,11 +21,15 @@ end
 `ingest_url` defaults to `https://railwatch.rebulk.com`, so this is the one
 setting a self-hosted install always needs; everything the gem sends —
 records, ping, deploys — hangs off that host. Pass `--url=` to the
-installer to have it written for you:
+installer to have it written for you (it implies `--cloud`):
 
 ```sh
 bin/rails generate railwatch:install --url=https://telemetry.example.com
 ```
+
+To keep an embedded install and mirror it to your platform, set
+`RAILWATCH_INGEST_URL` and `RAILWATCH_TOKEN` and turn on
+[export](embedded.md#three-ways-to-run-it) instead.
 
 ## Getting a token
 

@@ -4,11 +4,12 @@ About *using* the `railwatch` gem from a Rails application; copy
 this into that application's repository. Index of everything else:
 [`llms.txt`](llms.txt).
 
-Railwatch instruments a Rails app end to end and ships linked telemetry to
+Railwatch instruments a Rails app end to end and stores linked telemetry in
+two SQLite databases of the app's own (embedded, the default) or sends it to
 Railwatch Cloud. Every request, job attempt, scheduled task run, and command is
-an **execution**; every query, cache read, log line, outgoing HTTP call, view
-render, exception, and span is a child of one, linked by
-`execution_id`/`trace_id`. It never writes to the app's database.
+an **execution**; every query, cache read, log line, outgoing HTTP call, LLM
+call, view render, exception, and span is a child of one, linked by
+`execution_id`/`trace_id`. It never writes to the app's primary database.
 
 ## Install
 
@@ -19,24 +20,35 @@ bin/rails generate railwatch:install --prompt-token --kamal-secrets  # or: Railw
 ```
 
 With no flags the install is embedded (see [Embedded mode](docs/embedded.md)):
-telemetry stays in two SQLite databases the app owns and the dashboard is served
-at `/railwatch`. `--cloud`, or any of `--prompt-token`, `--token-stdin`, `--url`,
-`--kamal-secrets`, sends it to Railwatch Cloud instead. For the cloud install the generator writes `config/initializers/railwatch.rb`, mounts `Railwatch::Engine`
-at `/railwatch`, adds the Kamal `post-deploy` hook and the Inertia browser client
-where the app has them, requires `railwatch/rspec` (or `railwatch/minitest`) in the
-test helper, and then runs `railwatch:doctor`. A prompted/stdin/environment token
-goes into `.env` only when Git confirms that file is ignored; token values are
-never printed. Configuration lives only in that
-initializer; every option also has a `RAILWATCH_*` environment variable.
+telemetry stays in two SQLite databases the app owns (`railwatch`,
+`railwatch_telemetry`, added to `config/database.yml`), Puma forks one writer
+for them (`plugin :railwatch` in `config/puma.rb`), and the dashboard is served
+at `/railwatch`. It is open in development and answers 401 elsewhere until
+`RAILS_ENV=production bin/rails railwatch:authentication:configure` sets a
+password. An exported `RAILWATCH_TOKEN` alone does not change the mode.
+`--cloud`, or any of `--prompt-token`, `--token-stdin`, `--url`,
+`--kamal-secrets`, sends telemetry to Railwatch Cloud instead.
+
+Both modes write `config/initializers/railwatch.rb`, mount `Railwatch::Engine`
+at `/railwatch`, add the Kamal `post-deploy` hook and the Inertia browser client
+where the app has them, and require `railwatch/rspec` (or `railwatch/minitest`)
+in the test helper; the cloud install then runs `railwatch:doctor`. A
+prompted/stdin/environment token goes into `.env` only when Git confirms that
+file is ignored; token values are never printed. Configuration lives only in
+that initializer; every option also has a `RAILWATCH_*` environment variable.
+An embedded install mirrors to Railwatch Cloud as well with a token and
+`c.export_enabled = true`.
 
 ## Rake tasks
 
 | Task | Does |
 |---|---|
-| `bin/rails railwatch:doctor` | ✓/✗ per check: token, ingest URL, reachability, middleware, engine mount, deploy marker, sample rates, ignored types, Kamal hook, browser client and whether an entrypoint calls it, profiler backend, test matchers. Exits non-zero if the token is missing or the host is unreachable. **Run this first when telemetry is missing.** |
-| `bin/rails railwatch:token` | Where to create an ingest token for this app's platform. |
-| `bin/rails railwatch:mcp` | Paste-ready MCP client configuration for this app's platform. |
-| `bin/rails railwatch:deploy[ref,name,url]` | Records a deploy marker. Use as a release step when not deploying with Kamal. |
+| `bin/rails railwatch:doctor` | ✓/✗ per check. Embedded: databases, migrations, writer process, last write, maintenance, dashboard access, export. Cloud: token, token storage, ingest URL, reachability. Both: middleware, engine mount, deploy, sample rates, ignored types, Kamal hook, browser client and whether an entrypoint calls it, profiler backend, test matchers. Exits non-zero on a missing database, pending migrations, broken export, a missing or tracked token, or an unreachable host. **Run this first when telemetry is missing.** |
+| `bin/rails railwatch:authentication:configure` | Sets the embedded dashboard's HTTP Basic credentials for the current `RAILS_ENV`. |
+| `bin/rails railwatch:export:status` | What the export queue holds and whether it can send. |
+| `bin/rails railwatch:token` | Where to create a Railwatch Cloud ingest token for this app. |
+| `bin/rails railwatch:mcp` | Paste-ready MCP client configuration for this app's Railwatch Cloud. |
+| `bin/rails railwatch:deploy[ref,name,url]` | Records a deploy marker (in the embedded database, or on the cloud). Use as a release step when not deploying with Kamal. |
 | `bin/rails 'railwatch:sourcemaps[public,true]'` | Uploads Vite source maps for the configured deploy, then deletes acknowledged files. Run after building and before publishing assets. Omit `true` to retain files. See [Source maps](docs/source-maps.md). |
 
 ## Facade
@@ -77,9 +89,11 @@ Per action, in a controller class body: `railwatch_sample 0.01, only: :index`,
 ## Specs
 
 `require "railwatch/rspec"` in `spec/rails_helper.rb` (or `"railwatch/minitest"` in
-`test/test_helper.rb`). Railwatch must be enabled in the test env — set any
-non-blank `RAILWATCH_TOKEN`; records go to an in-memory transport, never over the
-wire. All matchers are block matchers.
+`test/test_helper.rb`). Railwatch must be enabled in the test env: an embedded
+install is, and needs `RAILS_ENV=test bin/rails db:prepare` once so its test
+databases exist; a cloud install needs any non-blank `RAILWATCH_TOKEN`. Records
+go to an in-memory transport, never over the wire. All matchers are block
+matchers.
 
 ```ruby
 expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)   # or exactly:/at_least:
@@ -102,8 +116,8 @@ melt in production.
 
 ## MCP
 
-The platform is an MCP server at `<ingest host>/mcp`. Generate a personal
-token at Settings → Profile → "API & MCP token", then:
+Railwatch Cloud (not embedded mode) is an MCP server at `<ingest host>/mcp`.
+Generate a personal token at Settings → Profile → "API & MCP token", then:
 
 ```sh
 claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
@@ -112,10 +126,12 @@ claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
 
 `bin/rails railwatch:mcp` prints this and the Claude Desktop, Cursor, VS Code, and
 Zed equivalents for whichever platform the app points at. Call
-`list_applications` first; then `list_issues`, `get_issue`, `get_route`,
-`search_requests`, `get_execution`, `explain_query`, `get_profile`,
-`search_logs`, `release_health`, `recent_deploys`, `list_alerts`, and the
-`triage_issue` / `slow_route` / `daily_summary` prompts. All durations are
+`list_applications` first; then `list_issues`, `get_issue` (stack frames,
+cause, locals, breadcrumbs), `get_route`, `search_requests`, `get_execution`,
+`explain_query`, `get_profile`, `search_logs`, `search_telemetry`,
+`release_health`, `recent_deploys`, `list_alerts`, and the `triage_issue` /
+`slow_route` / `daily_summary` prompts. `update_issue` and `add_comment` write,
+attributed to the token's user and your agent name. All durations are
 milliseconds; these docs are served at `railwatch://docs/<name>`.
 
 ## Gotchas

@@ -2,18 +2,17 @@
 
 Everything below lives on `Railwatch::Configuration`, in
 `lib/railwatch/configuration.rb`. Set it via
-`Railwatch.configure { |c| ... }` in `config/initializers/railwatch.rb`.
-That file is created by
-`bin/rails generate railwatch:install`. Most settings have a `RAILWATCH_*`
-env var default; the tables below show which. Explicit values set in the
-initializer always win over the env var.
+`Railwatch.configure { |c| ... }` in `config/initializers/railwatch.rb`,
+which `bin/rails generate railwatch:install` creates. Most settings have a
+`RAILWATCH_*` env var default; the tables below show which. Explicit
+values set in the initializer always win over the env var.
 
 ## Core
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `enabled` | `RAILWATCH_ENABLED` | `true` | Master switch. `Railwatch.enabled?` is also `false` whenever `token` is blank, so setting only `RAILWATCH_TOKEN` is enough to turn Railwatch on. |
-| `token` | `RAILWATCH_TOKEN` | nil | Bearer token for `/ingest`. Required. |
+| `enabled` | `RAILWATCH_ENABLED` | `true` | Master switch. With `transport = :http`, `Railwatch.enabled?` is also `false` whenever `token` is blank, so setting only `RAILWATCH_TOKEN` is enough to turn a cloud install on. An embedded install needs no token. |
+| `token` | `RAILWATCH_TOKEN` | nil | Bearer token for `/ingest`. Required with `transport = :http` and for [export](#export-to-railwatch-cloud). |
 | `ingest_url` | `RAILWATCH_INGEST_URL` | `https://railwatch.rebulk.com` | Platform base URL. Point at a self-hosted instance to override. |
 | `allow_http` | `RAILWATCH_ALLOW_HTTP` | `false` | Permit a non-loopback plain HTTP ingest URL. HTTPS is required by default; `localhost`, `127.0.0.1`, and `::1` remain available for local self-hosted development. |
 | `deploy` | `RAILWATCH_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `railwatch:deploy`. Full 40-character SHAs are shortened to 12 characters. |
@@ -26,7 +25,8 @@ initializer always win over the env var.
 | `beacon_rate_limit` | `RAILWATCH_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /railwatch/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
 `Railwatch.enabled?` delegates to `config.enabled?`, which is `@enabled &&
-token.present?`. There is no separate "is configured" check elsewhere.
+(local? || token.present?)`. There is no separate "is configured" check
+elsewhere.
 
 Deploy detection stops at the first value found: `RAILWATCH_DEPLOY`,
 `KAMAL_VERSION`, `GIT_REV`, `GIT_SHA`, `SOURCE_VERSION`,
@@ -569,7 +569,7 @@ Rake tasks and Solid Queue jobs are never interactive.
 
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
-| `capture_exception_source` | `RAILWATCH_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Send source snippet lines surrounding each in-application exception frame to Railwatch Cloud. This is on by default for crash context; disable it when source disclosure is outside the application's telemetry policy. |
+| `capture_exception_source` | `RAILWATCH_CAPTURE_EXCEPTION_SOURCE_CODE` | `true` | Record source snippet lines surrounding each in-application exception frame (sent to Railwatch Cloud when the install reports there or exports). This is on by default for crash context; disable it when source disclosure is outside the application's telemetry policy. |
 | `capture_exception_locals` | `RAILWATCH_CAPTURE_EXCEPTION_LOCALS` | `false` | Snapshot the raising frame's local variables (up to 25, values truncated to 200 chars, run through the same filter as request params) onto each exception, like Sentry's locals panel. Installs a `TracePoint(:raise)`; opt in per environment. |
 | `capture_request_payload` | `RAILWATCH_CAPTURE_REQUEST_PAYLOAD` | `false` | Capture (redacted) request params — only for a request that raised, never otherwise. |
 | `capture_job_arguments` | `RAILWATCH_CAPTURE_JOB_ARGUMENTS` | `false` | Add the job's real arguments (`job.serialize["arguments"]`) to each `job_attempt`/`scheduled_task` record, capped at 8 KiB of JSON. Hash arguments run through the same filter as request params. Off by default because job arguments routinely carry PII; `arguments_preview` (argument *shapes* only) is always on regardless. |
@@ -884,7 +884,7 @@ ignore block's building blocks, and are nestable.
 ## Embedded mode
 
 ```ruby
-c.transport = :local        # RAILWATCH_TRANSPORT; default "http"
+c.transport = :local        # RAILWATCH_TRANSPORT; runtime default "http", but the installer writes :local
 c.issue_prefix = "SHOP"     # RAILWATCH_ISSUE_PREFIX; default from the app name
 c.repository_url = "..."    # RAILWATCH_REPOSITORY_URL
 c.retention_days = 7        # RAILWATCH_RETENTION_DAYS
@@ -892,8 +892,9 @@ c.http_basic_auth_enabled = true      # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; on, a
 c.http_basic_auth_user = "ops"        # RAILWATCH_HTTP_BASIC_AUTH_USER, or credentials railwatch.http_basic_auth_user
 c.http_basic_auth_password = "..."    # RAILWATCH_HTTP_BASIC_AUTH_PASSWORD, or credentials railwatch.http_basic_auth_password
 c.base_controller_class = "AdminController"  # RAILWATCH_BASE_CONTROLLER_CLASS; default ActionController::Base
-c.dashboard_open = false              # RAILWATCH_DASHBOARD_OPEN; public on purpose
+c.dashboard_open = false              # RAILWATCH_DASHBOARD_OPEN; default false, true makes it public on purpose
 c.dashboard_user = ->(request) { { id:, name:, email: } or nil }
+c.writer_socket = "tmp/sockets/railwatch-writer.sock"  # RAILWATCH_WRITER_SOCKET
 ```
 
 With `transport = :local` the reporter writes each batch into the app's
@@ -905,25 +906,48 @@ railwatch:authentication:configure` has written credentials; a host with
 its own admin auth turns Basic off and sets `base_controller_class` or a
 routes constraint. Full walkthrough: [Embedded mode](embedded.md).
 
+### Export to Railwatch Cloud
+
+An embedded install can also mirror every record to Railwatch Cloud.
+Off unless `export_enabled` is set; a configured token alone sends
+nothing. Only meaningful with `transport = :local`.
+
+| Attribute | Env var | Default | Meaning |
+|---|---|---|---|
+| `export_enabled` | `RAILWATCH_EXPORT_ENABLED` | `false` | Mirror every record to the cloud as well as storing it locally. |
+| `export_token` | `RAILWATCH_EXPORT_TOKEN` | `token` | Cloud environment token to send with. |
+| `export_url` | `RAILWATCH_EXPORT_URL` | `{ingest_url}/ingest` | Where to send. |
+| `export_max_bytes` | `RAILWATCH_EXPORT_MAX_BYTES` | `268435456` (256 MiB) | Queue ceiling in bytes. At capacity new work is refused and counted, not swapped for old. |
+| `export_max_deliveries` | `RAILWATCH_EXPORT_MAX_DELIVERIES` | `100000` | Queue ceiling in deliveries. |
+| `export_max_age` | `RAILWATCH_EXPORT_MAX_AGE_SECONDS` | `86400` | How long a queued delivery is kept. At most seven days, past which the receiver no longer recognises it. |
+
+`railwatch:doctor` fails when export is enabled and cannot work, and
+`railwatch:export:status` shows the queue. See
+[Embedded mode](embedded.md#three-ways-to-run-it).
+
 ## Rake tasks
 
 Ship with the gem via Rails::Engine's default `lib/tasks` convention, in
 `lib/tasks/railwatch_tasks.rake`:
 
-- **`railwatch:status`** pings `{ingest_url}/ingest/ping` with the
-  configured token. It aborts if `RAILWATCH_TOKEN` is unset or the ping
-  fails.
-- **`railwatch:doctor`** prints a ✓/✗ checklist of the whole install:
-  token, ingest URL, `GET /ingest/ping`, `Railwatch::Middleware::Request`
+- **`railwatch:status`** embedded: prints that telemetry is stored in the
+  app. Cloud: pings `{ingest_url}/ingest/ping` with the configured token,
+  and aborts if `RAILWATCH_TOKEN` is unset or the ping fails.
+- **`railwatch:doctor`** prints a ✓/✗ checklist of the whole install.
+  Embedded, it checks both databases and their migrations, telemetry
+  disk mode, the maintenance clock, the writer process, dashboard access,
+  and export when enabled. Cloud, it checks the token, where the token is
+  stored, the ingest URL and its transport security, and
+  `GET /ingest/ping`. Then, either way: `Railwatch::Middleware::Request`
   in the middleware stack, the mounted engine's beacon route,
-  `config.deploy` and its environment, `REVISION`, Git, or initializer
-  source, sample rates, ignored record types, the Kamal `post-deploy`
-  hook, `app/frontend/lib/railwatch.ts`, and whether `railwatch/rspec` or
-  `railwatch/minitest` is required by the test helper. The last five are
-  informational. It exits non-zero only when the token is missing or the
-  ping fails.
-- **`railwatch:deploy[ref,name,url]`** POSTs `{deploy, ref, name, url,
-  server, timestamp, performer, destination, service, commits}` to
+  `config.deploy` and its source, sample rates, ignored record types, the
+  Kamal `post-deploy` hook, the browser client and whether an entrypoint
+  calls it, the profiler backend, and the test matchers. It exits
+  non-zero only on the lines marked fatal in
+  [Troubleshooting](troubleshooting.md).
+- **`railwatch:deploy[ref,name,url]`** embedded: writes the deploy marker
+  to the app's `railwatch` database. Cloud: POSTs `{deploy, ref, name,
+  url, server, timestamp, performer, destination, service, commits}` to
   `{ingest_url}/ingest/deploys`. `deploy` comes from `config.deploy`. It
   aborts if that's unset. `ref` defaults to `git rev-parse HEAD` when not
   passed. `performer`/`destination`/`service` come from `KAMAL_PERFORMER`,
@@ -931,13 +955,30 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention, in
   `{sha, author, message, at}` objects, newest first, from `git log`. It
   is empty inside an app container, which has no `.git`. That is why the
   hook below posts from the deployer instead.
+- **`railwatch:authentication:configure`** writes the embedded
+  dashboard's HTTP Basic credentials to the current environment's Rails
+  credentials.
+- **`railwatch:export:status`**, **`railwatch:export:rebind`**,
+  **`railwatch:export:discard`** show the export queue, clear a
+  credential block (abandoning work queued under the old token), and
+  abandon everything queued.
+- **`railwatch:vacuum:status`** and **`railwatch:vacuum`** report and
+  reclaim the telemetry database's disk
+  ([Embedded mode](embedded.md#giving-the-disk-back)).
+- **`railwatch:token`** and **`railwatch:mcp`** print where to create a
+  cloud ingest token and paste-ready MCP client configuration.
+- **`railwatch:sourcemaps[directory,delete]`** uploads browser source
+  maps ([Source maps](source-maps.md)).
 
 ## Kamal integration
 
 `bin/rails generate railwatch:install` writes `.kamal/hooks/post-deploy`,
-but only if `config/deploy.yml` already exists. It no-ops when
-`RAILWATCH_TOKEN` isn't set, and never fails a deploy. Every network call
-ends in `|| true`.
+but only if `config/deploy.yml` already exists. With
+`RAILWATCH_TRANSPORT=local` in the deployer's environment it runs
+`bin/rails railwatch:deploy[$KAMAL_VERSION]` in the primary container,
+which records the marker in the embedded database, and stops. Otherwise
+it no-ops when `RAILWATCH_TOKEN` isn't set. It never fails a deploy.
+Every network call ends in `|| true`.
 
 The hook runs on the **deployer machine**, not in a container, which is
 the whole point. That's where the git history lives and where Kamal

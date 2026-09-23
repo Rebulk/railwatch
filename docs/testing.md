@@ -27,10 +27,20 @@ require "railwatch/minitest"
 ```
 
 Railwatch must be *enabled* in the test environment or every block would look
-empty. `config.enabled?` is true when `config.enabled` is set and a token is
-present, so set any non-blank `RAILWATCH_TOKEN` for the test env. Records go to
-an in-memory transport, never over the network. If Railwatch is disabled, the
-matchers raise `Railwatch::SpecHelper::Disabled` rather than quietly passing.
+empty. An embedded install (`transport = :local`) is enabled with no token. A
+cloud install needs a token present, so set any non-blank `RAILWATCH_TOKEN` for
+the test env. Either way records go to an in-memory transport, never over the
+network or into the telemetry database. If Railwatch is disabled, the matchers
+raise `Railwatch::SpecHelper::Disabled` rather than quietly passing.
+
+An embedded install adds its two databases to the `test` environment too, and
+Rails' schema check refuses to run the suite while their migrations are
+pending. `bin/rails db:test:prepare` does not create them, because they keep no
+schema file; run this once locally and as a CI setup step:
+
+```sh
+RAILS_ENV=test bin/rails db:prepare
+```
 
 Sampling is forced on for the block, so a fractional `c.sample` in the app's
 test config can't turn an assertion into one that never fires either.
