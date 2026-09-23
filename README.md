@@ -9,9 +9,10 @@ microseconds per query, with zero writes to your database.
 By default all of it stays inside the app:
 [embedded mode](docs/embedded.md) serves the full dashboard at
 `/railwatch` out of two SQLite files your app owns, with no token, no
-Node, no Redis and no job worker. Railwatch Cloud is optional, for
-alerts that arrive when the app is down, MCP for your AI assistant, and
-many apps and servers in one place.
+Node, no Redis and no job worker. Railwatch Cloud is optional: it
+delivers alerts to Slack, email, webhooks or Linear (including when the
+app is down), serves MCP to your AI assistant, and puts many apps and
+servers in one place.
 
 ## Install
 
@@ -23,9 +24,12 @@ bin/rails generate railwatch:install  # 2. embedded: databases, Puma writer, das
 Restart and open `/railwatch`. It is open in development; before you
 deploy, give it a password with
 `RAILS_ENV=production bin/rails railwatch:authentication:configure`
-(it answers 401 in production until you do).
+(it answers 401 in production until you do). On a PostgreSQL or MySQL
+app without the `sqlite3` gem, the generator adds it to the Gemfile;
+run `bundle install` and `bin/rails db:prepare` to finish.
 
-Or send everything to Railwatch Cloud instead:
+To send everything to Railwatch Cloud instead, pass `--cloud` or a token
+option:
 
 ```sh
 bundle add railwatch
@@ -33,10 +37,10 @@ bin/rails generate railwatch:install --prompt-token  # hidden token input plus a
 bin/rails railwatch:doctor                          # check every piece is wired up after restart
 ```
 
-Getting the token, the generator's flags, and deploying with Kamal,
+The generator's flags, getting a token, and deploying with Kamal,
 Docker, Heroku, or Render are covered in
-[Getting started](docs/getting-started.md). For a self-hosted deployment
-or an unreleased revision, use the Git source instead:
+[Getting started](docs/getting-started.md). For an unreleased revision,
+use the Git source instead:
 
 ```ruby
 gem "railwatch", github: "Rebulk/railwatch"
@@ -52,12 +56,16 @@ gem "railwatch", github: "Rebulk/railwatch"
   ([Configuration](docs/configuration.md)).
 - An optional stack profiler through `vernier` or `stackprof`, off by
   default ([Configuration](docs/configuration.md)).
+- LLM calls made through RubyLLM: tokens, cost, cut-off answers, tool
+  calls and workflows, each tied to the request or job that made it
+  ([Record types](docs/records.md#llm_call)).
 - A browser client for Inertia apps: page-visit timing, Core Web Vitals,
   and browser errors ([Getting started](docs/getting-started.md)).
 - RSpec and Minitest matchers that turn a query budget into a CI gate
   ([Testing](docs/testing.md)).
-- An MCP server so Claude Code, Cursor, VS Code, or Zed can read your
-  production data ([AI assistants and MCP](docs/ai-and-mcp.md)).
+- With Railwatch Cloud, an MCP server so Claude Code, Cursor, VS Code, or
+  Zed can read your production data
+  ([AI assistants and MCP](docs/ai-and-mcp.md)).
 
 Configuration lives in `config/initializers/railwatch.rb`; most options
 also have a `RAILWATCH_*` environment variable.
@@ -79,11 +87,11 @@ expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 
 ## Embedded mode
 
-The default install keeps everything inside the application. Telemetry goes to two
-SQLite files it owns -- `railwatch` for issues, comments and saved views,
-`railwatch_telemetry` for what the app reports -- and the dashboard is
-served at `/railwatch` from a bundle shipped inside the gem. Nothing
-leaves the machine, and there is nothing else to run.
+Telemetry goes to two SQLite files the app owns -- `railwatch` for
+issues, comments and saved views, `railwatch_telemetry` for what the app
+reports -- and the dashboard is served at `/railwatch` from a bundle
+shipped inside the gem. Nothing leaves the machine unless you turn on
+export to Railwatch Cloud, and there is nothing else to run.
 
 Puma forks a single writer process (`plugin :railwatch`, which the
 installer adds) that owns both files. The web workers hand it batches
@@ -92,20 +100,21 @@ runs the maintenance clock too, so exception grouping, rollups, retention
 and threshold scans happen without a queue.
 
 That dashboard reads every query, log line and exception the app
-produced, so outside development it is closed by default the way
-Mission Control Jobs is: HTTP Basic is on with no credentials, and every
-request is 401 until you set them with
-`bin/rails railwatch:authentication:configure`. In development, with no
-credentials set, it is open. Apps that
-would rather use their own session hand it a `dashboard_user` resolver
-instead. [Embedded mode](docs/embedded.md) covers all of it, including
-upgrades and what it costs to store.
+produced, so it is gated the way Mission Control Jobs is: HTTP Basic is
+on, and with no credentials every request is 401 until you set them
+with `bin/rails railwatch:authentication:configure`. Development is the
+exception: with no credentials set there, it is open. Apps that would
+rather use their own authentication turn Basic off and gate the pages
+with `base_controller_class` or a routes constraint around the mount; a
+`dashboard_user` resolver then names the operator and authorizes live
+updates, but does not gate pages. [Embedded mode](docs/embedded.md)
+covers all of it, including upgrades and what it costs to store.
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md) — five-minute install for a
-  Rails 8 app, the three optional lines, and deploying with Kamal, Docker,
-  Heroku, Render, or none of them.
+- [Getting started](docs/getting-started.md) — the embedded install, the
+  Railwatch Cloud install and its token, the three optional lines, and
+  deploying with Kamal, Docker, Heroku, Render, or none of them.
 - [Configuration](docs/configuration.md) — every option and `RAILWATCH_*`
   variable, field by field.
 - [Record types](docs/records.md) — every record Railwatch ships and every
@@ -113,13 +122,15 @@ upgrades and what it costs to store.
 - [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
   performance gate.
 - [AI assistants and MCP](docs/ai-and-mcp.md) — connecting Claude Code,
-  Cursor, VS Code, or Zed to your production data.
+  Cursor, VS Code, or Zed to your production data through Railwatch
+  Cloud.
 - [Replacing Sentry](docs/replacing-sentry.md) — a step-by-step migration,
   option by option and call site by call site.
 - [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md) — the
   record-type mapping and the sampling model, for Laravel people.
-- [Embedded mode](docs/embedded.md) — the whole dashboard inside your
-  app, telemetry in your own SQLite files, no cloud.
+- [Embedded mode](docs/embedded.md) — the default: the whole dashboard
+  inside your app, telemetry in your own SQLite files, and optional
+  export to Railwatch Cloud.
 - [Self-hosting](docs/self-hosting.md) — pointing the gem at your own
   Railwatch Cloud.
 - [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired

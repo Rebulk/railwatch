@@ -258,10 +258,11 @@ module Railwatch
                  config/puma.rb Puma forks one Railwatch writer process that
                  writes every batch and runs the maintenance clock, so no web
                  process ever holds the telemetry database. No job worker.
-              4. Optional: mirror to Railwatch Cloud for alerts that still
-                 arrive when this app is down, MCP for your AI assistant, and
-                 every app in one place. Set RAILWATCH_TOKEN and
-                 c.export_enabled = true (docs/embedded.md).
+              4. Optional: mirror to Railwatch Cloud for alerts delivered even
+                 when this app is down, MCP for your AI assistant, and every
+                 app in one place. Get a token (bin/rails railwatch:token), set
+                 RAILWATCH_TOKEN, then c.export_enabled = true in the
+                 initializer (docs/embedded.md).
           STEPS
           return
         end

@@ -2,10 +2,12 @@
 
 Railwatch is the same product shape for Rails: one package instruments the
 framework end to end, records are grouped under the execution that
-produced them, and a hosted platform turns them into routes, jobs,
-queries, issues, and alerts. If you know Nightwatch, you already know
-how to read Railwatch — this page maps the vocabulary and points out the
-three places the Rails answer is genuinely different.
+produced them, and a dashboard turns them into routes, jobs, queries,
+issues, and alerts. Unlike Nightwatch, that dashboard runs inside your
+app by default ([embedded mode](embedded.md)); Railwatch Cloud is the
+hosted option. If you know Nightwatch, you already know how to read
+Railwatch — this page maps the vocabulary and points out the three
+places the Rails answer is genuinely different.
 
 Railwatch is an independent product and is not affiliated with Laravel or
 Laravel Nightwatch.
@@ -18,10 +20,10 @@ separate daemon POSTs them.
 
 Puma and Solid Queue workers *are* long-lived, so Railwatch skips that
 tier. A single reporter thread per process holds a bounded buffer
-(default 5,000 records, oldest dropped and counted), and gzip-NDJSON
-POSTs batches to the platform every 2 seconds or every 500 records. There
-is no daemon to install, supervise, or forget to restart, and nothing
-between the app and the ingest URL.
+(16 MiB and 10,000 records by default, oldest dropped and counted) and
+flushes batches every 2 seconds or every 500 records: to the embedded
+writer process Puma forks, or as gzip-NDJSON POSTs to Railwatch Cloud.
+There is no daemon to install, supervise, or forget to restart.
 
 The thread is re-armed after `fork`, so clustered Puma workers and
 forked Solid Queue workers each get their own with no `on_worker_boot`
@@ -50,7 +52,7 @@ Nightwatch's types, and what they're called here:
 | `queued-job` | `enqueued_job` | The enqueue side, in the execution that enqueued it. |
 | `log` | `log` | Lines at or above `log_level`, plus Rails 8.1 structured `Rails.event` events. |
 | `user` | `user` | Resolved once per user per process-hour, not once per request. |
-| deployment (`nightwatch:deploy`) | `Deploy` on the platform | Posted by `railwatch:deploy` or the Kamal `post-deploy` hook, with up to 50 commits so the platform can diff what shipped. |
+| deployment (`nightwatch:deploy`) | `Deploy` on the dashboard | Recorded by `railwatch:deploy` or the Kamal `post-deploy` hook, with up to 50 commits when Git history is at hand, so the dashboard can diff what shipped. |
 | request `stages` | parent `stages` | Same idea, Rails boundaries: `middleware_before`, `action`, `render`, `middleware_after`, `body`. Laravel's `bootstrap` has no equivalent in a warm process — Railwatch reports boot time once per process as a `process` record instead. |
 
 And the types with no Nightwatch counterpart at all: `storage_op` (Active
@@ -59,7 +61,7 @@ Storage), `view_render`, `span` (your own timed blocks), `attachment`,
 `session` (release health), `process`, `health` (Puma pool, Active Record
 pool, Solid Queue backlog), and `profile` (sampled stack profiles).
 
-Field-by-field detail for all 26 is in [`records.md`](records.md).
+Field-by-field detail for all 28 is in [`records.md`](records.md).
 
 ## What "execution" means
 
@@ -76,7 +78,7 @@ it is propagated across services as a W3C `traceparent` on outgoing HTTP
 — an inbound `traceparent` is adopted, so a trace spans services rather
 than stopping at the process boundary.
 
-Practically: on the platform you never look at a query in isolation. You
+Practically: on the dashboard you never look at a query in isolation. You
 open the request, and the query is in its waterfall with everything else
 that execution did.
 
@@ -182,7 +184,7 @@ every setting still has an env var — `NIGHTWATCH_*` becomes `RAILWATCH_*`.
 | `nightwatch:agent` | Nothing — the reporter thread lives in the app process. |
 | `nightwatch:status` | `bin/rails railwatch:status` |
 | `nightwatch:deploy {deploy} --ref --name --url` | `bin/rails railwatch:deploy[ref,name,url]`, or the generated `.kamal/hooks/post-deploy` |
-| — | `bin/rails railwatch:doctor`, which checks the whole install and exits non-zero if the token or the ingest host is wrong |
+| — | `bin/rails railwatch:doctor`, which checks the whole install and exits non-zero if the embedded databases, the token, or the ingest host is wrong |
 
 ## The three things worth knowing about Rails
 
@@ -211,6 +213,6 @@ See [`testing.md`](testing.md).
 
 ## Next
 
-- [`getting-started.md`](getting-started.md) — install, in five minutes.
+- [`getting-started.md`](getting-started.md) — the two-command install.
 - [`configuration.md`](configuration.md) — every option and env var.
-- [`records.md`](records.md) — all 26 record types, field by field.
+- [`records.md`](records.md) — all 28 record types, field by field.

@@ -1,7 +1,7 @@
 # Record types
 
 Every record Railwatch ships is a flat hash. See `lib/railwatch/record.rb`.
-This lists all 27, field by field, sourced from the subscriber or patch
+This lists all 28, field by field, sourced from the subscriber or patch
 that builds each one. Field names below are the hash keys as sent over
 the wire: symbols in Ruby, strings in the gzip NDJSON payload.
 
@@ -207,7 +207,7 @@ vs `#execute`. `db:migrate` and other tasks in
 | `name` | Task name, or `"runner"`. |
 | `command` | Full invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`. |
 | `exit_code` | 0 on success, `SystemExit`'s status, or 1 on an unhandled exception, clamped to 0-255. |
-| `interactive` | `true` on a `bin/rails runner` an engineer typed or piped (`-`, inline code, or a `.rb` file under `config.interactive_runner_paths`); absent otherwise. Such a run ships this record — with its `exit_code` and `exception_preview` — but its exception is not reported. A deployed script (`rails runner script/nightly.rb`), a rake task, and a job are never interactive. See [Console and runner sessions](replacing-sentry.md#console-and-runner-sessions). |
+| `interactive` | `true` on a `bin/rails runner` an engineer typed or piped (`-`, inline code, or a `.rb` file under `config.interactive_runner_paths`); absent otherwise. Such a run ships this record — with its `exit_code` and `exception_preview` — but its exception is not reported. A deployed script (`rails runner script/nightly.rb`), a rake task, and a job are never interactive. See [Console and runner sessions](replacing-sentry.md#12-console-and-runner-sessions). |
 
 ### `channel_action`
 
@@ -526,14 +526,17 @@ adds the `workflow_*` fields. `cost_nanos` is null rather than zero
 whenever RubyLLM reported no cost or the model registry could not price
 it — an unpriced call is not a free one.
 
-**Concurrent tool calls are not recorded.** RubyLLM's opt-in
-`tool_concurrency` (`:threads` or `:fibers`) runs each tool in a fresh
-thread or fiber. `Railwatch::Current` is backed by
-`ActiveSupport::IsolatedExecutionState`, which a new thread does not
-inherit, so the `tool_call.ruby_llm` event fires with no execution to
-attach to and the record is dropped rather than misattributed. This
-affects every Railwatch subscriber in an app-spawned thread, not just this
-one. Tool concurrency is off by default; with it off, tool calls are
+**Tool calls run on their own threads are not recorded.** RubyLLM's opt-in
+`tool_concurrency: :threads` runs each tool in a fresh thread.
+`Railwatch::Current` is backed by `ActiveSupport::IsolatedExecutionState`,
+which a new thread does not inherit, so the `tool_call.ruby_llm` event
+fires with no execution to attach to and the record is dropped rather
+than misattributed. This affects every Railwatch subscriber in an
+app-spawned thread, not just this one. `:fibers` depends on Rails'
+isolation level: under the default, `:thread`, fibers share their
+thread's state and the tool calls are recorded; with
+`config.active_support.isolation_level = :fiber` they are dropped the same
+way. Tool concurrency is off by default; with it off, tool calls are
 recorded normally. The model calls themselves are unaffected either way,
 so cost is always complete.
 

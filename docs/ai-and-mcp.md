@@ -9,6 +9,10 @@ crash-free rates per release. It can also write — resolve an issue, set a
 priority, leave a comment — and every write is signed with your user and the
 agent's name in the issue's activity feed.
 
+MCP is a Railwatch Cloud feature. The embedded dashboard at `/railwatch`
+does not serve it; an embedded install gets it by
+[exporting to the cloud](embedded.md#three-ways-to-run-it).
+
 The endpoint is `<your ingest host>/mcp`. For the hosted platform that's
 `https://railwatch.rebulk.com/mcp`; if you self-host, it is your own host (see
 [`self-hosting.md`](self-hosting.md)). The gem knows which one you're on:
@@ -145,9 +149,9 @@ durations are milliseconds.** Every `window` argument takes `1h`, `6h`,
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `list_applications` | — | applications, their account, and their environments. Start here — everything else takes the `application_slug` and `environment` this returns. |
+| `list_applications` | — | applications, their account, and their environments. Start here — everything else takes the `application_slug` and `environment` this returns (plus `account_slug`/`application_id` when two accounts share a slug). |
 | `list_issues` | `application_slug?`, `environment?`, `status?` (`open`/`resolved`/`ignored`, default `open`), `limit?` | issues with key, title, kind, status, priority, occurrence and affected-user counts, culprit, first/last seen. |
-| `get_issue` | `key` | one issue plus the sample occurrence: exception class, message, stack frames, and the execution it happened inside. |
+| `get_issue` | `key` or `issue_id` | one issue. For an exception, the sample and latest occurrences with stored stack frames, cause, locals, parsed context, browser breadcrumbs, and the execution it happened inside. For a performance or anomaly issue, the metric, limit or baseline, representative records, trend, and deploy comparison. |
 | `update_issue` | `key`, `status?`, `priority?`, `assignee_email?`, `agent?` | the updated issue. Writes an activity entry attributed to your user and `agent`. |
 | `add_comment` | `key`, `body`, `agent?` | the created comment, attributed the same way. |
 | `list_slow_routes` | `application_slug`, `environment`, `window?` | the 20 slowest routes by p95, each with `group_hash`, count, errors, `p95_ms`. |
@@ -157,6 +161,7 @@ durations are milliseconds.** Every `window` argument takes `1h`, `6h`,
 | `explain_query` | `application_slug`, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `RAILWATCH_CAPTURE_QUERY_EXPLAIN`. `sql` is the normalized shape unless the app also sets `RAILWATCH_CAPTURE_SQL_VALUES`. |
 | `get_profile` | `application_slug`, `environment`, `profile_id?`, `execution_id?`, `limit?` | the hottest frames of a stack profile — self and total samples, each with a percentage. |
 | `search_logs` | `application_slug`, `environment`, `q`, `level?`, `limit?` | matching log lines, each with the `execution_id` to expand with `get_execution`. |
+| `search_telemetry` | `application_slug`, `environment`, `resource` (`jobs`/`exceptions`/`logs`/`queries`), `q?`, `window?`, `cursor?`, `limit?` | raw rows of that resource with cursor pagination (`meta.next_cursor`, `meta.has_more`). `q` takes `after:`, `before:`, `user:`, `tenant:`, `deploy:`, plus per-resource keys such as `class:`, `queue:`, `level:`. |
 | `list_tenants` | `application_slug`, `environment`, `window?`, `q?` | your app's own tenants (whatever it passes to `Railwatch.context(tenant:)`) with request, error, job, exception, and user counts. |
 | `recent_deploys` | `application_slug`, `environment` | the 20 most recent deploys with ref, name, time, and link. |
 | `release_health` | `application_slug`, `environment`, `window?` | crash-free session rate, crash-free user rate, and adoption per release. |
@@ -220,7 +225,8 @@ Copy either into your own app's repo to give its agent the same context.
 
 ## See also
 
-- [`getting-started.md`](getting-started.md) — install, token, first request.
+- [`getting-started.md`](getting-started.md) — install, the cloud token,
+  first request.
 - [`self-hosting.md`](self-hosting.md) — pointing the gem, and this endpoint,
   at your own platform.
 - [`troubleshooting.md`](troubleshooting.md) — when something isn't

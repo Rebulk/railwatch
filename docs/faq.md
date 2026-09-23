@@ -51,20 +51,26 @@ A second gate, `bench/no_db_writes.rb`, drives 200 requests and a job with
 a `sql.active_record` subscriber watching for any `INSERT`/`UPDATE`/
 `DELETE` issued from a frame inside `lib/railwatch`, and fails if it finds
 one. **Railwatch never writes to your application's database.** Records
-live in memory and are shipped by a background thread. That is not a
-nicety: instrumentation that takes a write lock is what turns a
+live in memory and are delivered by a background thread, to the cloud or
+to the embedded writer process, which owns its own two SQLite files. That
+is not a nicety: instrumentation that takes a write lock is what turns a
 single-writer SQLite app into a "database is locked" incident.
 
 ## Where does the data go, and how long is it kept?
 
-To the platform, over one gzip-NDJSON POST to `{ingest_url}/ingest` per
+Embedded (the default): into the app's own `railwatch_telemetry` SQLite
+database under `storage/`, written by one writer process Puma forks.
+Raw rows are pruned nightly to `retention_days` (7 by default), and
+hourly rollups back the charts. Nothing leaves the machine unless you
+turn on export. See [Embedded mode](embedded.md).
+
+Railwatch Cloud: one gzip-NDJSON POST to `{ingest_url}/ingest` per
 batch. The platform stores each monitored environment's telemetry in its
 own database, prunes raw rows on a retention window, and keeps hourly
-rollups for the charts.
-
-Retention is set by the account's plan tier, not by the gem — 7, 30, or
-90 days depending on the plan. For a self-hosted install, retention,
-backups, and pruning are the platform operator's responsibility.
+rollups for the charts. Retention there is set by the account's plan
+tier, not by the gem — 7, 30, or 90 days depending on the plan. For a
+self-hosted platform, retention, backups, and pruning are the operator's
+responsibility.
 
 ## What about PII?
 
@@ -119,8 +125,9 @@ Yes, on both sides, and it's the first-class target.
 
 **In your app:** the gem does no I/O on the request path and never writes
 to the app database, so there is no contention with SQLite's single
-writer. SQL normalization is per adapter, so SQLite, Postgres, MySQL, and
-Trilogy all group correctly.
+writer. Embedded mode's own two databases are separate SQLite files,
+whatever the app runs on. SQL normalization is per adapter, so SQLite,
+Postgres, MySQL, and Trilogy all group correctly.
 
 **On the platform:** telemetry is stored one SQLite database per
 monitored environment. That is what makes retention pruning, backup, and
@@ -162,6 +169,11 @@ with `task_key`, `schedule`, and `drift`) and the queue depth and
 oldest-job age on `health` records.
 
 ## What happens when the platform is unreachable?
+
+This section is about the cloud transport. In embedded mode the
+equivalent is the writer process being down, covered in
+[Embedded mode](embedded.md#the-writer-process), and export keeps its
+own durable queue.
 
 Nothing, from your app's point of view. This is the property everything
 else is built around: **delivery never raises into application code.**

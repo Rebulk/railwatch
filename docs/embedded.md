@@ -1,18 +1,17 @@
 # Embedded mode: the dashboard inside your app
 
-This is the default. Railwatch keeps every record in your own application
-and serves the full dashboard at `/railwatch`, with no token and no cloud. The gem's
-reporter, buffer and sampling are the same; the only difference is
-where a batch ends up. In embedded mode it is written straight into a
-SQLite database your app owns, and the dashboard reads it back from
-there.
+This is what the installer sets up by default. Railwatch keeps every
+record in your own application and serves the full dashboard at
+`/railwatch`, with no token and no cloud. The gem's reporter, buffer and
+sampling are the same as with the cloud; the only difference is where a
+batch ends up. In embedded mode it is written into a SQLite database
+your app owns, and the dashboard reads it back from there.
 
 Use it when one server runs the app. Telemetry lands in a file next to
 your other SQLite databases, so several servers would each see only
-their own slice. For more than one server, or for a team that wants one
-place for many apps, point the gem at Railwatch Cloud instead
-([Getting started](getting-started.md)); the two are switchable with
-one setting.
+their own slice. For more than one server, or one place for many apps,
+add Railwatch Cloud: export alongside embedded, or the cloud on its own
+([Getting started](getting-started.md#railwatch-cloud-instead)).
 
 ## Three ways to run it
 
@@ -27,23 +26,38 @@ up:
 
 Embedded is `c.transport = :local`, which is what the installer writes
 unless you ask it for the cloud (`--cloud`, or any token or URL option).
-Cloud is the gem's default when no initializer says otherwise. "Both" is embedded plus one more line:
+With no initializer setting it, the runtime default is `:http`, the
+cloud. "Both" is embedded plus export, which needs a Railwatch Cloud
+environment token. The default embedded install has none, so set one
+first (`bin/rails railwatch:token` prints where to create it), plus the
+ingest URL if you self-host:
+
+```sh
+RAILWATCH_TOKEN=rw_...
+RAILWATCH_INGEST_URL=https://telemetry.example.com   # only when self-hosting
+```
+
+With a token in place, export is one more line:
 
 ```ruby
 c.export_enabled = true   # or RAILWATCH_EXPORT_ENABLED=true
 ```
 
-It reuses the token and ingest URL you already have, so an install that
-was pointed at the cloud and moved to embedded needs nothing else to send
-to both. Everything captured locally is mirrored — the same records the
-same install would have sent had you chosen the cloud — so the hosted
-dashboard is as complete as it would be either way.
+It reuses `RAILWATCH_TOKEN` and `RAILWATCH_INGEST_URL`
+(`RAILWATCH_EXPORT_TOKEN` and `RAILWATCH_EXPORT_URL` override them), so
+an install that was pointed at the cloud and moved to embedded needs
+nothing else. Every record captured locally is mirrored, so the hosted
+dashboard is as complete as a cloud-only install's, and `/railwatch`
+keeps working.
 
 It is off unless you set that flag. A token being present is not consent:
 an embedded install that has one configured still sends nothing.
 `railwatch:doctor` says nothing about export until you ask for it, and
-fails loudly if you ask for it and it cannot work. `railwatch:export:status`
-shows what is queued.
+fails if you ask for it and it cannot work. `railwatch:export:status`
+shows what is queued. The queue is durable, in the telemetry database,
+and bounded: 256 MiB (`RAILWATCH_EXPORT_MAX_BYTES`), 100,000 deliveries
+(`RAILWATCH_EXPORT_MAX_DELIVERIES`), and a day's age
+(`RAILWATCH_EXPORT_MAX_AGE_SECONDS`, at most seven days).
 
 ## Railwatch Cloud runs the same models
 
@@ -64,10 +78,12 @@ bin/rails generate railwatch:install
 ```
 
 Restart the app and open `/railwatch`; in development it is open with no
-password (see [Authentication](#authentication) for production). Then `bin/rails railwatch:doctor`
-checks the wiring. The generator creates and migrates both databases
-itself; `bin/rails db:prepare`, which a deploy already runs, migrates
-them after every gem update.
+password (see [Authentication](#authentication) for production).
+`bin/rails railwatch:doctor` checks the wiring. When the `sqlite3` gem
+is already in the bundle, the generator creates and migrates both
+databases itself; when it is not, see the next section. After that,
+`bin/rails db:prepare`, which a deploy already runs, migrates them after
+every gem update.
 
 The engine needs Active Job (its grouping and scan jobs are Active Job
 classes even though embedded mode calls them directly) and loads it
@@ -81,20 +97,21 @@ databases it adds are SQLite files either way, so the generated entries
 name `adapter: sqlite3` themselves rather than inheriting your default
 block, and they need no `&default` anchor to exist.
 
-On a PostgreSQL or MySQL app that means the install is two commands
-rather than one, because SQLite's adapter gem will not be in your bundle:
+On a PostgreSQL or MySQL app without the `sqlite3` gem, the install
+takes two more commands:
 
 ```sh
 bin/rails generate railwatch:install   # adds gem "sqlite3", writes the config
 bundle install
-bin/rails db:prepare                           # creates the two SQLite files
+bin/rails db:prepare                   # creates the two SQLite files
 ```
 
 Verified end to end on both. On a PostgreSQL app and on a MySQL app, the
 application's own four databases stay where they were, Railwatch's two are
 files under `storage/`, and neither server gains a single Railwatch table.
 
-What the embedded install writes, on top of what every install writes:
+What the embedded install writes, on top of what every install writes
+(listed in [Getting started](getting-started.md#what-the-generator-writes)):
 
 - `config/initializers/railwatch.rb` with `c.transport = :local` and the
   dashboard's own paths excluded from request capture.
@@ -106,6 +123,8 @@ What the embedded install writes, on top of what every install writes:
   databases need that form. Each entry's `migrations_paths` points into
   the gem, so `db:prepare` builds the tables from the gem's own
   migrations and nothing is copied into `db/`.
+- `plugin :railwatch` at the end of `config/puma.rb`, which forks the
+  [writer process](#the-writer-process).
 - `mount Railwatch::Engine, at: "/railwatch"`, as always.
 
 Nothing touches your primary database.
@@ -134,16 +153,19 @@ inside the gem, so the app needs no Node, no Vite and no asset pipeline
 integration.
 
 Not in embedded mode: accounts and members (the operator is whoever your
-app lets through), integrations (alerts are recorded, not delivered),
-and the MCP server.
+app lets through), integrations (alerts are recorded, not delivered to
+Slack, email, webhooks or Linear), and the
+[MCP server](ai-and-mcp.md). Those are Railwatch Cloud's, and
+[export](#three-ways-to-run-it) gets them without giving up the local
+dashboard.
 
 ## Authentication
 
 The dashboard shows every query, log line and exception your app
 produced, so it works the way Mission Control Jobs does: **HTTP Basic
-authentication is on and closed by default**. With no credentials
-configured every dashboard request is 401, the app logs a warning at
-boot, and `railwatch:doctor` says so. Set them with
+authentication is on by default, and closed until credentials exist**.
+With none configured every dashboard request is 401, the app logs a
+warning at boot, and `railwatch:doctor` says so. Set them with
 
 ```sh
 bin/rails railwatch:authentication:configure
@@ -151,11 +173,10 @@ RAILS_ENV=production bin/rails railwatch:authentication:configure
 ```
 
 The one exception is development. There, with Basic on and no
-credentials set, the dashboard is open, so a first run is the install and
-a page rather than a password step first; Rails already shows full error
-pages in development for the same reason. Set credentials there too and
-development asks for them like everywhere else. Test, staging and
-production are closed until you do.
+credentials set, the dashboard is open, so a first run needs no password
+step; Rails shows full error pages in development for the same reason.
+Set credentials there too and development asks for them like everywhere
+else. Test, staging and production are closed until you do.
 
 `railwatch:authentication:configure` writes them to that environment's Rails credentials:
 
@@ -265,8 +286,10 @@ no user table to check it against. Comments, saved views, issue activity
 and assignment all key off whatever you return, so a person keeps their
 own views and their name on their own comments however you identify them.
 
-Returning `nil` refuses the request, which is what makes this an
-authorisation rule as well as a label.
+On a page, returning `nil` does not refuse the request: the page renders
+with the default "Operator". With HTTP Basic off, `nil` refuses the
+live-update subscription. Pages are gated by HTTP Basic, your
+`base_controller_class`, or a mount constraint, never by this resolver.
 
 ## The writer process
 
@@ -274,8 +297,13 @@ Puma forks one Railwatch writer from its master when `config/puma.rb`
 carries the plugin (the embedded install adds it):
 
 ```ruby
-plugin :railwatch if defined?(Railwatch)
+plugin :railwatch
 ```
+
+Leave it unconditional: `bundle exec puma` reads this file before it
+loads the app, so `if defined?(Railwatch)` would be false there and no
+writer would start. The plugin does nothing when Railwatch is off or not
+in embedded mode.
 
 Every web worker keeps its reporter thread, but instead of writing
 SQLite it hands each batch to the writer over a Unix socket
@@ -391,7 +419,7 @@ Railwatch.configure do |c|
   c.retention_days = 7            # RAILWATCH_RETENTION_DAYS
   c.http_basic_auth_enabled = true    # RAILWATCH_HTTP_BASIC_AUTH_ENABLED; credentials from Rails credentials or env
   c.base_controller_class = "ActionController::Base"  # RAILWATCH_BASE_CONTROLLER_CLASS
-  c.dashboard_open = false            # RAILWATCH_DASHBOARD_OPEN; "yes, public, on purpose"
+  c.dashboard_open = false            # RAILWATCH_DASHBOARD_OPEN; true makes it public on purpose
   c.dashboard_user = ->(request) { ... }
 end
 ```
@@ -403,8 +431,11 @@ a busy app.
 ## Deploys
 
 `bin/rails railwatch:deploy` records the marker in the app's own
-database instead of posting it, and the Kamal post-deploy hook does the
-same when `RAILWATCH_TRANSPORT=local` is set on the deployer.
+database instead of posting it. The Kamal post-deploy hook runs on the
+deployer, which does not read your initializer, so it only knows the
+install is embedded when `RAILWATCH_TRANSPORT=local` is set in the
+deployer's environment. Then it runs `railwatch:deploy` inside the
+primary container.
 
 ## Storage and overhead
 
@@ -465,6 +496,8 @@ never need to run it again.
 
 ## Switching to the cloud later
 
-Set a token and drop `c.transport = :local` (or set
+To keep the local dashboard and add the cloud, turn on
+[export](#three-ways-to-run-it). To move to the cloud entirely, set a
+token and drop `c.transport = :local` (or set
 `RAILWATCH_TRANSPORT=http`). The local databases can stay; the dashboard
 at `/railwatch` keeps reading what is there until it is pruned.

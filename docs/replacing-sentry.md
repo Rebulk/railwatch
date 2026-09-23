@@ -8,7 +8,10 @@ depends on a conditional row.
 
 Install Railwatch first ([`getting-started.md`](getting-started.md)); you
 can run both for a day if you want to compare, since neither knows about
-the other.
+the other. The default install is embedded, with the dashboard at
+`/railwatch` and no token. The token and alert steps below apply when
+you send to Railwatch Cloud, either as a cloud install or by exporting
+from embedded.
 
 ## Decide whether Railwatch covers your workload
 
@@ -30,7 +33,7 @@ Railwatch does not claim those broader capabilities.
 | Ruby profiling | Conditional | Requires `vernier` or `stackprof`; there is no profiler bundled into the SDK. |
 | Browser monitoring | Partial | The optional Inertia client reports visits, Web Vitals, browser errors, and breadcrumbs. Session Replay, native/mobile SDKs, and Sentry's full browser/source-map workflow are outside the currently released Rails-server replacement. |
 | Runtime compatibility | Narrow today | The currently proved pair is Ruby 3.4 + Rails 8.1. A maintained compatibility matrix and any safe lowering of requirements are tracked by [#26](https://github.com/Rebulk/railwatch/issues/26). |
-| Managed integrations and operations | Partial | Railwatch Cloud supports its documented email, Slack, and webhook paths plus self-hosting. It does not promise Sentry's broader integration catalog. |
+| Managed integrations and operations | Partial | Railwatch Cloud delivers alerts to email, Slack, webhooks and Linear, plus self-hosting; embedded mode records alerts without delivering them. It does not promise Sentry's broader integration catalog. |
 | SQL value privacy | Supported by default | Query records carry normalized SQL shapes without literal values, and Active Record binds are never sent. Raw SQL and query plans are separate opt-ins; either can contain values. |
 
 For a Rails 8.1 application whose work enters through Rack and Active Job,
@@ -70,9 +73,11 @@ deploy config once the app boots without it.
 `config/initializers/railwatch.rb` (written by the install generator) is
 where every option from `Sentry.init` lands. The mapping:
 
-- **`dsn:`** becomes `RAILWATCH_TOKEN`, one token per environment, created
-  in Railwatch Cloud. Self-hosting adds `RAILWATCH_INGEST_URL`. The token is
-  also the on/off switch: with it blank, Railwatch installs nothing.
+- **`dsn:`** has no equivalent in embedded mode, which stores telemetry in
+  the app. For Railwatch Cloud it becomes `RAILWATCH_TOKEN`, one token per
+  environment, created in Railwatch Cloud. Self-hosting adds
+  `RAILWATCH_INGEST_URL`. On a cloud install the token is also the on/off
+  switch: with it blank, Railwatch installs nothing.
 - **`environment:`** becomes `c.environment`, which defaults to
   `Rails.env` — set it only to report under a different name.
 - **`release:`** becomes `c.deploy`, which auto-detects the release from
@@ -111,7 +116,9 @@ where every option from `Sentry.init` lands. The mapping:
 - **Rack `X-Request-Start` queue time** needs no setting: it is parsed
   into `queue_time` on every `request` record.
 
-A worked initializer, roughly what a `Sentry.init` block turns into:
+A worked initializer for a cloud install, roughly what a `Sentry.init`
+block turns into (an embedded install has `c.transport = :local` instead
+of the token):
 
 ```ruby
 # config/initializers/railwatch.rb
@@ -415,9 +422,9 @@ startRailwatch({
 
 | Sentry | Railwatch |
 |---|---|
-| `Sentry.init({ dsn })` | `startRailwatch()`. There is no DSN: the beacon posts to the app's own origin and the *server* decides whether to record it (`c.beacon_enabled`, `RAILWATCH_TOKEN`). The gate you already have on whether `startRailwatch()` runs at all is the only gate. |
+| `Sentry.init({ dsn })` | `startRailwatch()`. There is no DSN: the beacon posts to the app's own origin and the *server* decides whether to record it (`c.beacon_enabled`, and whether Railwatch is enabled). The gate you already have on whether `startRailwatch()` runs at all is the only gate. |
 | `release` | Automatic. The record is stamped with `c.deploy`, the same release the server records carry, so a browser issue and a server issue from one deploy line up without a matching pair of settings to get wrong. |
-| `environment` | Automatic — the ingest token identifies the environment. |
+| `environment` | Automatic — the embedded databases belong to one environment, and on Railwatch Cloud the ingest token identifies it. |
 | `ignoreErrors` | `startRailwatch({ ignoreErrors })`. Strings match anywhere in the message; regexes are tested against it. Both `ResizeObserver` messages are ignored by default. |
 | `denyUrls` | `startRailwatch({ denyUrls })`, matched against the top stack frame's URL. `/extensions\//i`, `/^chrome:\/\//i`, and `/^moz-extension:\/\//i` are denied by default, **and** any frame from an origin that isn't the app's own is dropped — extensions, injected widgets, tag managers. |
 | `Sentry.setUser` | Server-side. The beacon is a same-origin POST carrying the session cookie, so the server resolves the user the same way it does for a request (`Railwatch.user`) when `Current.user` or Warden is set by middleware; an app that authenticates in a `before_action` gives Railwatch the same lookup with `c.beacon_user { \|request\| ... }`. Nothing the browser sends names the user, so it cannot be forged. |
@@ -561,8 +568,10 @@ hook matching `rails runner …` previews, or `sentry_runner_noise.rb` under
 | Inertia visit timing | Real browser page-visit duration, prop byte size, partial reloads, SSR time, and Core Web Vitals, from a client the generator installs. |
 | Spec matchers as a CI gate | `have_railwatch_queries`, `have_railwatch_n_plus_one`, `have_railwatch_outgoing_requests` fail the pull request that regresses a hot path. |
 | Zero app-DB writes | The gem holds records in memory and ships them from a background thread; a bench gate asserts no `INSERT`/`UPDATE`/`DELETE` ever originates in `lib/railwatch`. This is why it is safe on single-writer SQLite. |
-| One SQLite database per environment | The platform stores each monitored environment's telemetry in its own database file, which makes retention pruning, backup, and restore per-environment operations. |
-| An MCP server | AI assistants can ask what broke after the last deploy, list slow routes, read an execution's timeline, and search logs ([`ai-and-mcp.md`](ai-and-mcp.md)). |
+| A dashboard inside the app | The default install serves the whole dashboard at `/railwatch` from two SQLite files the app owns, with no hosted service at all ([`embedded.md`](embedded.md)). |
+| One SQLite database per environment | Railwatch Cloud stores each monitored environment's telemetry in its own database file, which makes retention pruning, backup, and restore per-environment operations. |
+| LLM calls | RubyLLM calls are recorded with tokens, cost, finish reason, tool calls and workflows, in the request or job that made them ([`records.md`](records.md#llm_call)). |
+| An MCP server | With Railwatch Cloud, AI assistants can ask what broke after the last deploy, list slow routes, read an execution's timeline, and search logs ([`ai-and-mcp.md`](ai-and-mcp.md)). |
 
 ## See also
 

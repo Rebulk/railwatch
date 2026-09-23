@@ -18,11 +18,15 @@ Include affected versions, reproduction steps, and impact when possible.
 
 ## Data boundary
 
-The gem runs inside the customer Rails process and sends telemetry outward to
-the configured Railwatch Cloud ingest URL. It does not accept commands from
-Railwatch Cloud and never writes to the application's database. Its one inbound
-route is the unauthenticated browser beacon mounted under `/railwatch/beacon`;
-that route is rate- and size-limited.
+The gem runs inside the customer Rails process. By default (embedded mode) it
+stores telemetry in two SQLite databases of the app's own and serves a
+dashboard at `/railwatch`, behind HTTP Basic authentication that is closed
+outside development until credentials are set. A cloud install, or an embedded
+install with export enabled, sends telemetry outward to the configured
+Railwatch Cloud ingest URL. It does not accept commands from Railwatch Cloud
+and never writes to the application's own database. Its one unauthenticated
+inbound route is the browser beacon mounted under `/railwatch/beacon`; that
+route is rate- and size-limited.
 
 Telemetry may include request metadata, filtered headers, normalized SQL,
 logs, exception messages and backtraces, and source lines surrounding an
