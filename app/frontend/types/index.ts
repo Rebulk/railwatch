@@ -62,6 +62,9 @@ export interface EnvironmentContext {
 
 export type Window = "1h" | "6h" | "24h" | "7d" | "30d" | "custom"
 
+// Chart bucket width; the server offers the subset that fits the window.
+export type Step = "1m" | "5m" | "15m" | "1h" | "6h" | "1d"
+
 export interface WindowRange {
   from: string
   to: string
@@ -76,9 +79,6 @@ export interface CursorMeta {
   next_cursor: string | null
   has_more: boolean
 }
-
-// Chart bucket width; the server offers the subset that fits the window.
-export type Step = "1m" | "5m" | "15m" | "1h" | "6h" | "1d"
 
 export interface SharedProps {
   auth: Auth
@@ -128,6 +128,8 @@ export interface Session {
 
 export type Percentile = "p50" | "p95" | "p99"
 
+// One chart bucket. Durations are null where nothing ran, so a latency
+// line breaks over a quiet bucket instead of dropping to zero.
 export interface SeriesPoint {
   t: string
   count: number

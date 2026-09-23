@@ -6,6 +6,17 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The gem ships the dashboard's frontend source (`app/frontend`, without
+  tests) alongside its build, and `Railwatch.frontend_path` points at it.
+  Railwatch Cloud now builds its bundle from this source instead of
+  keeping its own copy, so the dashboard has one author. A host
+  application is unaffected: it still uses the prebuilt bundle and needs
+  no Node. The package grows by about 300 KB.
+- The gem no longer carries the cloud's hosting pages and components
+  (marketing, sign-in, accounts, settings, usage, docs), which it never
+  rendered, or eleven components no page used. Three unused Radix
+  packages are removed from the dashboard build.
+
 ## 0.6.1 (2026-09-23)
 
 - The docs describe embedded as the default install throughout: two
