@@ -118,7 +118,9 @@ module Railwatch
          cache_read_tokens: group.sum { |r| r.cache_read_tokens.to_i }, cache_write_tokens: group.sum { |r| r.cache_write_tokens.to_i },
          cost_nanos: group.sum { |r| r.cost_nanos.to_i },
          priced: group.count { |r| r.cost_nanos },
-         unpriced: group.count { |r| r.cost_nanos.nil? },
+         # A call that failed before the provider answered used no tokens,
+         # so there is nothing to price; only an answered call can be unpriced.
+         unpriced: group.count { |r| r.cost_nanos.nil? && r.status != "failed" },
          # A cut-off answer is not an error and will never show in the error
          # rate, so it needs counting on its own or it stays invisible.
          truncated: group.count { |r| r.finish_reason == "max_tokens" },

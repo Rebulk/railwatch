@@ -306,7 +306,7 @@ export default function LlmCalls(p: Props) {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <VolumePanel
-          legend="request"
+          legend="outcome"
           label="Model calls"
           seriesLabel="Calls"
           data={p.series}
@@ -316,7 +316,7 @@ export default function LlmCalls(p: Props) {
       {p.totals.tool_count > 0 && (
         <div className="grid gap-4 lg:grid-cols-2">
           <VolumePanel
-            legend="request"
+            legend="outcome"
             label="Tool calls"
             seriesLabel="Calls"
             data={p.tool_series}
@@ -564,6 +564,7 @@ export default function LlmCalls(p: Props) {
           {
             key: "what",
             header: "Call",
+            grow: true,
             cell: (r) => (
               <span className="font-mono text-xs">
                 {r.operation === "tool" ? (
@@ -624,7 +625,9 @@ export default function LlmCalls(p: Props) {
             header: "Cost",
             align: "right",
             cell: (r) =>
-              r.cost === null && r.operation !== "tool" ? (
+              r.cost === null &&
+              r.operation !== "tool" &&
+              r.status !== "failed" ? (
                 <span
                   className="text-muted-foreground"
                   title="No registry pricing"

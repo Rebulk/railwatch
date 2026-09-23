@@ -6,6 +6,22 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Draw the Trend sparklines. Recharts pads every side of a chart by 5px,
+  which left the 32x10 table-cell sparkline a plot area 0px tall, so every
+  Trend column on every page was blank.
+- LLM calls: a failed call no longer counts as "unpriced". It used no
+  tokens and has nothing to price, yet any failure made its model read
+  "+N unpriced" beside a complete spend total; the Recent table shows "–"
+  for it instead. The model and tool call charts label their bars ok /
+  failed instead of HTTP status classes, and the Recent table's Call
+  column truncates instead of pushing Detail off the right edge.
+- Issues: the daily chart marks each deploy day with a line and names the
+  deploys in the tooltip, instead of printing refs that overprint when
+  several ship in a week.
+- Jobs: the recent runs card keeps the job name readable. The exception
+  truncates, and the origin user and tenant columns appear from 2xl up
+  (the job class page shows them at every width).
+
 ## 0.6.0 (2026-09-22)
 
 - Embedded is now the installer's default. `bin/rails generate
