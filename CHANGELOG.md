@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.7.0 (2026-09-23)
+
 - The gem ships the dashboard's frontend source (`app/frontend`, without
   tests) alongside its build, and `Railwatch.frontend_path` points at it.
   Railwatch Cloud now builds its bundle from this source instead of
