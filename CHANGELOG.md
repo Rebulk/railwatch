@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.2 (2026-09-23)
+
 - The Profiles page's profiled share counts only the executions inside
   its window. A window starting or ending mid-hour counted the whole of
   its first and last hours, because a rollup holds its whole hour; the
