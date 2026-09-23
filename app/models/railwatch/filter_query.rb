@@ -127,8 +127,16 @@ module Railwatch
       scope = scope.where(outcome: outcome) if outcome
       # A job's group is the digest of its class name, and group_hash is
       # indexed with occurred_at; name is not, so class: alone walked every
-      # job in the window (49 s for a week through MCP).
-      scope = scope.where(group_hash: Record.group_hash(fields["class"]), name: fields["class"]) if fields["class"].present?
+      # job in the window (49 s for a week through MCP). Not every group
+      # follows that rule -- Solid Queue's pruned attempts are named
+      # "(pruned)" under the SolidQueue::Pruned group -- so the window's
+      # rollups supply any other group recorded under the name.
+      if fields["class"].present?
+        name = fields["class"]
+        groups = [ Record.group_hash(name) ] |
+                 Telemetry::Rollup.for_type("job_attempt").between(range.begin, range.end).where(name: name).distinct.pluck(:group_hash)
+        scope = scope.where(group_hash: groups, name: name)
+      end
       scope = scope.where(job_id: fields["job_id"]) if fields["job_id"].present?
       return scope unless text.present?
       scope.merge(Telemetry::Execution.named_like("job_attempt", text, range, previews: true))
