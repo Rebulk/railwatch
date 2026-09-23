@@ -52,6 +52,16 @@ RSpec.describe "Lookups that seek an execution's group" do
     expect(found).to contain_exactly(pruned)
   end
 
+  it "walks the window for a class the rollups say is common, where the newest page comes first" do
+    busy = run("job_attempt", "BusyJob", at: 1.hour.ago)
+    Railwatch::Telemetry::Rollup.create!(record_type: "job_attempt", group_hash: busy.group_hash, name: "BusyJob",
+      bucket: Railwatch::Telemetry::Rollup.bucket_for(1.hour.ago), count: Railwatch::Telemetry::Execution::DENSE_MATCHES)
+
+    found = Railwatch::FilterQuery.apply(execution.jobs, resource: :jobs, query: "class:BusyJob", from: 1.day.ago, to: Time.current)
+    expect(found).to contain_exactly(busy)
+    expect(found.to_sql).not_to include("INDEXED BY")
+  end
+
   it "reads each task's newest schedule, and skips keys that never ran" do
     run("scheduled_task", "cleanup", task_key: "cleanup", at: 2.hours.ago, schedule: "every hour")
     run("scheduled_task", "cleanup", task_key: "cleanup", at: 1.hour.ago, schedule: "every 5 minutes")
