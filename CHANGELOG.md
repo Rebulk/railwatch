@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.3 (2026-09-23)
+
 - Filtering jobs by `class:` seeks the class's group (a job's group is
   the digest of its class name) instead of walking every job in the
   window: 715 ms over a week on the platform's own tenant, now 9 ms, and
