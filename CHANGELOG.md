@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.1 (2026-09-23)
+
 - The Tenants page reads only through the tenant-led indexes. Sparklines
   are drawn for the tenants already found, by name. The untagged share is
   the window's requests less the tagged ones, and the tagged ones are
