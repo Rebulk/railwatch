@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.4 (2026-09-23)
+
 - A `class:` filter for a job class with many attempts in the window
   walks the window again, where the newest page comes first. 0.8.3
   gathered and sorted every attempt of the class through its group:
