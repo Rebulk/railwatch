@@ -6,6 +6,11 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The Profiles page's profiled share counts only the executions inside
+  its window. A window starting or ending mid-hour counted the whole of
+  its first and last hours, because a rollup holds its whole hour; the
+  partial hours are now counted from the rows.
+
 ## 0.8.1 (2026-09-23)
 
 - The Tenants page reads only through the tenant-led indexes. Sparklines
