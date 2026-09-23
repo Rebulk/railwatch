@@ -6,6 +6,14 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Filtering jobs by `class:` seeks the class's group (a job's group is
+  the digest of its class name) instead of walking every job in the
+  window: 715 ms over a week on the platform's own tenant, now 9 ms, and
+  one MCP search took 49 s.
+- The Scheduled tasks page and the missed-task check read each task's
+  newest schedule with one index seek per key. The single grouped query
+  they used read every scheduled run kept (10 s once, 185 ms warm).
+
 ## 0.8.2 (2026-09-23)
 
 - The Profiles page's profiled share counts only the executions inside
