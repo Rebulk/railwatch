@@ -44,6 +44,14 @@ RSpec.describe "Lookups that seek an execution's group" do
     expect(found).to contain_exactly(pruned)
   end
 
+  it "finds a just-recorded attempt of such a class before its rollup exists" do
+    pruned = execution.create!(kind: "job_attempt", name: "(pruned)", group_hash: Railwatch::Record.group_hash("SolidQueue::Pruned"),
+      duration: 0, occurred_at: 1.minute.ago)
+
+    found = Railwatch::FilterQuery.apply(execution.jobs, resource: :jobs, query: "class:(pruned)", from: 1.day.ago, to: Time.current)
+    expect(found).to contain_exactly(pruned)
+  end
+
   it "reads each task's newest schedule, and skips keys that never ran" do
     run("scheduled_task", "cleanup", task_key: "cleanup", at: 2.hours.ago, schedule: "every hour")
     run("scheduled_task", "cleanup", task_key: "cleanup", at: 1.hour.ago, schedule: "every 5 minutes")

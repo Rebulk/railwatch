@@ -61,6 +61,19 @@ module Railwatch
           .where(ids.map { |branch| "#{quoted_table_name}.id IN (#{branch.select(:id).to_sql})" }.join(" OR "))
       end
 
+      # Executions of `kind` in `range` that are in one of `groups`, or recent
+      # enough (FRESH_NAMES) that their rollup may not exist yet. Each branch
+      # names its index and the outer lookup is by rowid, as in named_like:
+      # an OR over the two conditions made SQLite walk the whole window.
+      def self.in_groups_or_fresh(kind, groups, range)
+        by_group = indexed_by("index_executions_on_group_hash_and_occurred_at").where(group_hash: groups, occurred_at: range, kind: kind)
+        fresh = where(kind: kind, occurred_at: [ range.begin, range.end - FRESH_NAMES ].max..range.end)
+        return where(kind: kind, occurred_at: range).where(group_hash: groups).or(fresh) unless TelemetryRecord.sqlite?
+
+        from("#{quoted_table_name} NOT INDEXED").where(kind: kind, occurred_at: range)
+          .where([ by_group, fresh ].map { |branch| "#{quoted_table_name}.id IN (#{branch.select(:id).to_sql})" }.join(" OR "))
+      end
+
       def self.indexed_by(index) = unscoped.from("#{quoted_table_name} INDEXED BY #{index}")
       private_class_method :indexed_by
 
