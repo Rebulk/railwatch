@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.6.0 (2026-09-22)
+
 - Embedded is now the installer's default. `bin/rails generate
   railwatch:install` with no flags writes what `--local` used to: the
   `railwatch` and `railwatch_telemetry` SQLite databases, `plugin
