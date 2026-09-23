@@ -107,7 +107,8 @@ module Railwatch
           Rails.logger.warn(
             "[railwatch] the dashboard is closed: HTTP Basic is on and no credentials are configured for " \
             "#{Rails.env}, so every request to it is 401. Run `RAILS_ENV=#{Rails.env} bin/rails " \
-            "railwatch:authentication:configure`, or gate it with your own auth (docs/embedded.md)."
+            "railwatch:authentication:configure`, or gate it with your own auth and set " \
+            "`c.http_basic_auth_enabled = false` (docs/embedded.md)."
           )
         end
 
