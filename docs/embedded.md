@@ -1,7 +1,7 @@
 # Embedded mode: the dashboard inside your app
 
-Railwatch can keep every record in your own application and serve the
-full dashboard at `/railwatch`, with no token and no cloud. The gem's
+This is the default. Railwatch keeps every record in your own application
+and serves the full dashboard at `/railwatch`, with no token and no cloud. The gem's
 reporter, buffer and sampling are the same; the only difference is
 where a batch ends up. In embedded mode it is written straight into a
 SQLite database your app owns, and the dashboard reads it back from
@@ -25,8 +25,9 @@ up:
 | **Cloud** | Railwatch Cloud | the hosted one |
 | **Both** | your app's files, *and* Railwatch Cloud | either |
 
-Embedded is `c.transport = :local`, which is what `--local` writes.
-Cloud is the default. "Both" is embedded plus one more line:
+Embedded is `c.transport = :local`, which is what the installer writes
+unless you ask it for the cloud (`--cloud`, or any token or URL option).
+Cloud is the gem's default when no initializer says otherwise. "Both" is embedded plus one more line:
 
 ```ruby
 c.export_enabled = true   # or RAILWATCH_EXPORT_ENABLED=true
@@ -59,7 +60,7 @@ documents: `id`, `slug`, `name`, `with_telemetry`, and the display attributes.
 
 ```sh
 bundle add railwatch
-bin/rails generate railwatch:install --local
+bin/rails generate railwatch:install
 ```
 
 Restart the app and open `/railwatch`. Then `bin/rails railwatch:doctor`
@@ -83,7 +84,7 @@ On a PostgreSQL or MySQL app that means the install is two commands
 rather than one, because SQLite's adapter gem will not be in your bundle:
 
 ```sh
-bin/rails generate railwatch:install --local   # adds gem "sqlite3", writes the config
+bin/rails generate railwatch:install   # adds gem "sqlite3", writes the config
 bundle install
 bin/rails db:prepare                           # creates the two SQLite files
 ```
@@ -92,7 +93,7 @@ Verified end to end on both. On a PostgreSQL app and on a MySQL app, the
 application's own four databases stay where they were, Railwatch's two are
 files under `storage/`, and neither server gains a single Railwatch table.
 
-What `--local` writes, on top of the usual install:
+What the embedded install writes, on top of what every install writes:
 
 - `config/initializers/railwatch.rb` with `c.transport = :local` and the
   dashboard's own paths excluded from request capture.
@@ -262,7 +263,7 @@ authorisation rule as well as a label.
 ## The writer process
 
 Puma forks one Railwatch writer from its master when `config/puma.rb`
-carries the plugin (`--local` adds it):
+carries the plugin (the embedded install adds it):
 
 ```ruby
 plugin :railwatch if defined?(Railwatch)

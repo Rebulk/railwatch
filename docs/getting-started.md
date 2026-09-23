@@ -4,10 +4,10 @@ Five minutes from `bundle add` to a request on the dashboard, on a
 Rails 8 app. Everything below is the gem's own generator and rake tasks;
 nothing else has to be wired by hand.
 
-Running one server and want the dashboard inside the app itself, with
-no token and no cloud? That is `bin/rails generate railwatch:install
---local`; see [Embedded mode](embedded.md). The rest of this page is
-the cloud install.
+The installer's default is embedded: the dashboard inside the app at
+`/railwatch`, no token and no cloud; see [Embedded mode](embedded.md).
+This page is the cloud install, which is the same generator with
+`--cloud` or any of the token options below.
 
 ## 1. Add the gem
 
@@ -21,7 +21,7 @@ The gem, its Ruby namespace, and its require path share one name:
 ## 2. Run the installer
 
 ```sh
-bin/rails generate railwatch:install
+bin/rails generate railwatch:install --cloud
 ```
 
 With the token already in hand, let the generator read it without placing the
@@ -36,6 +36,10 @@ bin/rails generate railwatch:install \
 
 - `--prompt-token` reads without echo. `--token-stdin` is available for a
   secret-manager pipe; an already exported `RAILWATCH_TOKEN` is also detected.
+- Any of `--prompt-token`, `--token-stdin`, `--url=` and `--kamal-secrets`
+  means the cloud, so none of them needs `--cloud` as well. An exported
+  `RAILWATCH_TOKEN` on its own does not: without one of these flags the
+  install is embedded.
 - A token is written to `.env` only when Git confirms that `.env` is ignored.
   A tracked or non-ignored dotenv file is refused; use Rails credentials, a
   deployment secret manager, or add `.env` to `.gitignore` first. Token values

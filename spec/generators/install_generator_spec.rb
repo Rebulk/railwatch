@@ -281,7 +281,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       previous_token = ENV["RAILWATCH_TOKEN"]
       ENV["RAILWATCH_TOKEN"] = "rw_from_environment"
 
-      Dir.chdir(destination_root) { run_generator }
+      Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
 
       expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_from_environment\n")
     ensure
@@ -446,7 +446,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "finishes by running railwatch:doctor in process and printing its checklist" do
       stub_request(:get, "http://railwatch.test/ingest/ping").to_return(status: 200, body: "ok")
 
-      output = Dir.chdir(destination_root) { run_generator [] }
+      output = Dir.chdir(destination_root) { run_generator %w[--cloud] }
 
       expect(output).to include("bin/rails railwatch:doctor")
       expect(output).to include("✓ token: test-t... (10 chars)")
@@ -456,7 +456,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "reports the failing checks without raising when the doctor aborts" do
       stub_request(:get, "http://railwatch.test/ingest/ping").to_return(status: 500, body: "err")
 
-      output = Dir.chdir(destination_root) { run_generator [] }
+      output = Dir.chdir(destination_root) { run_generator %w[--cloud] }
 
       expect(output).to include("✗ ingest reachable:")
       expect(output).to include("only picked up after a restart")
@@ -465,7 +465,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
   describe "next steps" do
     it "tells you how to set the token with Kamal or credentials and how to verify the install" do
-      output = Dir.chdir(destination_root) { run_generator }
+      output = Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
 
       expect(output).to include("Set RAILWATCH_TOKEN")
       expect(output).to include(".kamal/secrets")
@@ -478,7 +478,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     end
   end
 
-  describe "--local" do
+  describe "embedded, the default" do
     def write_file(path, contents)
       full = File.join(destination_root, path)
       FileUtils.mkdir_p(File.dirname(full))
@@ -514,9 +514,36 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       YAML
     end
 
+    it "sends to the cloud only when asked: --cloud or an option that only means something there" do
+      # --prompt-token is in the same list (CLOUD_OPTIONS) but reads with noecho, which needs a TTY.
+      [ %w[--cloud], %w[--token-stdin], %w[--url=https://t.example.com], %w[--kamal-secrets] ].each do |flags|
+        prepare_destination
+        FileUtils.mkdir_p(File.join(destination_root, "config"))
+        File.write(File.join(destination_root, "config/routes.rb"), "Rails.application.routes.draw do\nend\n")
+        previous_stdin = $stdin
+        $stdin = StringIO.new("\n")
+        Dir.chdir(destination_root) { run_generator flags + %w[--no-doctor] }
+        $stdin = previous_stdin
+
+        expect(read("config/initializers/railwatch.rb")).not_to include("c.transport = :local"), "#{flags.join} stayed embedded"
+      end
+    end
+
+    it "stays embedded when RAILWATCH_TOKEN is exported but no cloud option is given" do
+      previous_token = ENV["RAILWATCH_TOKEN"]
+      ENV["RAILWATCH_TOKEN"] = "rw_from_environment"
+
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
+
+      expect(read("config/initializers/railwatch.rb")).to include("c.transport = :local")
+      expect(File).not_to exist(File.join(destination_root, ".env"))
+    ensure
+      previous_token.nil? ? ENV.delete("RAILWATCH_TOKEN") : ENV["RAILWATCH_TOKEN"] = previous_token
+    end
+
     it "writes an initializer that keeps telemetry in the app instead of asking for a token" do
       write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       initializer = read("config/initializers/railwatch.rb")
       expect(initializer).to include("c.transport = :local")
@@ -527,7 +554,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
     it "adds railwatch and railwatch_telemetry databases to every environment, nesting a flat one under primary" do
       write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
       expect(yml["development"].keys).to eq(%w[primary railwatch railwatch_telemetry])
@@ -549,7 +576,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     # PendingMigrationError and "disk I/O error" out of configure_connection.
     it "gives each parallel test worker its own databases" do
       write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       raw = read("config/database.yml")
       expect(raw).to include(%(database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>_railwatch.sqlite3))
@@ -592,7 +619,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
             <<: *default
             database: shop_production
       YAML
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
       %w[development test production].each do |env|
@@ -616,7 +643,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
           <<: *default
           database: storage/staging.sqlite3
       YAML
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
       expect(yml["staging"]["railwatch_telemetry"]["database"]).to eq("storage/staging_railwatch_telemetry.sqlite3")
@@ -631,7 +658,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
           adapter: sqlite3
           database: storage/development.sqlite3
       YAML
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
       expect(yml["development"]["railwatch"]["adapter"]).to eq("sqlite3")
@@ -643,7 +670,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       write_file("config/database.yml", flat_database_yml)
       write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
 
-      output = Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(read("Gemfile")).to include(%(gem "json", "< 3"), "rails/rails#58784")
       expect(output).to include("bundle install")
@@ -656,25 +683,25 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       write_file("config/database.yml", flat_database_yml)
       write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
 
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(read("Gemfile")).to include(%(gem "sqlite3"))
     end
 
     it "copies no schema or migration files: the engine migrates both databases from the gem" do
       write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
-    it "adds the writer plugin to config/puma.rb once, at the end, and only with --local" do
+    it "adds the writer plugin to config/puma.rb once, at the end, and only in embedded mode" do
       write_file("config/database.yml", flat_database_yml)
       puma = "threads 3, 3\nport ENV.fetch(\"PORT\", 3000)\nplugin :tmp_restart\n"
       write_file("config/puma.rb", puma)
 
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       updated = read("config/puma.rb")
       expect(updated).to start_with(puma)
@@ -685,10 +712,10 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(updated).to end_with("plugin :railwatch\n")
     end
 
-    it "leaves config/puma.rb alone without --local" do
+    it "leaves config/puma.rb alone with --cloud" do
       write_file("config/puma.rb", "plugin :tmp_restart\n")
 
-      Dir.chdir(destination_root) { run_generator }
+      Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
 
       expect(read("config/puma.rb")).to eq("plugin :tmp_restart\n")
     end
@@ -702,7 +729,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
             schedule: every hour at minute 12
       YAML
       write_file("config/recurring.yml", recurring)
-      output = Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(read("config/recurring.yml")).to eq(recurring)
       expect(output).to include("No job worker")
@@ -711,10 +738,10 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "changes nothing on a second run" do
       write_file("config/database.yml", flat_database_yml)
       write_file("config/recurring.yml", "production:\n  x:\n    class: XJob\n    schedule: every hour\n")
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
       first = [ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]
 
-      Dir.chdir(destination_root) { run_generator %w[--local --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect([ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]).to eq(first)
     end

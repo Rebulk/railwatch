@@ -9,10 +9,11 @@ module Railwatch
       source_root File.expand_path("templates", __dir__)
 
       desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers. " \
-           "With --local, also the two SQLite databases the in-app dashboard needs."
+           "By default telemetry stays in this app, in two SQLite databases, with the dashboard at /railwatch. " \
+           "--cloud (or any token or URL option) sends it to Railwatch Cloud instead."
 
-      class_option :local, type: :boolean, default: false,
-                           desc: "Keep telemetry in this app and serve the dashboard at /railwatch: no token, no cloud."
+      class_option :cloud, type: :boolean, default: false,
+                           desc: "Send telemetry to Railwatch Cloud instead of keeping it in this app. Implied by --prompt-token, --token-stdin, --url and --kamal-secrets."
       class_option :prompt_token, type: :boolean, default: false,
                                   desc: "Prompt for the ingest token without echoing it."
       class_option :token_stdin, type: :boolean, default: false,
@@ -67,9 +68,9 @@ module Railwatch
       # database is, so an app on PostgreSQL or MySQL needs the adapter gem
       # added before those files can be created.
       def ensure_sqlite3_gem
-        return unless options[:local]
+        return unless local?
         return if Gem.loaded_specs.key?("sqlite3")
-        return say("--local needs the sqlite3 gem for its two databases; add `gem \"sqlite3\"` and re-run.", :yellow) unless File.exist?("Gemfile")
+        return say("Embedded mode needs the sqlite3 gem for its two databases; add `gem \"sqlite3\"` and re-run.", :yellow) unless File.exist?("Gemfile")
 
         contents = File.read("Gemfile")
         unless contents.match?(/^\s*gem ["']sqlite3["']/)
@@ -89,9 +90,9 @@ module Railwatch
       # creates the tables now and migrates them after every gem update.
       # Nothing is copied into the app.
       def configure_local_databases
-        return unless options[:local]
+        return unless local?
 
-        return say("--local: no config/database.yml found; add railwatch and railwatch_telemetry databases yourself (docs/embedded.md).", :yellow) unless File.exist?("config/database.yml")
+        return say("No config/database.yml found; add railwatch and railwatch_telemetry databases yourself (docs/embedded.md).", :yellow) unless File.exist?("config/database.yml")
 
         contents = File.read("config/database.yml")
         updated = self.class.database_yml_with_railwatch(contents)
@@ -103,8 +104,8 @@ module Railwatch
       # The writer process: one per Puma master, forked by the gem's Puma
       # plugin, so batches are mapped and written outside the web workers.
       def configure_local_writer
-        return unless options[:local]
-        return say("--local: no config/puma.rb found; add `plugin :railwatch` to your Puma config yourself (docs/embedded.md).", :yellow) unless File.exist?("config/puma.rb")
+        return unless local?
+        return say("No config/puma.rb found; add `plugin :railwatch` to your Puma config yourself (docs/embedded.md).", :yellow) unless File.exist?("config/puma.rb")
 
         contents = File.read("config/puma.rb")
         updated = self.class.puma_rb_with_railwatch(contents)
@@ -166,7 +167,7 @@ module Railwatch
       # A token lands in .env only when Git confirms the file is ignored.
       # URLs are not secret and can still be written to a tracked dotenv file.
       def write_env
-        return if options[:local]
+        return if local?
 
         token = resolved_token
         vars = { TOKEN_VAR => token, URL_VAR => options[:url] }.compact
@@ -219,7 +220,7 @@ module Railwatch
       # the same prepare a deploy runs, for both databases only. The host's
       # own databases are not touched, and a schema file is never written.
       def prepare_local_databases
-        return unless options[:local]
+        return unless local?
         return unless File.exist?("config/database.yml")
         return if @needs_bundle
         return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
@@ -242,7 +243,7 @@ module Railwatch
       end
 
       def show_next_steps
-        if options[:local]
+        if local?
           say <<~STEPS, :green
 
             Next steps
@@ -257,6 +258,10 @@ module Railwatch
                  config/puma.rb Puma forks one Railwatch writer process that
                  writes every batch and runs the maintenance clock, so no web
                  process ever holds the telemetry database. No job worker.
+              4. Optional: mirror to Railwatch Cloud for alerts that still
+                 arrive when this app is down, MCP for your AI assistant, and
+                 every app in one place. Set RAILWATCH_TOKEN and
+                 c.export_enabled = true (docs/embedded.md).
           STEPS
           return
         end
@@ -287,7 +292,7 @@ module Railwatch
         # This process read its configuration before the initializer was
         # written, so in local mode the doctor would report an http transport
         # with no token. The databases it would check were prepared above.
-        return if options[:local]
+        return if local?
         return unless defined?(Rails) && Rails.respond_to?(:application) && Rails.application
 
         say "\nbin/rails railwatch:doctor", :green
@@ -454,6 +459,16 @@ module Railwatch
       private_class_method :block_end, :insert_lines
 
       private
+
+      # Embedded unless the invocation asks for the cloud: --cloud itself, or
+      # an option that only means something there. A RAILWATCH_TOKEN already
+      # in the environment is not asking -- it is picked up when one of these
+      # is given, never used to choose the mode.
+      CLOUD_OPTIONS = %i[cloud prompt_token token_stdin url kamal_secrets].freeze
+
+      def local?
+        CLOUD_OPTIONS.none? { |name| options[name] }
+      end
 
       def resolved_token
         @resolved_token ||= begin

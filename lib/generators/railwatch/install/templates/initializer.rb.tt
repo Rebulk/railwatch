@@ -3,7 +3,7 @@
 # Railwatch: first-class monitoring for Rails. Every option here can also be
 # set by the RAILWATCH_* env var named in the comment.
 Railwatch.configure do |c|
-<% if options[:local] -%>
+<% if local? -%>
   # Telemetry stays in this app's own railwatch_telemetry database and the
   # dashboard is served at /railwatch. No token, no cloud. Put the mount
   # behind your own authentication; this only names who is looking.

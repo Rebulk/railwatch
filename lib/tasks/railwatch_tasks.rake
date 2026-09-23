@@ -235,7 +235,7 @@ namespace :railwatch do
       %w[railwatch railwatch_telemetry].each do |name|
         configured = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
         check.call(!configured.nil?, "#{name} database",
-                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install --local)",
+                   configured ? configured.database : "not in config/database.yml (bin/rails generate railwatch:install)",
                    fatal: true)
       end
       { "railwatch_telemetry" => Railwatch::TelemetryRecord, "railwatch" => Railwatch::ApplicationRecord }.each do |name, base|
