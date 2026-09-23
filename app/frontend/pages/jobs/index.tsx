@@ -230,7 +230,9 @@ export default function Jobs(p: Props) {
                   },
                   {
                     key: "user",
-                    hideOnMobile: true,
+                    // The card is two thirds of the page; below 2xl the job
+                    // name needs this width more. The job class page shows it.
+                    className: "hidden 2xl:table-cell",
                     header: "Origin user",
                     cell: (j) => (
                       <OriginIdentity
@@ -245,7 +247,9 @@ export default function Jobs(p: Props) {
                   },
                   {
                     key: "tenant",
-                    hideOnMobile: true,
+                    // The card is two thirds of the page; below 2xl the job
+                    // name needs this width more. The job class page shows it.
+                    className: "hidden 2xl:table-cell",
                     header: "Origin tenant",
                     cell: (j) => (
                       <OriginIdentity
@@ -262,8 +266,11 @@ export default function Jobs(p: Props) {
                     key: "ex",
                     hideOnMobile: true,
                     header: "Exception",
+                    // Capped so a long message truncates instead of
+                    // squeezing the job name out of a one-third-width card.
+                    className: "max-w-48",
                     cell: (j) => (
-                      <span className="text-destructive line-clamp-1 text-xs">
+                      <span className="text-destructive block truncate text-xs">
                         {j.exception_preview}
                       </span>
                     ),

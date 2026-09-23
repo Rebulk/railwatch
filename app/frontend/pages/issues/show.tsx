@@ -56,6 +56,13 @@ import { ago, bytes, count, when } from "@/lib/format"
 import * as R from "@/routes"
 import type { ExceptionDetail, IssueRow, TimelineEntry } from "@/types"
 
+// A 30-bar chart has no room to print deploy refs: on a week with a
+// deploy a day they overprint into noise. The dashed line marks the day
+// and the tooltip names what shipped.
+function deploysOn(deploys: { ref: string; at: string }[], day: string) {
+  return deploys.filter((d) => d.at.slice(0, 10) === day).map((d) => d.ref)
+}
+
 const dailyConfig = {
   count: { label: "Occurrences", color: "var(--chart-5)" },
 } satisfies ChartConfig
@@ -1072,24 +1079,26 @@ export default function IssueShow(p: Props) {
                     <ChartTooltip
                       content={
                         <ChartTooltipContent
-                          labelFormatter={(v) => String(v)}
+                          labelFormatter={(v) => {
+                            const refs = deploysOn(p.deploys, String(v))
+                            return refs.length > 0
+                              ? `${String(v)} · deployed ${refs.join(", ")}`
+                              : String(v)
+                          }}
                         />
                       }
                     />
                     <Bar dataKey="count" fill="var(--color-count)" radius={2} />
-                    {p.deploys.map((d) => (
-                      <ReferenceLine
-                        key={d.deploy}
-                        x={d.at.slice(0, 10)}
-                        stroke="var(--muted-foreground)"
-                        strokeDasharray="3 3"
-                        label={{
-                          value: d.ref,
-                          position: "insideTopRight",
-                          fontSize: 10,
-                        }}
-                      />
-                    ))}
+                    {[...new Set(p.deploys.map((d) => d.at.slice(0, 10)))].map(
+                      (day) => (
+                        <ReferenceLine
+                          key={day}
+                          x={day}
+                          stroke="var(--muted-foreground)"
+                          strokeDasharray="3 3"
+                        />
+                      ),
+                    )}
                   </BarChart>
                 </ChartContainer>
               </CardContent>

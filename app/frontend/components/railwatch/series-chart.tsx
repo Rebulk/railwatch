@@ -371,8 +371,12 @@ export function Sparkline({
   const active = hoverKey != null && hoveredKey === hoverKey
   return (
     <ChartContainer config={config} className={className}>
+      {/* recharts pads every side by 5px by default, which leaves a table
+          cell's 10px-tall sparkline no plot area at all; the stroke's
+          half-width is the only margin a chart this small needs. */}
       <AreaChart
         data={data.map((v) => ({ v }))}
+        margin={{ top: 1, right: 1, bottom: 1, left: 1 }}
         onMouseEnter={hoverKey ? () => setHoveredKey(hoverKey) : undefined}
         onMouseLeave={hoverKey ? () => setHoveredKey(null) : undefined}
       >

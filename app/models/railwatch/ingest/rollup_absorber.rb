@@ -160,7 +160,7 @@ module Railwatch
           extra["cache_write_tokens"] += row[:cache_write_tokens].to_i
           extra["cost_nanos"] += row[:cost_nanos].to_i
           extra["priced"] += 1 if row[:cost_nanos]
-          extra["unpriced"] += 1 if row[:cost_nanos].nil?
+          extra["unpriced"] += 1 if row[:cost_nanos].nil? && row[:status] != "failed"
           extra["truncated"] += 1 if row[:finish_reason] == "max_tokens"
           extra["with_attachments"] += 1 if row[:attachments].to_i.positive?
         end
