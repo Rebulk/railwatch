@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.5 (2026-09-25)
+
 - A new migration adds a partial covering index for the per-tenant sums
   on the Tenants page and in MCP's `list_tenants`. Over 30 days of
   rebulk-system's 358,000 tagged requests they took 8.1 s, reading every
