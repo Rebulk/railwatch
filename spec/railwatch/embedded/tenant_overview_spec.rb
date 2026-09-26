@@ -47,4 +47,17 @@ RSpec.describe Railwatch::Telemetry::Tenant, "index page aggregates" do
     expect(row[:sparkline].sum).to eq(2)
     expect(row[:sparkline].count(&:positive?)).to eq(2)
   end
+
+  # 8 s over 30 days through (app_tenant, occurred_at); 131 ms from an index
+  # holding every column the sums read. A search by name must use it too.
+  it "reads the per-tenant sums from the tenant summary index, with and without a search" do
+    request("acme")
+    [ nil, "ac" ].each do |q|
+      sql = described_class.filtered(described_class.summary_scope("request").between(from, to), q)
+        .group(:app_tenant).select(:app_tenant, "COUNT(*)", "COUNT(DISTINCT user_ref)").to_sql
+      plan = Railwatch::TelemetryRecord.connection.select_rows("EXPLAIN QUERY PLAN #{sql}").map(&:last).join(" ")
+      expect(plan).to include("COVERING INDEX idx_executions_tenant_summary")
+    end
+    expect(described_class.index(from, to, q: "ac").sole).to include(tenant: "acme", requests: 1)
+  end
 end

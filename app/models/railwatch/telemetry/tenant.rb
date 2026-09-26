@@ -120,8 +120,18 @@ module Railwatch
 
       # -- Aggregation steps -----------------------------------------------------
 
+      # The per-tenant sums read through idx_executions_tenant_summary, which
+      # holds every column they need for tagged rows only. SQLite prefers the
+      # narrower (app_tenant, occurred_at) index on its own estimate and then
+      # fetches every row from the table (8 s against 131 ms over 30 days).
+      def self.summary_scope(kind)
+        scope = Telemetry::Execution
+        scope = scope.from("#{scope.quoted_table_name} INDEXED BY idx_executions_tenant_summary") if TelemetryRecord.sqlite?
+        scope.where(kind: kind).where.not(app_tenant: nil)
+      end
+
       def self.absorb_requests(rows, from, to, q)
-        filtered(Telemetry::Execution.requests.between(from, to), q).group(:app_tenant)
+        filtered(summary_scope("request").between(from, to), q).group(:app_tenant)
           .pluck(:app_tenant, COUNT_SQL, ERRORS_SQL, Arel.sql("AVG(duration)"), Arel.sql("MAX(duration)"), USERS_SQL)
           .each do |tenant, count, errors, avg, max, users|
             rows[tenant].merge!(requests: count, errors: errors, avg: ms(avg), max: ms(max), users: users)
@@ -129,7 +139,7 @@ module Railwatch
       end
 
       def self.absorb_jobs(rows, from, to, q)
-        filtered(Telemetry::Execution.jobs.between(from, to), q).group(:app_tenant)
+        filtered(summary_scope("job_attempt").between(from, to), q).group(:app_tenant)
           .pluck(:app_tenant, COUNT_SQL, FAILED_SQL)
           .each { |tenant, count, failed| rows[tenant].merge!(jobs: count, failed_jobs: failed) }
       end
@@ -139,7 +149,7 @@ module Railwatch
       end
 
       def self.absorb_last_seen(rows, from, to, q)
-        filtered(Telemetry::Execution.between(from, to), q).group(:app_tenant).maximum(:occurred_at)
+        filtered(summary_scope(Telemetry::Execution::KINDS).between(from, to), q).group(:app_tenant).maximum(:occurred_at)
           .each { |tenant, at| rows[tenant][:last_seen_at] = at }
       end
 
