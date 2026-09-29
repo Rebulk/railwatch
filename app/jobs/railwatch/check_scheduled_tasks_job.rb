@@ -30,10 +30,13 @@ module Railwatch
         # A task taken out of config/recurring.yml stops running on purpose.
         # Its history would otherwise read as a miss every window for 30 days
         # (reconcile_ingest_batches was live for four minutes and flagged 62
-        # times). The gem ships the schedule Solid Queue is actually running
-        # on every health sample; a key absent from the newest manifest is
-        # removed, not missed. No manifest yet means an older gem: judge from
-        # history alone, as before.
+        # times). The gem ships the manifest of tasks Solid Queue is actually
+        # running; a key absent from the newest one is removed, not missed.
+        # It is not on every health sample -- it repeats only when it changes
+        # or every five minutes, half the live window -- so read it with
+        # HealthSample.recurring_task_keys, which skips the samples without
+        # one. No manifest at all means an older gem: judge from history
+        # alone, as before.
         if configured && !configured.include?(key)
           resolve_missed!(open_missed["missed:#{key}"], "Auto-resolved: #{key} is no longer a configured recurring task.")
           next

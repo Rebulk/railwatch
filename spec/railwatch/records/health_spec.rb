@@ -44,6 +44,10 @@ RSpec.describe "health record" do
     # puma_server is memoized for the life of the process, so the lookup has
     # to be re-armed for each example.
     Railwatch::Health.remove_instance_variable(:@puma_server) if Railwatch::Health.instance_variable_defined?(:@puma_server)
+    # The recurring task manifest is deduplicated against module-level, and
+    # therefore process-wide, state. Clear it for the same reason.
+    Railwatch::Health.instance_variable_set(:@manifest_digest, nil)
+    Railwatch::Health.instance_variable_set(:@manifest_sent_at, nil)
     stub_const("Puma::Server", fake_puma_server)
     stub_const("SolidQueue::ReadyExecution", fake_ready_execution)
     stub_const("SolidQueue::Process", fake_solid_queue_process)
@@ -196,5 +200,79 @@ RSpec.describe "Railwatch::Health fork state" do
     expect(Railwatch::Health.instance_variable_get(:@mutex)).not_to equal(old_mutex)
     expect(Railwatch::Health.instance_variable_get(:@wakeup)).not_to equal(old_wakeup)
     expect(Railwatch::Health.instance_variable_get(:@pid)).to be_nil
+  end
+end
+
+# The manifest is a property of the deploy, not of the sample: identical in
+# every process, changed only by an edit to config/recurring.yml. So it is
+# deduplicated rather than repeated on every 15-second sample. Its one reader
+# is the platform's Telemetry::HealthSample.recurring_task_keys, which takes
+# the newest sample that *carries* a manifest from inside a ten-minute live
+# window -- these examples are the contract between the two.
+RSpec.describe "the health record's recurring task manifest" do
+  around do |example|
+    Railwatch.config.transport = :local
+    example.run
+  ensure
+    Railwatch.config.transport = :http
+  end
+
+  let(:environment) { Railwatch::Environment.current }
+  let(:schedules) { { "nightly_cleanup" => "0 2 * * *", "hourly_sweep" => "every hour" } }
+
+  before do
+    Railwatch::Health.instance_variable_set(:@manifest_digest, nil)
+    Railwatch::Health.instance_variable_set(:@manifest_sent_at, nil)
+    stub_recurring(schedules)
+  end
+
+  def stub_recurring(map)
+    allow(Railwatch::Subscribers::Jobs).to receive(:recurring_tasks)
+      .and_return(keys: map.keys, classes: [], schedules: map)
+  end
+
+  # One entry per health record shipped, nil where that sample left the
+  # manifest out.
+  def manifests
+    railwatch_records(:health).map { |r| JSON.parse(r[:detail])["recurring_tasks"] }
+  end
+
+  it "ships on the first sample and on no later sample that would only repeat it" do
+    20.times { Railwatch::Health.sample }
+
+    expect(manifests.size).to eq(20)
+    expect(manifests.compact).to eq([ schedules ])
+  end
+
+  it "ships again the moment a task is added, removed, or rescheduled" do
+    Railwatch::Health.sample
+    rescheduled = schedules.merge("hourly_sweep" => "every 30 minutes")
+    stub_recurring(rescheduled)
+    Railwatch::Health.sample
+
+    expect(manifests.compact).to eq([ schedules, rescheduled ])
+  end
+
+  it "ships again once the floor has passed, so it can never age out of the reader's live window" do
+    Railwatch::Health.sample
+    allow(Railwatch::Clock).to receive(:monotonic)
+      .and_return(Railwatch::Clock.monotonic + Railwatch::Health::MANIFEST_INTERVAL + 1)
+    Railwatch::Health.sample
+
+    expect(manifests.compact).to eq([ schedules, schedules ])
+  end
+
+  it "is still what HealthSample.recurring_task_keys resolves once later samples have buried it" do
+    20.times { Railwatch::Health.sample }
+    records = railwatch_records(:health)
+    Railwatch::Transport::Local.new(Railwatch.config).deliver(records, batch_id: SecureRandom.uuid)
+
+    rows, keys = environment.with_telemetry do
+      [ Railwatch::Telemetry::HealthSample.count, Railwatch::Telemetry::HealthSample.recurring_task_keys ]
+    end
+    # The manifest is on the oldest of the twenty, not the newest: the
+    # platform's lookup has to skip nineteen rows without one to find it.
+    expect(rows).to eq(20)
+    expect(keys).to match_array(schedules.keys)
   end
 end
