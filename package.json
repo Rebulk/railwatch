@@ -73,5 +73,10 @@
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "overrides": {
+      "@tailwindcss/typography>postcss-selector-parser": "^7.1.6"
+    }
   }
 }
