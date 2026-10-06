@@ -28,5 +28,8 @@ Rails.application.load_tasks
 # :environment prerequisite requires it.
 Rake::Task.define_task(:environment) { Rails.application.initialize! }
 ENV["VERBOSE"] = "false"
+# Booted and about to migrate: the caller releases its lock only after this
+# has had longer than the database's configured timeout to wait on it.
+File.write(ENV.fetch("DB_PREPARE_BOOT_READY"), "ready") if ENV["DB_PREPARE_BOOT_READY"]
 Rake::Task["db:prepare"].invoke
 puts "DB_PREPARE_OK"
