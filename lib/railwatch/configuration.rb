@@ -76,7 +76,7 @@ module Railwatch
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
                   :backpressure,
                   :flush_interval, :flush_threshold,
-                  :connect_timeout, :timeout, :shutdown_timeout,
+                  :connect_timeout, :timeout, :shutdown_timeout, :migration_busy_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
                   :beacon_enabled, :beacon_rate_limit, :beacon_global_rate_limit, :beacon_allowed_origins,
@@ -187,6 +187,13 @@ module Railwatch
       @connect_timeout = env_float("RAILWATCH_CONNECT_TIMEOUT", 1.0)
       @timeout = env_float("RAILWATCH_TIMEOUT", 3.0)
       @shutdown_timeout = env_float("RAILWATCH_SHUTDOWN_TIMEOUT", 2.0)
+      # Seconds a migration of the railwatch databases waits for SQLite's
+      # write lock (Patches::MigrationBusyTimeout). A deploy migrates while
+      # the old release's writer is still committing to the same file; the
+      # database's own `timeout` (5 s) is too short to get between its
+      # transactions when the disk is busy. Kept under a typical health-check
+      # window (Kamal's deploy_timeout defaults to 30 s and is often 90 s).
+      @migration_busy_timeout = env_float("RAILWATCH_MIGRATION_BUSY_TIMEOUT", 60.0)
       @slow_query_threshold_ms = env_float("RAILWATCH_SLOW_QUERY_MS", 5.0)
       @n_plus_one_threshold = env_int("RAILWATCH_N_PLUS_ONE_THRESHOLD", 5)
       @max_view_renders_per_execution = 20
