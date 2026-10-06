@@ -6,6 +6,28 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- An install upgrading from 0.5.0 or older can migrate again. 0.5.1
+  renumbered the export queue migration (20260919000000 to
+  20260919000100), so a telemetry database that had already run it under
+  the old number saw it as pending, and its plain `create_table` raised
+  "table export_destinations already exists" -- in `db:prepare`, which a
+  deploy runs before the app boots. Every statement in it is now
+  `if_not_exists`, so it builds the queue on a new database, completes it
+  on one that ran the old number (keeping anything already queued), and
+  stays a no-op where the new number has run. Rolling it back on a
+  database that came through the old number leaves the queue in place,
+  since the old version still owns it; anywhere else it is reversed as
+  before.
+- The 0.8.0, 0.8.1 and 0.8.5 index migrations accept an index that is
+  already there. Each one reads a whole table, and on a telemetry file
+  much larger than memory that is not seconds: about 40 s per table on
+  rebulk-system's 14.8 GB file, five builds in all, against a deploy
+  that health-checks within 90 s of the container starting -- and runs
+  `db:prepare` inside that window. An operator can now build them ahead
+  of the deploy, while the old release still serves, with the
+  migrations' own `CREATE INDEX` statements; `db:prepare` then records
+  them and moves on.
+
 ## 0.8.5 (2026-09-25)
 
 - A new migration adds a partial covering index for the per-tenant sums

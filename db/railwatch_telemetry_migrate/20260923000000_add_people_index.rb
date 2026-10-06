@@ -10,6 +10,6 @@
 class AddPeopleIndex < ActiveRecord::Migration[8.1]
   def change
     add_index :executions, [ :user_ref, :kind, :occurred_at, :status ], name: "idx_executions_people",
-              where: "user_ref IS NOT NULL"
+              where: "user_ref IS NOT NULL", if_not_exists: true
   end
 end
