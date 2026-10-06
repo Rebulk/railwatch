@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.6 (2026-10-06)
+
 - An install upgrading from 0.5.0 or older can migrate again. 0.5.1
   renumbered the export queue migration (20260919000000 to
   20260919000100), so a telemetry database that had already run it under
