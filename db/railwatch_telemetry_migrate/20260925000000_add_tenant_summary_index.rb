@@ -12,6 +12,6 @@
 class AddTenantSummaryIndex < ActiveRecord::Migration[8.1]
   def change
     add_index :executions, [ :kind, :app_tenant, :occurred_at, :status, :outcome, :duration, :user_ref ],
-              name: "idx_executions_tenant_summary", where: "app_tenant IS NOT NULL"
+              name: "idx_executions_tenant_summary", where: "app_tenant IS NOT NULL", if_not_exists: true
   end
 end

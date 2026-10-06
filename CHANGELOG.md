@@ -18,6 +18,15 @@
   database that came through the old number leaves the queue in place,
   since the old version still owns it; anywhere else it is reversed as
   before.
+- The 0.8.0, 0.8.1 and 0.8.5 index migrations accept an index that is
+  already there. Each one reads a whole table, and on a telemetry file
+  much larger than memory that is not seconds: about 40 s per table on
+  rebulk-system's 14.8 GB file, five builds in all, against a deploy
+  that health-checks within 90 s of the container starting -- and runs
+  `db:prepare` inside that window. An operator can now build them ahead
+  of the deploy, while the old release still serves, with the
+  migrations' own `CREATE INDEX` statements; `db:prepare` then records
+  them and moves on.
 
 ## 0.8.5 (2026-09-25)
 

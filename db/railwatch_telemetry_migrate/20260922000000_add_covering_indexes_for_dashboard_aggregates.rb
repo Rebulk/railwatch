@@ -25,10 +25,10 @@
 # Execution.named_like seek them instead of reading the window.
 class AddCoveringIndexesForDashboardAggregates < ActiveRecord::Migration[8.1]
   def change
-    add_index :executions, [ :kind, :occurred_at, :queue, :outcome, :queue_latency ], name: "idx_executions_queue_stats"
+    add_index :executions, [ :kind, :occurred_at, :queue, :outcome, :queue_latency ], name: "idx_executions_queue_stats", if_not_exists: true
     add_index :health_samples, [ :sampled_at, :threads_max, :threads_busy, :backlog, :queue_depth, :queue_latency ],
-              name: "idx_health_samples_series"
-    add_index :broadcasts, :occurred_at
-    add_index :executions, [ :kind, :occurred_at ], name: "idx_executions_with_preview", where: "exception_preview IS NOT NULL"
+              name: "idx_health_samples_series", if_not_exists: true
+    add_index :broadcasts, :occurred_at, if_not_exists: true
+    add_index :executions, [ :kind, :occurred_at ], name: "idx_executions_with_preview", where: "exception_preview IS NOT NULL", if_not_exists: true
   end
 end
