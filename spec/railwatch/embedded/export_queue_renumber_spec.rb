@@ -89,6 +89,46 @@ RSpec.describe "CreateExportQueue across its renumbering" do
     end
   end
 
+  describe "rolling back" do
+    def roll_back(path)
+      migrate(path, Railwatch.migrations_path(:railwatch_telemetry)) do |connection|
+        connection.pool.migration_context.run(:down, NEW_VERSION)
+        yield connection
+      end
+    end
+
+    it "keeps the queue the old number built, and what it holds" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "upgraded.sqlite3")
+        migrate(path, old_layout(dir)) do |connection|
+          connection.execute(<<~SQL.squish)
+            INSERT INTO export_destinations (url, url_sha256, producer_id, credential_sha256, created_at, updated_at)
+            VALUES ('https://r.test/ingest', '#{"a" * 64}', 'p-1', '#{"b" * 64}', '2026-09-19', '2026-09-19')
+          SQL
+        end
+
+        roll_back(path) do |connection|
+          expect(versions(connection)).to include(OLD_VERSION)
+          expect(versions(connection)).not_to include(NEW_VERSION)
+          expect_whole_export_queue(connection)
+          expect(connection.select_value("SELECT producer_id FROM export_destinations")).to eq("p-1")
+        end
+      end
+    end
+
+    it "removes the queue it built itself" do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "fresh.sqlite3")
+        roll_back(path) do |connection|
+          expect(versions(connection)).not_to include(NEW_VERSION)
+          expect(connection.tables).not_to include("export_destinations", "export_deliveries")
+          expect(connection.column_exists?(:ingest_batches, :export_disposition)).to be(false)
+          expect(connection.column_exists?(:ingest_batches, :export_record_count)).to be(false)
+        end
+      end
+    end
+  end
+
   it "leaves a database that already ran it under the new number alone" do
     Dir.mktmpdir do |dir|
       path = File.join(dir, "current.sqlite3")

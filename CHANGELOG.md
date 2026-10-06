@@ -14,7 +14,10 @@
   deploy runs before the app boots. Every statement in it is now
   `if_not_exists`, so it builds the queue on a new database, completes it
   on one that ran the old number (keeping anything already queued), and
-  stays a no-op where the new number has run.
+  stays a no-op where the new number has run. Rolling it back on a
+  database that came through the old number leaves the queue in place,
+  since the old version still owns it; anywhere else it is reversed as
+  before.
 
 ## 0.8.5 (2026-09-25)
 
