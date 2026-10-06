@@ -25,11 +25,14 @@ end
 
 Rails.application.load_tasks
 # What a real app's config/environment.rb does when db:prepare's
-# :environment prerequisite requires it.
-Rake::Task.define_task(:environment) { Rails.application.initialize! }
+# :environment prerequisite requires it. The ready signal goes after the
+# application is initialized, the last thing before db:prepare's own body
+# asks for the database: the caller releases its lock only once this has
+# had longer than the configured timeout to wait on it.
+Rake::Task.define_task(:environment) do
+  Rails.application.initialize!
+  File.write(ENV.fetch("DB_PREPARE_BOOT_READY"), "ready") if ENV["DB_PREPARE_BOOT_READY"]
+end
 ENV["VERBOSE"] = "false"
-# Booted and about to migrate: the caller releases its lock only after this
-# has had longer than the database's configured timeout to wait on it.
-File.write(ENV.fetch("DB_PREPARE_BOOT_READY"), "ready") if ENV["DB_PREPARE_BOOT_READY"]
 Rake::Task["db:prepare"].invoke
 puts "DB_PREPARE_OK"
