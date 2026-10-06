@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.8.7 (2026-10-06)
+
 - A migration of the railwatch databases waits up to 60 s for SQLite's
   write lock instead of the database's own `timeout` (5 s in the generated
   `database.yml`). A deploy migrates while the previous release is still
