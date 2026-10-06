@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "open3"
 require "tmpdir"
 
 # A deploy migrates the telemetry database while the previous release's
@@ -48,10 +49,18 @@ RSpec.describe Railwatch::Patches::MigrationBusyTimeout do
       exit!(0)
     end
     writer.close
-    expect(reader.gets).to eq("held\n")
+    # Bounded: a child that died before taking the lock must fail this
+    # example, not hang the suite.
+    held = reader.wait_readable(10) && reader.gets
+    raise "lock holder never took the lock (#{Process.wait2(pid).last.inspect})" unless held == "held\n"
+
     yield
   ensure
-    Process.wait(pid) if pid
+    begin
+      Process.wait(pid) if pid
+    rescue Errno::ECHILD
+      nil # already reaped by the diagnostic above
+    end
   end
 
   def migrate(db_config)
@@ -138,6 +147,43 @@ RSpec.describe Railwatch::Patches::MigrationBusyTimeout do
           expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < HOLD_SECONDS
         end
       end
+    end
+  end
+
+  # The path a deploy takes, end to end: `db:prepare` through Rails' own rake
+  # task in a fresh process with Railwatch disabled, the patch installed by
+  # load_tasks rather than by this spec, and the database's timeout coming
+  # from database.yml.
+  it "lets the entrypoint's db:prepare through a held lock" do
+    Dir.mktmpdir("railwatch-db-prepare") do |root|
+      FileUtils.mkdir_p("#{root}/config")
+      FileUtils.mkdir_p("#{root}/db")
+      telemetry = "#{root}/telemetry.sqlite3"
+      File.write("#{root}/config/database.yml", <<~YAML)
+        test:
+          primary:
+            adapter: sqlite3
+            database: #{root}/primary.sqlite3
+          railwatch_telemetry:
+            adapter: sqlite3
+            database: #{telemetry}
+            timeout: #{CONFIGURED_TIMEOUT_MS}
+            migrations_paths: #{Railwatch.migrations_path(:railwatch_telemetry)}
+            schema_dump: false
+      YAML
+      SQLite3::Database.new(telemetry).execute("PRAGMA journal_mode = wal")
+
+      output, status = with_writer_holding_lock(telemetry) do
+        Open3.capture2e(
+          { "RAILS_ENV" => "test", "DB_PREPARE_BOOT_ROOT" => root, "RAILWATCH_ENABLED" => "0",
+            "RAILWATCH_MIGRATION_BUSY_TIMEOUT" => (HOLD_SECONDS * 5).to_s },
+          Gem.ruby, File.expand_path("../../fixtures/db_prepare_boot.rb", __dir__)
+        )
+      end
+
+      expect(status.success?).to be(true), output
+      expect(output).to include("DB_PREPARE_OK")
+      expect(versions(telemetry)).to include(20260919000100, 20260925000000)
     end
   end
 end
