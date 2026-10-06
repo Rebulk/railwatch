@@ -6,6 +6,22 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- A migration of the railwatch databases waits up to 60 s for SQLite's
+  write lock instead of the database's own `timeout` (5 s in the generated
+  `database.yml`). A deploy migrates while the previous release is still
+  serving, and on an embedded install that release's writer keeps
+  committing telemetry to the same file: about a second per transaction on
+  a warm 15 GB file, several seconds while the deploy's image build has the
+  disk. rebulk-system's container entrypoint ran `db:prepare` into that,
+  got `SQLite3::BusyException: database is locked` from the first
+  migration that needed a write, and crash-looped until the health check
+  gave up. Only the connection Active Record migrates with is changed, only
+  while it migrates, and only for a database whose `migrations_paths` are
+  this gem's; the app's requests keep failing fast. It applies with
+  Railwatch disabled, which is how an entrypoint migrates.
+  `RAILWATCH_MIGRATION_BUSY_TIMEOUT` (`c.migration_busy_timeout`, seconds)
+  sets it; keep it inside the deploy's health-check window.
+
 ## 0.8.6 (2026-10-06)
 
 - An install upgrading from 0.5.0 or older can migrate again. 0.5.1
