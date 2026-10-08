@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.9.0 (2026-10-08)
+
 - An `outgoing_request` now says whether it was made inside a database
   transaction (`in_transaction`), like Isolator: the transaction and its
   locks wait on the other service, and a rollback cannot undo the call. Only
