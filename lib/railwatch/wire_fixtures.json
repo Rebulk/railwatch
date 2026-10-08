@@ -538,6 +538,7 @@
     "response_size": 2,
     "error": null,
     "response_body": null,
+    "in_transaction": false,
     "source": "/spec/railwatch/wire_fixtures_spec.rb"
   },
   "storage_op": {

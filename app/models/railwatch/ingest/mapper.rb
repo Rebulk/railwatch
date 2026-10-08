@@ -216,7 +216,7 @@ module Railwatch
         when "mail" then child(Telemetry::Mail, rec, %w[mailer subject to cc bcc attachments delivery_method perform_deliveries duration failed message_id])
         when "broadcast" then child(Telemetry::Broadcast, rec, %w[kind stream channel action bytes duration failed])
         when "notification" then child(Telemetry::Notification, rec, %w[notifier delivery_method channel duration failed])
-        when "outgoing_request" then child(Telemetry::OutgoingRequest, rec, %w[host method url duration status_code request_size response_size error source response_body])
+        when "outgoing_request" then child(Telemetry::OutgoingRequest, rec, %w[host method url duration status_code request_size response_size error source response_body in_transaction])
         when "llm_call" then child(Telemetry::LlmCall, rec, %w[operation provider model response_model tool_name duration status error
           streaming message_count tool_count input_tokens output_tokens cache_read_tokens cache_write_tokens thinking_tokens
           cost_nanos workflow_id workflow_name workflow_step_id workflow_step_name workflow_step_parent_id prompt completion

@@ -132,6 +132,7 @@ module Railwatch
       @record_limit = @failure_context ? Railwatch.config.failure_context : MAX_RECORDS
       @byte_limit = Railwatch.config.execution_buffer_bytes
       @transaction_statement_counts = Hash.new(0)
+      @open_transactions = 0
       @allocations_start = GC.stat(:total_allocated_objects)
       @gc_time_start = GC.stat(:time) if GC_TIME_SUPPORTED
     end
@@ -304,6 +305,24 @@ module Railwatch
 
     def transaction_statement_count(transaction_object_id)
       @transaction_statement_counts.delete(transaction_object_id) || 0
+    end
+
+    # Database transactions (and savepoints) this execution has BEGUN and not
+    # yet finished, so an outgoing HTTP call can say whether it held one open.
+    # Only transactions opened during the execution count: a test's
+    # transactional fixture is already open when the execution starts, and
+    # flagging every request spec would make the signal useless. A nested
+    # execution (perform_now inside a request) inherits its parent's.
+    def transaction_opened
+      @open_transactions += 1
+    end
+
+    def transaction_closed
+      @open_transactions -= 1 if @open_transactions.positive?
+    end
+
+    def in_transaction?
+      @open_transactions.positive? || (parent_execution&.in_transaction? || false)
     end
 
     def duration

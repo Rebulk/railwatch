@@ -6,6 +6,14 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- An `outgoing_request` now says whether it was made inside a database
+  transaction (`in_transaction`), like Isolator: the transaction and its
+  locks wait on the other service, and a rollback cannot undo the call. Only
+  transactions the execution began count, so transactional test fixtures do
+  not. New `have_railwatch_http_in_transaction` matcher and
+  `refute_railwatch_http_in_transaction` assertion, and a telemetry migration
+  adding the column to `outgoing_requests`.
+
 ## 0.8.7 (2026-10-06)
 
 - A migration of the railwatch databases waits up to 60 s for SQLite's

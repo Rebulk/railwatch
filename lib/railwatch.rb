@@ -389,7 +389,8 @@ module Railwatch
         host = (URI(url.to_s).host rescue nil)
         record(:outgoing_request, group: Record.group_hash(host, method.to_s.upcase),
                timestamp: started_at, host: host, method: method.to_s.upcase,
-               url: url.to_s[0, 2048], duration: Clock.micros_since(start), status_code: result.status.to_i)
+               url: url.to_s[0, 2048], duration: Clock.micros_since(start), status_code: result.status.to_i,
+               in_transaction: execution&.in_transaction? || false)
       end
       result
     end

@@ -115,7 +115,7 @@ module Railwatch
       end
 
       def outgoing_lines(records)
-        lines(records) { |r| "#{r[:method]} #{truncate(r[:url])}" }
+        lines(records) { |r| "#{r[:method]} #{truncate(r[:url])}#{" at #{r[:source]}" if r[:source]}" }
       end
 
       def exception_lines(records)

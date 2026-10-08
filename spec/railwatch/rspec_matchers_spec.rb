@@ -193,6 +193,27 @@ RSpec.describe "Railwatch RSpec matchers" do
     end
   end
 
+  describe "have_railwatch_http_in_transaction" do
+    it "passes the negation when the HTTP call happens after the transaction commits" do
+      expect {
+        ActiveRecord::Base.transaction { Widget.create!(name: "a") }
+        Net::HTTP.get(URI("http://example.test/after"))
+      }.not_to have_railwatch_http_in_transaction
+    end
+
+    it "names the call and the app line that made it when a transaction is held across it" do
+      message = negated_failure_from(have_railwatch_http_in_transaction) do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          Net::HTTP.get(URI("http://example.test/inside"))
+        end
+      end
+
+      expect(message).to include("expected no outgoing HTTP requests inside a database transaction, but the block made 1")
+      expect(message).to match(%r{GET http://example\.test/inside at \S*spec/railwatch/rspec_matchers_spec\.rb:\d+})
+    end
+  end
+
   describe "capture mechanics" do
     it "ignores records produced before the block runs" do
       Widget.count

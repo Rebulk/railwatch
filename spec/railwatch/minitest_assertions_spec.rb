@@ -136,4 +136,25 @@ RSpec.describe "Railwatch Minitest assertions" do
   ensure
     Railwatch.config.token = old_token
   end
+
+  describe "#refute_railwatch_http_in_transaction" do
+    it "asserts true when no transaction is open around the call" do
+      test_case.refute_railwatch_http_in_transaction { Net::HTTP.get(URI("http://example.test/plain")) }
+
+      expect(test_case.last.passed).to be(true)
+    end
+
+    it "asserts false and names the call when a transaction is held across it" do
+      test_case.refute_railwatch_http_in_transaction do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          Net::HTTP.get(URI("http://example.test/inside"))
+        end
+      end
+
+      expect(test_case.last.passed).to be(false)
+      expect(test_case.last.message).to include("but the block made 1")
+      expect(test_case.last.message).to include("GET http://example.test/inside")
+    end
+  end
 end

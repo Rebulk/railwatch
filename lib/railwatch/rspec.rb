@@ -136,4 +136,27 @@ RSpec::Matchers.define :have_railwatch_outgoing_requests do |bounds|
   end
 end
 
+# Isolator's check: an HTTP call made while a database transaction this
+# block opened is still open holds that transaction (and its locks) for the
+# whole round trip, and a rollback cannot undo what the call did.
+RSpec::Matchers.define :have_railwatch_http_in_transaction do
+  supports_block_expectations
+
+  match do |block|
+    @offending = railwatch_capture(&block).select { |r| r[:t] == "outgoing_request" && r[:in_transaction] }
+    @offending.any?
+  end
+
+  description { "make an outgoing HTTP request inside a database transaction" }
+
+  failure_message do
+    "expected the block to make an outgoing HTTP request inside a database transaction, but it made none"
+  end
+
+  failure_message_when_negated do
+    "expected no outgoing HTTP requests inside a database transaction, but the block made " \
+      "#{@offending.size}:#{Railwatch::SpecHelper.outgoing_lines(@offending)}"
+  end
+end
+
 RSpec.configure { |config| config.include Railwatch::SpecHelper } if defined?(RSpec.configure)
