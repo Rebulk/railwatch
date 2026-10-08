@@ -53,7 +53,8 @@ module Railwatch
                      url: Record.url_without_sensitive_components(url, limit: 2048),
                      duration: Clock.micros_since(start), status_code: env.status.to_i,
                      error: error && "#{error.class}: #{error.message}"[0, 255],
-                     response_body: response_body(env))
+                     response_body: response_body(env),
+                     in_transaction: Railwatch.execution&.in_transaction? || false)
     end
 
     # Faraday threads one Env through the whole stack, and the adapter

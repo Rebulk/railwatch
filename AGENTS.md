@@ -102,6 +102,7 @@ expect { Checkout.new(cart).total }.to record_railwatch_span("checkout.total")
 expect { importer.run }.to record_railwatch_exception(ArgumentError)
 expect { importer.run }.not_to record_railwatch_exceptions
 expect { SyncCustomers.run }.to have_railwatch_outgoing_requests(at_most: 1)
+expect { post "/orders", params: }.not_to have_railwatch_http_in_transaction
 
 records = railwatch_capture { get "/widgets" }   # everything the block produced
 ```

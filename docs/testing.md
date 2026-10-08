@@ -109,11 +109,26 @@ expect { SyncCustomers.run }.to have_railwatch_outgoing_requests(at_most: 1)
 Same bounds as `have_railwatch_queries`. Failures list the method and URL of
 every request the block made.
 
+### `have_railwatch_http_in_transaction`
+
+```ruby
+expect { post "/orders", params: }.not_to have_railwatch_http_in_transaction
+```
+
+Railwatch's version of [Isolator](https://github.com/palkan/isolator): fails
+when the block makes an outgoing HTTP call while a database transaction it
+opened is still open. The transaction, and every lock it holds, waits on the
+other service, and rolling back cannot undo what the call did. The negated
+failure message lists each such call with the app line that made it. Only
+transactions opened inside the block count, so a suite's transactional
+fixtures never trip it.
+
 ## Minitest assertions
 
 ```ruby
 assert_railwatch_queries(at_most: 5) { OrderSummary.new(order).to_h }
 refute_railwatch_n_plus_one { get widgets_url }
+refute_railwatch_http_in_transaction { post orders_url, params: }
 assert_railwatch_span("checkout.total") { Checkout.new(cart).total }
 ```
 

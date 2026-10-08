@@ -32,6 +32,13 @@ module Railwatch
              "detected:#{SpecHelper.n_plus_one_lines(n_plus_ones)}"
     end
 
+    def refute_railwatch_http_in_transaction(&block)
+      offending = railwatch_capture(&block).select { |r| r[:t] == "outgoing_request" && r[:in_transaction] }
+      assert offending.empty?,
+             "Expected no outgoing HTTP requests inside a database transaction, but the block made " \
+             "#{offending.size}:#{SpecHelper.outgoing_lines(offending)}"
+    end
+
     def assert_railwatch_span(name, &block)
       spans = railwatch_capture(&block).select { |r| r[:t] == "span" }
       assert spans.any? { |s| s[:name] == name },

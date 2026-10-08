@@ -500,6 +500,7 @@ never double-recorded.
 | `response_size` | Bytes, from `Content-Length` or body size. |
 | `error` | `"Class: message"`, truncated to 255 chars, if the request raised. |
 | `response_body` | First 4 KiB of the response body, but only when `config.capture_response_body_on_error` is on (off by default) *and* the response was an error. A body that parses as a JSON object is run through the same parameter filter as request params and re-serialized; anything else is stored as it arrived. nil in every other case — including a connection failure, where there is no response (on the Net::HTTP path a body is read only if Net::HTTP already buffered it, so a response being streamed through `read_body` is never consumed; on the Faraday path the body is taken only once a status came back, so an outgoing request payload can never be filed as a response). |
+| `in_transaction` | True when the execution had a database transaction (or savepoint) of its own open for this call, so the transaction and its locks were held for the whole round trip and a rollback cannot undo what the call did. Only transactions the execution began count: one already open when it started, such as a test's transactional fixture, does not. Active Record begins a transaction at its first statement, so a `transaction do` block that has not yet run one is not open. A job performed inline inherits its parent's. The `have_railwatch_http_in_transaction` matcher fails a spec on it. |
 | `source` | App-code call site (Net::HTTP path only). |
 
 ### `llm_call`

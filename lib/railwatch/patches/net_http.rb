@@ -68,6 +68,7 @@ module Railwatch
           response_size: response ? (response["Content-Length"]&.to_i || response.body&.bytesize rescue nil) : nil,
           error: error && "#{error.class}: #{error.message}"[0, 255],
           response_body: response_body(response, error),
+          in_transaction: Railwatch.execution&.in_transaction? || false,
           source: Backtrace.caller_location(skip: 4))
       rescue StandardError => e
         Railwatch.debug { "outgoing request record failed: #{e.message}" }

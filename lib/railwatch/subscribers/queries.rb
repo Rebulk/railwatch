@@ -148,8 +148,16 @@ module Railwatch
           end
         end
 
+        # Fired when a transaction or savepoint actually sends BEGIN (Active
+        # Record opens them lazily), paired with transaction.active_record
+        # below on commit, rollback, or restart.
+        subscribe_payload("start_transaction.active_record") do |_payload|
+          execution&.transaction_opened
+        end
+
         subscribe("transaction.active_record") do |event|
           exe = execution
+          exe&.transaction_closed
           exe&.count(:transactions)
           p = event.payload
           # Taken (and removed) whether or not a record is built: the

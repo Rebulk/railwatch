@@ -78,6 +78,107 @@ RSpec.describe "outgoing_request record" do
     expect(railwatch_records(:outgoing_request)).to be_empty
   end
 
+  describe "in_transaction" do
+    def fetch_once
+      Railwatch.start_execution(source: :command, sample_kind: :commands)
+      yield
+      finish!
+      railwatch_records(:outgoing_request)
+    end
+
+    it "is true for a call made while a transaction the execution opened is still open" do
+      requests = fetch_once do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          Net::HTTP.get(URI("http://example.test/inside"))
+        end
+      end
+
+      expect(requests.sole[:in_transaction]).to be(true)
+    end
+
+    it "is false before the transaction begins and after it commits" do
+      requests = fetch_once do
+        Net::HTTP.get(URI("http://example.test/before"))
+        ActiveRecord::Base.transaction { Widget.create!(name: "a") }
+        Net::HTTP.get(URI("http://example.test/after"))
+      end
+
+      expect(requests.map { |r| r[:in_transaction] }).to eq([ false, false ])
+    end
+
+    it "is false after a rollback" do
+      requests = fetch_once do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          raise ActiveRecord::Rollback
+        end
+        Net::HTTP.get(URI("http://example.test/after"))
+      end
+
+      expect(requests.sole[:in_transaction]).to be(false)
+    end
+
+    it "stays true inside the outer transaction after a nested savepoint closes" do
+      requests = fetch_once do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          ActiveRecord::Base.transaction(requires_new: true) { Widget.create!(name: "b") }
+          Net::HTTP.get(URI("http://example.test/inside"))
+        end
+      end
+
+      expect(requests.sole[:in_transaction]).to be(true)
+    end
+
+    it "is false inside a transaction block that never ran a statement, since nothing was begun" do
+      # Active Record begins a transaction lazily, at its first statement; until
+      # then no connection is held in a transaction and there is nothing to wait on.
+      requests = fetch_once do
+        ActiveRecord::Base.transaction { Net::HTTP.get(URI("http://example.test/lazy")) }
+      end
+
+      expect(requests.sole[:in_transaction]).to be(false)
+    end
+
+    it "ignores a transaction that was already open when the execution started (a test's transactional fixture)" do
+      # This whole suite runs with use_transactional_fixtures, so the
+      # connection is inside a transaction for every example here; requests
+      # in the specs above are false outside their own blocks for that reason.
+      expect(ActiveRecord::Base.connection.transaction_open?).to be(true)
+      requests = fetch_once { Net::HTTP.get(URI("http://example.test/plain")) }
+
+      expect(requests.sole[:in_transaction]).to be(false)
+    end
+
+    it "is true on the Faraday path too" do
+      conn = Faraday.new("http://example.test") { |f| f.use Railwatch::Faraday }
+      requests = fetch_once do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          conn.get("/faraday")
+        end
+      end
+
+      expect(requests.sole[:in_transaction]).to be(true)
+    end
+
+    it "is true for a job performed inline from inside the parent's transaction" do
+      requests = fetch_once do
+        ActiveRecord::Base.transaction do
+          Widget.create!(name: "a")
+          job = Railwatch.start_execution(source: :job, sample_kind: :jobs)
+          job.sampled = true
+          Net::HTTP.get(URI("http://example.test/from-job"))
+          Railwatch.finish_execution(:job_attempt, group: "j", class: "DemoJob", name: "DemoJob")
+        end
+      end
+
+      expect(requests.sole[:url]).to eq("http://example.test/from-job")
+      expect(requests.sole[:in_transaction]).to be(true)
+    end
+  end
+
   it "computes a caller source location for an outgoing request" do
     Railwatch.start_execution(source: :command, sample_kind: :commands)
     Net::HTTP.get(URI("http://example.test/widgets"))
