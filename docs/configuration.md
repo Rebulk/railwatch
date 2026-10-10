@@ -50,7 +50,9 @@ proxy with `Forwarded` or `X-Forwarded-*` headers.
 is decided once per execution, not per record, by
 `Railwatch::Sampler.decide` in `lib/railwatch/sampler.rb`. A sampled-in
 execution ships every child record it buffered. A sampled-out one ships
-nothing except an unhandled exception. That exception is governed by its
+nothing except an unhandled exception. A sampled-out scheduled task also
+ships its `scheduled_task` record alone: that record is the run's check-in,
+and without it the missed-run check would flag a task that ran. That exception is governed by its
 own `exceptions` rate, decided once and memoized per execution. See
 `docs/records.md`'s `exception` section.
 

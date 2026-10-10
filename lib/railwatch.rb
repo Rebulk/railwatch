@@ -161,6 +161,12 @@ module Railwatch
     # unless the tail decision (tail_keep?) rescues the whole tree, which is
     # also how a failure-context ring is promoted.
     #
+    # A scheduled_task parent ships whatever the sampling decision, alone
+    # when sampled out: it is the run's check-in, and the missed-run detector
+    # reads its absence as "the scheduler did not run this". Sampling it out
+    # (backpressure divides the rate by up to 8) raised "missed its run" for
+    # tasks that ran on time. One small record per run is the price.
+    #
     # The parent's fields may be given as a block instead of keywords. It is
     # called only when a parent is actually going to ship, so a caller whose
     # fields are expensive to assemble (the request middleware: an
@@ -178,7 +184,7 @@ module Railwatch
       # either way: a profiler left running would outlive the execution.
       profiled = exe.profiler_handle && ship_profile(exe, shipping)
       parent = nil
-      if parent_type && (shipping || exe.exception_sampled)
+      if parent_type && (shipping || exe.exception_sampled || parent_type == :scheduled_task)
         fields.merge!(yield) if block_given?
         group ||= fields.delete(:group)
         fields[:tail_sampled] = true if tail
@@ -197,7 +203,8 @@ module Railwatch
         reporter.write(parent) if parent
       elsif parent
         # Head-sampled out, but an unhandled exception rolled the exceptions
-        # sample in: the exception needs its parent, and only its parent.
+        # sample in (the exception needs its parent, and only its parent), or
+        # it is a scheduled task's check-in, which always ships.
         reporter.write(parent)
       end
       parent

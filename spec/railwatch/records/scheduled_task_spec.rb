@@ -69,4 +69,34 @@ RSpec.describe "scheduled_task record" do
 
     expect(railwatch_records(:scheduled_task).sole[:drift]).to be_a(Integer)
   end
+
+  # rebulk-system, 2026-10-10 03:45: EmailIngestionRecoveryJob ran at
+  # 03:45:07 (Solid Queue log), but the reporter's backpressure factor was
+  # 2.0, halving the scheduled_tasks rate to 0.5, and the run rolled out.
+  # Nothing shipped, so the platform read 03:40 as the last run and raised
+  # "email_ingestion_recovery missed its run (expected 03:45)" (REBULK-14).
+  it "ships the scheduled_task check-in, without its child records, when backpressure samples the run out" do
+    job = WidgetJob.new("bob")
+    register_recurring("email_ingestion_recovery", job, schedule: "every 5 minutes")
+    Railwatch.reporter.instance_variable_set(:@backpressure_factor, 2.0)
+    allow(Random).to receive(:rand).and_return(0.6)
+
+    job.perform_now
+
+    task = railwatch_records(:scheduled_task).sole
+    expect(task).to include(task_key: "email_ingestion_recovery", schedule: "every 5 minutes", status: "processed")
+    expect(railwatch_records(:log)).to be_empty
+    expect(railwatch_records(:query)).to be_empty
+  ensure
+    Railwatch.reporter.instance_variable_set(:@backpressure_factor, 1.0)
+  end
+
+  it "still ships a sampled-out ordinary job as nothing at all" do
+    Railwatch.config.sample[:jobs] = 0.0
+
+    WidgetJob.new("plain").perform_now
+
+    expect(railwatch_records(:job_attempt)).to be_empty
+    expect(railwatch_records(:scheduled_task)).to be_empty
+  end
 end

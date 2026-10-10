@@ -6,6 +6,12 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- A scheduled task run always ships its `scheduled_task` record, even when
+  sampling (or reporter backpressure, which divides every rate by up to 8)
+  rolled the run out; only its child records are dropped. The record is the
+  run's check-in, and a sampled-out run read as "missed its run" for a task
+  that ran on time.
+
 ## 0.9.0 (2026-10-08)
 
 - An `outgoing_request` now says whether it was made inside a database
