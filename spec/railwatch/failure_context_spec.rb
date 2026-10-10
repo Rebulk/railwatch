@@ -128,13 +128,16 @@ RSpec.describe "failure context", type: :request do
       expect(railwatch_records(:scheduled_task).sole).to include(task_key: "widget_failure_context", tail_sampled: true)
     end
 
-    it "ships nothing when the task succeeds" do
+    # The scheduled_task record is the run's check-in, so it ships even
+    # sampled out; the failure-context ring is still discarded.
+    it "ships only its check-in when the task succeeds" do
       job = WidgetJob.new("bob")
       register_recurring("widget_failure_context_ok", job)
 
       job.perform_now
 
-      expect(railwatch_records).to be_empty
+      expect(railwatch_records.map { |r| r[:t] }).to eq([ "scheduled_task" ])
+      expect(railwatch_records(:scheduled_task).sole).not_to have_key(:tail_sampled)
     end
   end
 

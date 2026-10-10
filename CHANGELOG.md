@@ -6,6 +6,13 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Sampling (or reporter backpressure, which divides every rate by up to 8)
+  no longer drops a scheduled task's `scheduled_task` record: a sampled-out
+  run still queues it, alone, and only its child records are dropped. The
+  record is the run's check-in, and a sampled-out run read as "missed its
+  run" for a task that ran on time. Once queued it is subject to the same
+  reporter-buffer and delivery limits as any other record.
+
 ## 0.9.0 (2026-10-08)
 
 - An `outgoing_request` now says whether it was made inside a database
