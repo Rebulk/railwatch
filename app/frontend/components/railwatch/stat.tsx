@@ -1,3 +1,4 @@
+import { usePage } from "@inertiajs/react"
 import { ArrowDown, ArrowUp } from "lucide-react"
 import type { ReactNode } from "react"
 
@@ -69,7 +70,14 @@ export interface RollingValue {
 // disconnected, or reduced motion each mean an instant swap -- which is
 // also WCAG 2.2.2's pause/stop mechanism: the live toggle in the page
 // header stops the motion, not just the data.
+//
+// Only the live reload rolls. It keeps the page's URL, and anything that
+// changes the URL -- a new window, range, step or filter -- is a different
+// number rather than the same one moving, so the roll is keyed by the URL:
+// the new number is a fresh first paint, static and immediate, not a roll
+// held back behind the last one's coalescing window.
 function RollingStatValue({ value, format }: RollingValue) {
+  const { url } = usePage()
   const live = useIsLive()
   const reducedMotion = useReducedMotion()
   const formatted = format(value)
@@ -77,7 +85,11 @@ function RollingStatValue({ value, format }: RollingValue) {
   return (
     <>
       <span aria-hidden="true">
-        {animate ? <DigitRoll value={value} format={format} /> : formatted}
+        {animate ? (
+          <DigitRoll key={url} value={value} format={format} />
+        ) : (
+          formatted
+        )}
       </span>
       <span className="sr-only">{formatted}</span>
     </>

@@ -12,6 +12,18 @@ interface Callbacks {
 let created: { id: number; callbacks: Callbacks }[]
 const unsubscribe = vi.fn()
 const reload = vi.fn()
+const cancel = vi.fn()
+// Whether the mocked reload finishes by itself, the way the other tests
+// want it, or stays in flight until a test finishes it.
+let settleReloads = true
+let finishReload: (() => void) | undefined
+interface RouterEvent {
+  detail: { visit: { async: boolean } }
+}
+const routerListeners: Record<string, Set<(event: RouterEvent) => void>> = {
+  start: new Set(),
+  finish: new Set(),
+}
 
 // vi.mock calls are hoisted above the imports above, so mocking these two
 // modules here (rather than statically importing them) is enough to swap
@@ -29,13 +41,35 @@ vi.mock("@/lib/cable", () => ({
 
 vi.mock("@inertiajs/react", () => ({
   router: {
-    reload: (options: { onSuccess?: () => void; onFinish?: () => void }) => {
+    reload: (options: {
+      onCancelToken?: (token: { cancel: () => void }) => void
+      onSuccess?: () => void
+      onFinish?: () => void
+    }) => {
       reload(options)
-      options.onSuccess?.()
-      options.onFinish?.()
+      options.onCancelToken?.({
+        cancel: () => {
+          cancel()
+          options.onFinish?.()
+        },
+      })
+      if (settleReloads) {
+        options.onSuccess?.()
+        options.onFinish?.()
+      } else finishReload = () => options.onFinish?.()
+    },
+    on: (type: string, callback: (event: RouterEvent) => void) => {
+      routerListeners[type].add(callback)
+      return () => routerListeners[type].delete(callback)
     },
   },
 }))
+
+// A visit the user made (async: false), or one the page made by itself.
+function visit(type: "start" | "finish", async = false) {
+  for (const callback of routerListeners[type])
+    callback({ detail: { visit: { async } } })
+}
 
 function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", {
@@ -55,6 +89,9 @@ beforeEach(() => {
   created = []
   unsubscribe.mockClear()
   reload.mockClear()
+  cancel.mockClear()
+  settleReloads = true
+  finishReload = undefined
   localStorage.clear()
   setVisibility("visible")
 })
@@ -159,6 +196,67 @@ describe("useLive", () => {
       vi.advanceTimersByTime(5_000)
     })
     expect(reload).toHaveBeenCalledTimes(2)
+  })
+
+  it("cancels a reload in flight when the user changes the window, so it cannot land on the new page", () => {
+    settleReloads = false
+    renderHook(() => useLive(1))
+    act(() => fire({}))
+    expect(reload).toHaveBeenCalledTimes(1)
+    act(() => visit("start"))
+    expect(cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not refetch, after the user's visit, what that visit just loaded", () => {
+    renderHook(() => useLive(1))
+    act(() => {
+      fire({})
+      vi.advanceTimersByTime(1_000)
+      fire({}) // throttled: due 4s from now
+      visit("start")
+      vi.advanceTimersByTime(200)
+      visit("finish")
+      vi.advanceTimersByTime(10_000)
+    })
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it("holds an event that arrives during the user's visit until the throttle from the visit's start", () => {
+    renderHook(() => useLive(1))
+    act(() => {
+      visit("start")
+      fire({})
+    })
+    expect(reload).not.toHaveBeenCalled()
+    act(() => {
+      vi.advanceTimersByTime(200)
+      visit("finish")
+      vi.advanceTimersByTime(4_799)
+    })
+    expect(reload).not.toHaveBeenCalled()
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it("is not held up by a background visit such as a prefetch", () => {
+    settleReloads = false
+    renderHook(() => useLive(1))
+    act(() => {
+      visit("start", true)
+      fire({})
+    })
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(cancel).not.toHaveBeenCalled()
+    act(() => finishReload?.())
+  })
+
+  it("stops listening to the router on unmount", () => {
+    const { unmount } = renderHook(() => useLive(1))
+    unmount()
+    expect(routerListeners.start.size).toBe(0)
+    expect(routerListeners.finish.size).toBe(0)
   })
 })
 

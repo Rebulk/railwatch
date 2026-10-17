@@ -48,6 +48,13 @@ export function useIsLive() {
 // event arrived while it was hidden. Pass `only` to limit the reload to
 // specific props, matching whatever `router.reload({ only })` accepts;
 // omit it to refresh every prop the current page was rendered with.
+//
+// A visit the user makes (a window, range or filter change; anything that
+// is not itself a background reload) supersedes the reload: one in flight
+// is cancelled, since it is for the URL being left and would otherwise land
+// on top of the new page, none starts until the visit is over, and the
+// visit counts as the latest reload, so the throttle does not follow it
+// with a second fetch of what it just loaded.
 export function useLive(
   environmentId: number,
   {
@@ -98,6 +105,7 @@ export function useLive(
     let disposed = false
     let pending = false
     let inFlight = false
+    let navigating = false
     let lastReloadAt = -Infinity
     let timer: ReturnType<typeof setTimeout> | undefined
     let cancelReload: (() => void) | undefined
@@ -131,6 +139,7 @@ export function useLive(
         disposed ||
         !pending ||
         inFlight ||
+        navigating ||
         pausedRef.current ||
         document.visibilityState !== "visible"
       )
@@ -143,6 +152,21 @@ export function useLive(
     function onVisibilityChange() {
       maybeReload()
     }
+
+    // `async` is every visit the page starts by itself: these reloads, a
+    // poll, a prefetch, a deferred prop.
+    const stopOnStart = router.on("start", (event) => {
+      if (event.detail.visit.async) return
+      navigating = true
+      pending = false
+      lastReloadAt = Date.now()
+      cancelReload?.()
+    })
+    const stopOnFinish = router.on("finish", (event) => {
+      if (event.detail.visit.async) return
+      navigating = false
+      maybeReload()
+    })
 
     document.addEventListener("visibilitychange", onVisibilityChange)
     scheduleRef.current = maybeReload
@@ -169,6 +193,8 @@ export function useLive(
       disposed = true
       cancelReload?.()
       clearTimeout(timer)
+      stopOnStart()
+      stopOnFinish()
       scheduleRef.current = () => undefined
       document.removeEventListener("visibilitychange", onVisibilityChange)
       subscription.unsubscribe()
