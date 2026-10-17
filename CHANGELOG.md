@@ -6,6 +6,17 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.9.2 (2026-10-17)
+
+- Changing the dashboard's window (1h/6h/24h/7d, a custom range, step or
+  filter) shows the new numbers at once. The rolling-digits animation is for
+  live updates of the same page only: a navigation kept `Stat` mounted, so
+  the new window's number waited up to 2 s behind the last roll and rolled
+  up from the old window's value.
+- A live refresh in flight when the window changes is cancelled instead of
+  landing afterwards with the old window's numbers, and the page no longer
+  refetches what the window change just loaded.
+
 ## 0.9.1 (2026-10-10)
 
 - Sampling (or reporter backpressure, which divides every rate by up to 8)
