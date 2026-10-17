@@ -11,6 +11,11 @@ let reducedMotion = false
 
 vi.mock("@/hooks/use-live", () => ({ useIsLive: () => live }))
 
+// The page's URL, which a live reload keeps and a window change does not.
+let url = "/apps/1/envs/1?window=24h"
+
+vi.mock("@inertiajs/react", () => ({ usePage: () => ({ url }) }))
+
 let animations = 0
 
 function fakeAnimate(): Animation {
@@ -20,6 +25,7 @@ function fakeAnimate(): Animation {
 
 beforeEach(() => {
   live = false
+  url = "/apps/1/envs/1?window=24h"
   reducedMotion = false
   animations = 0
   Element.prototype.animate = fakeAnimate
@@ -177,6 +183,27 @@ describe("Stat rolling value", () => {
       <Stat label="Requests" roll={{ value: 36053, format: thousands }} />,
     )
     expect(animations).toBe(1)
+  })
+
+  it("paints a new window's number at once, with no roll, even straight after a live roll", () => {
+    live = true
+    const { container, rerender } = render(
+      <Stat label="Requests" roll={{ value: 36052, format: thousands }} />,
+    )
+    rerender(
+      <Stat label="Requests" roll={{ value: 36053, format: thousands }} />,
+    )
+    expect(animations).toBe(1)
+    // Inside the roll's 2s coalescing window, which used to hold the new
+    // window's number back and then roll the old one into it.
+    url = "/apps/1/envs/1?window=6h"
+    rerender(
+      <Stat label="Requests" roll={{ value: 9120, format: thousands }} />,
+    )
+    expect(animations).toBe(1)
+    expect(container.querySelector("[aria-hidden='true']")).toHaveTextContent(
+      "9,120",
+    )
   })
 
   it("stops animating and shows the plain number when live updates are turned off", () => {
