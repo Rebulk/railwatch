@@ -4,10 +4,11 @@ require "puma/plugin"
 
 # `plugin :railwatch` in config/puma.rb. In embedded mode, forks one
 # Railwatch::Writer from the Puma process once it has booted, restarts it if
-# it dies, and stops it with Puma. Same shape as Solid Queue's
-# `solid_queue_mode :fork`, in both cluster and single mode: a default Rails
-# 8 app runs Puma in single mode (no WEB_CONCURRENCY), and that app's
-# batches belong off its request threads just as much. The fork happens
+# it dies or stops answering on its socket, and stops it with Puma. Same
+# shape as Solid Queue's `solid_queue_mode :fork`, in both cluster and
+# single mode: a default Rails 8 app runs Puma in single mode (no
+# WEB_CONCURRENCY), and that app's batches belong off its request threads
+# just as much. The fork happens
 # from the plugin's background thread with the app loaded and Rails'
 # ForkTracker resetting every Railwatch thread in the child, exactly as it
 # does for a Puma cluster worker. A no-op when Railwatch is off or the
@@ -26,6 +27,21 @@ Puma::Plugin.create do
   # die until the I/O returns, and Puma's exit should not wait for that).
   REAP_POLL = 0.05
   KILL_REAP = 1
+  # How long a freshly forked writer has to bind its socket before it is
+  # treated as hung, KILLed, and replaced. A healthy writer binds about 2s
+  # after the fork (its process record lands ~2s after the web processes'),
+  # so this is several times that. It has to fire well inside
+  # Transport::Socket::WRITER_GRACE (60s), after which every process stops
+  # waiting and writes its own batches in-process: detection lands within
+  # one POLL past this, the KILL and reap take at most KILL_REAP, and the
+  # replacement binds in ~2s, so even a second hang in a row still leaves a
+  # third writer listening at ~38s, before any client has given up.
+  WRITER_BIND_GRACE = 15
+  # Consecutive polls a writer that HAS bound may go without answering on
+  # its socket (listener closed but the process lingering, or the socket
+  # file removed from under it) before it is replaced the same way. Three
+  # polls rather than one so a single refused connect is never a kill.
+  WRITER_LOST_POLLS = 3
 
   def start(launcher)
     @log_writer = launcher.log_writer
@@ -96,6 +112,9 @@ Puma::Plugin.create do
     @writer_pid = ::Railwatch::Writer.fork_writer! do
       ::Railwatch::Writer.run!(parent: @puma_pid)
     end
+    @writer_spawned_at = monotonic
+    @writer_bound = false
+    @writer_misses = 0
     log "Railwatch writer started (pid #{@writer_pid})"
   rescue SystemCallError => e
     @writer_pid = nil
@@ -105,15 +124,54 @@ Puma::Plugin.create do
   # Puma's cluster reaps every child with wait2(-1), the writer included, so
   # waitpid on the writer's pid raises ECHILD after it has died. Liveness is
   # asked with signal 0 instead, which works whoever reaped it.
+  #
+  # Alive is not enough. A child forked from this background thread while
+  # another thread held a lock inherits that lock with no owner, and can
+  # block on it before it ever reaches Writer.run!: alive to signal 0 for
+  # as long as Puma runs, never bound, and every process writing its own
+  # batches once WRITER_GRACE runs out. So a live writer must also be
+  # listening; one that is not (see writer_unresponsive) is KILLed -- TERM
+  # is handled by a Ruby trap, which a thread blocked on a native lock never
+  # returns to run -- reaped, and replaced on the same poll.
   def supervise
     loop do
       sleep POLL
       break if @shutting_down
       next unless @booted && active?
-      next if writer_alive?
 
-      log "Railwatch writer (pid #{@writer_pid}) is gone; starting" if @writer_pid
+      if writer_alive?
+        next unless (reason = writer_unresponsive)
+
+        log "Railwatch writer (pid #{@writer_pid}) #{reason}; killing and restarting"
+        kill_writer
+      elsif @writer_pid
+        log "Railwatch writer (pid #{@writer_pid}) is gone; starting"
+      end
       spawn_writer
+    end
+  end
+
+  # Why a live writer should be replaced, or nil while it is fine. Before it
+  # has ever answered it gets WRITER_BIND_GRACE from the fork; after, it
+  # gets WRITER_LOST_POLLS consecutive misses. The second case is not what
+  # the writer's own wedge guard covers: that one watches batch writes that
+  # never finish, and stops watching once the listener closes, so a writer
+  # whose listener is gone (closed but the process lingers, or the socket
+  # file removed, e.g. by `rails tmp:clear`) would otherwise be kept alive
+  # for good while every client falls back.
+  def writer_unresponsive
+    if ::Railwatch::Writer.listening?(::Railwatch.config.writer_socket_path)
+      @writer_bound = true
+      @writer_misses = 0
+      return nil
+    end
+
+    if @writer_bound
+      @writer_misses += 1
+      "stopped answering on its socket (#{@writer_misses} consecutive checks)" if @writer_misses >= WRITER_LOST_POLLS
+    else
+      waited = monotonic - @writer_spawned_at
+      "never bound its socket after #{waited.round}s (limit #{WRITER_BIND_GRACE}s)" if waited > WRITER_BIND_GRACE
     end
   end
 
@@ -168,6 +226,17 @@ Puma::Plugin.create do
     return if reaped_within?(stop_timeout)
 
     log "Railwatch writer (pid #{@writer_pid}) did not exit within #{stop_timeout}s of TERM; killing it"
+    kill_writer
+  rescue Errno::ECHILD, Errno::ESRCH
+    nil
+  ensure
+    @writer_pid = nil
+  end
+
+  # KILL, reaped with the KILL_REAP deadline, and forgotten either way.
+  def kill_writer
+    return unless @writer_pid
+
     Process.kill(:KILL, @writer_pid)
     log "Railwatch writer (pid #{@writer_pid}) did not exit on KILL; leaving it" unless reaped_within?(KILL_REAP)
   rescue Errno::ECHILD, Errno::ESRCH
@@ -200,14 +269,16 @@ Puma::Plugin.create do
   # wait2(-1) reaped it first) propagates to stop_writer, which reads it as
   # gone.
   def reaped_within?(seconds)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + seconds
+    deadline = monotonic + seconds
     loop do
       return true if Process.waitpid(@writer_pid, Process::WNOHANG)
-      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      return false if monotonic >= deadline
 
       sleep REAP_POLL
     end
   end
+
+  def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
   def log(message)
     log_writer.log(message)
