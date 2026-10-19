@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.9.3 (2026-10-18)
+
 - The dashboard's route helpers and its browser beacon follow the
   `railwatch-mount` meta tag wherever the page is served from: the embedded
   engine mounted somewhere other than `/railwatch`, or a Railwatch server
