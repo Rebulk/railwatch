@@ -230,6 +230,30 @@ describe("startRailwatch batching", () => {
     expect(blobBody(blob).visits.map((v) => v.url)).toEqual(["/a", "/b"])
   })
 
+  it("posts to the beacon under the dashboard's mount point", () => {
+    document.head.insertAdjacentHTML(
+      "beforeend",
+      '<meta name="railwatch-mount" content="/admin/railwatch">',
+    )
+    completeVisit("/a")
+    vi.advanceTimersByTime(5000)
+
+    const calls = sendBeacon.mock.calls as [string, FakeBlob][]
+    expect(calls[calls.length - 1][0]).toBe("/admin/railwatch/beacon")
+  })
+
+  it("ignores a mount that would send the beacon to another origin", () => {
+    document.head.insertAdjacentHTML(
+      "beforeend",
+      '<meta name="railwatch-mount" content="//evil.example">',
+    )
+    completeVisit("/a")
+    vi.advanceTimersByTime(5000)
+
+    const calls = sendBeacon.mock.calls as [string, FakeBlob][]
+    expect(calls[calls.length - 1][0]).toBe("/railwatch/beacon")
+  })
+
   it("does not send an empty batch when the timer fires with nothing queued", () => {
     vi.advanceTimersByTime(5000)
     expect(sendBeacon).not.toHaveBeenCalled()

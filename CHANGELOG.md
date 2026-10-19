@@ -6,6 +6,13 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The dashboard's route helpers and its browser beacon follow the
+  `railwatch-mount` meta tag wherever the page is served from: the embedded
+  engine mounted somewhere other than `/railwatch`, or a Railwatch server
+  mounted inside another app under a base path. The mount is read by one
+  helper (`lib/mount.ts`) that refuses anything but a single absolute path, so
+  a tag like `//host` cannot point links or the beacon at another origin.
+
 ## 0.9.2 (2026-10-17)
 
 - Changing the dashboard's window (1h/6h/24h/7d, a custom range, step or
