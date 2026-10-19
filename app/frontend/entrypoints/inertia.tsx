@@ -5,16 +5,13 @@ import { createRoot } from "react-dom/client"
 
 import { initializeTheme } from "@/hooks/use-appearance"
 import PersistentLayout from "@/layouts/persistent-layout"
+import { applyMount } from "@/lib/mount"
 import { railwatchRootOptions, startRailwatch } from "@/lib/railwatch"
-import { configure as configureRoutes } from "@/routes"
 
-// When served by the embedded engine, every route helper must carry the
-// engine's mount point. The engine layout emits it; the hosted platform does
-// not, so this is a no-op there.
-const mount = document.querySelector<HTMLMetaElement>(
-  'meta[name="railwatch-mount"]',
-)?.content
-if (mount) configureRoutes({ default_url_options: { script_name: mount } })
+// When served under a mount point (the embedded engine, or a Railwatch server
+// mounted inside another app), every route helper must carry it. The layout
+// emits it; the hosted platform does not, so this is a no-op there.
+applyMount()
 
 const appName = import.meta.env.VITE_APP_NAME ?? "Railwatch"
 

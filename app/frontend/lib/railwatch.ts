@@ -127,8 +127,17 @@ let foregroundRequest: { id?: string } | null = null
 // whether or not the first was reported.
 const requestFailures = new WeakSet<object>()
 
+// The engine's beacon, under the dashboard's mount point when the page has
+// one (<meta name="railwatch-mount">, lib/mount.ts; inlined because this
+// file is copied into apps on its own). An app's own pages have no such tag
+// and post to the engine at its default mount.
 function endpoint() {
-  return "/railwatch/beacon"
+  const mount =
+    document
+      .querySelector<HTMLMetaElement>('meta[name="railwatch-mount"]')
+      ?.content.trim()
+      .replace(/\/+$/, "") ?? ""
+  return /^\/(?![/\\])/.test(mount) ? `${mount}/beacon` : "/railwatch/beacon"
 }
 
 function csrf() {
