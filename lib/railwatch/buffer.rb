@@ -20,6 +20,10 @@ module Railwatch
       @bytes = 0
       @dropped = 0
       @dropped_bytes = 0
+      # Every record this queue has ever had to drop for room. Unlike
+      # @dropped it is never drained, so a caller can difference it across a
+      # span of time.
+      @overflowed = 0
       @mutex = Mutex.new
     end
 
@@ -56,6 +60,10 @@ module Railwatch
 
     def bytes
       @mutex.synchronize { @bytes }
+    end
+
+    def overflowed
+      @mutex.synchronize { @overflowed }
     end
 
     def stats
@@ -110,6 +118,7 @@ module Railwatch
     def drop(bytes)
       @dropped += 1
       @dropped_bytes += bytes
+      @overflowed += 1
     end
 
     def drop_oldest

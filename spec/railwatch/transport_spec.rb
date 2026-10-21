@@ -648,8 +648,175 @@ RSpec.describe Railwatch::Reporter do
     end
   end
 
+  # A receiver below its disk floor answers 503 with Retry-After: 60 until
+  # space is back, then accepts at once. The app should sample down while it
+  # refuses, return to full sampling as soon as it accepts, and say both.
+  describe "ingest refusals" do
+    def refused(seconds = 60)
+      delivery_result(ok: false, status: 503).tap do |result|
+        result.error = '{"error":"disk almost full","retry_after":60}'
+        result.retry_after_at = Time.now + seconds
+      end
+    end
+
+    def refusing_transport(&refusing)
+      refusal = method(:refused)
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, **|
+        refusing.call ? refusal.call : Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+      end
+      transport
+    end
+
+    def notices
+      seen = []
+      Railwatch.on_unrecoverable { |error| seen << error.message }
+      seen
+    end
+
+    after { Railwatch.config.on_unrecoverable = nil }
+
+    it "samples down at the full divisor on the first refusal and says so once" do
+      seen = notices
+      reporter = described_class.new(reporter_config, transport: refusing_transport { true })
+      reporter.buffer.push({ t: "log" })
+
+      reporter.flush
+      expect(reporter.backpressure_factor).to eq(described_class::MAX_BACKPRESSURE_FACTOR)
+      reporter.flush
+
+      expect(seen.size).to eq(1)
+      expect(seen.first).to include("ingest is refusing deliveries (HTTP 503: ", "disk almost full",
+                                    "holding 1 record and sampling down until it accepts again")
+    end
+
+    it "keeps the ladder, and quiet, for a failure that is not a refusal" do
+      seen = notices
+      transport = Object.new
+      transport.define_singleton_method(:deliver) { |*, **| Railwatch::Transport::Http::Result.new(ok: false, error: "Net::OpenTimeout") }
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ t: "log" })
+
+      reporter.flush
+
+      expect(reporter.backpressure_factor).to eq(1.0)
+      expect(seen).to be_empty
+    end
+
+    it "is back to full sampling within MAX_REFUSED_RETRY_DELAY of the receiver accepting again" do
+      notices
+      now = 0.0
+      allow(Railwatch::Clock).to receive(:monotonic) { now }
+      refusing_until = 60.0
+      transport = refusing_transport { now < refusing_until }
+      reporter = described_class.new(reporter_config, transport: transport, random: Random.new(42))
+      attempted_at = []
+
+      until now > refusing_until && reporter.backpressure_factor == 1.0
+        reporter.buffer.push({ t: "log", at: now })
+        attempted_at << now
+        reporter.flush
+        retry_at = reporter.instance_variable_get(:@retry_at)
+        now = retry_at || now + reporter_config.flush_interval
+      end
+      recovered_at = attempted_at.last
+
+      expect(recovered_at - refusing_until).to be <= described_class::MAX_REFUSED_RETRY_DELAY
+      # Not hammered while it refused: no two attempts closer than half the cap.
+      refused_attempts = attempted_at.select { |at| at < refusing_until }
+      expect(refused_attempts.each_cons(2).map { |a, b| b - a }.min).to be >= described_class::MAX_REFUSED_RETRY_DELAY / 2
+    end
+
+    it "says what the refusal cost once ingest accepts again" do
+      seen = notices
+      now = 100.0
+      allow(Railwatch::Clock).to receive(:monotonic) { now }
+      refusing = true
+      reporter = described_class.new(reporter_config, transport: refusing_transport { refusing })
+      reporter.buffer.push({ t: "log", n: 0 })
+      reporter.flush
+
+      now += 42
+      3.times { reporter.note_sampled_out }
+      5.times { |n| reporter.buffer.push({ t: "log", n: n + 1 }) } # buffer_size 3: two overflow
+      refusing = false
+      reporter.flush
+
+      expect(reporter.backpressure_factor).to eq(1.0)
+      expect(seen.size).to eq(2)
+      expect(seen.last).to eq("Railwatch ingest is accepting deliveries again after refusing for 42s; meanwhile " \
+                              "backpressure sampled out 3 executions and 2 records were dropped")
+      reporter.flush
+      expect(seen.size).to eq(2)
+    end
+
+    it "prints both lines to stderr by default" do
+      config = reporter_config
+      config.debug = false
+      allow(Railwatch).to receive(:config).and_return(config)
+      refusing = true
+      reporter = described_class.new(config, transport: refusing_transport { refusing })
+      reporter.buffer.push({ t: "log" })
+
+      expect { reporter.flush }.to output(/\A\[railwatch\] Railwatch ingest is refusing deliveries .*warn_on_data_loss = false/).to_stderr
+      refusing = false
+      expect { reporter.flush }.to output(/\A\[railwatch\] Railwatch ingest is accepting deliveries again/).to_stderr
+      expect { reporter.flush }.not_to output.to_stderr
+    end
+
+    it "waits out a short Retry-After, caps a long one, and never retries sooner than the ladder" do
+      random = Object.new
+      random.define_singleton_method(:rand) { 0.0 }
+      reporter = described_class.new(reporter_config, transport: Object.new, random: random)
+      reporter.instance_variable_set(:@retry_attempt, 1)
+
+      expect(reporter.send(:refused_delay, Time.now + 5)).to be_within(0.1).of(5.0)
+      expect(reporter.send(:refused_delay, Time.now + 60)).to eq(described_class::MAX_REFUSED_RETRY_DELAY / 2)
+      expect(reporter.send(:refused_delay, Time.now)).to eq(reporter.send(:retry_delay, 1))
+      reporter.instance_variable_set(:@retry_attempt, 8)
+      expect(reporter.send(:refused_delay, Time.now)).to eq(described_class::MAX_REFUSED_RETRY_DELAY)
+    end
+
+    it "leaves the factor at one when adaptive backpressure is disabled" do
+      seen = notices
+      config = reporter_config
+      config.backpressure = false
+      reporter = described_class.new(config, transport: refusing_transport { true })
+      reporter.buffer.push({ t: "log" })
+
+      reporter.flush
+
+      expect(reporter.backpressure_factor).to eq(1.0)
+      expect(seen.sole).to include("holding 1 record until it accepts again")
+    end
+  end
+
 
   describe "background delivery" do
+    it "does not busy-loop while ingest refuses with Retry-After: 0" do
+      calls = 0
+      lock = Mutex.new
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |_records, dropped: 0, **|
+        lock.synchronize { calls += 1 }
+        Railwatch::Transport::Http::Result.new(ok: false, status: 503, retry_after_at: Time.now)
+      end
+      config = reporter_config
+      config.flush_interval = 0.005
+      config.flush_threshold = 1
+      reporter = described_class.new(config, transport: transport)
+      allow(Railwatch).to receive(:notify_unrecoverable)
+
+      reporter.write({ t: "log" })
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 1
+      Thread.pass until lock.synchronize { calls.positive? } || Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      sleep(0.05)
+
+      expect(lock.synchronize { calls }).to eq(1)
+    ensure
+      reporter&.shutdown
+    end
+
     it "does not busy-loop while a retryable batch is backing off" do
       calls = 0
       lock = Mutex.new

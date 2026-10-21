@@ -8,10 +8,18 @@ module Railwatch
     module_function
 
     def decide(kind)
-      rate = Railwatch.config.sample_rate(kind) / Railwatch.reporter.backpressure_factor
+      configured = Railwatch.config.sample_rate(kind)
+      rate = configured / Railwatch.reporter.backpressure_factor
       return true if rate >= 1.0
       return false if rate <= 0.0
-      Random.rand < rate
+
+      roll = Random.rand
+      return true if roll < rate
+
+      # Kept by the configured rate, lost to backpressure: counted, so the
+      # reporter can say what an ingest refusal cost once it is over.
+      Railwatch.reporter.note_sampled_out if roll < configured
+      false
     end
   end
 end

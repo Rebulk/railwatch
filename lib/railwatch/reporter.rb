@@ -13,7 +13,8 @@ module Railwatch
     # counted) so the buffer's newest records win again. Without the cap a
     # batch that keeps failing would be pinned forever while everything
     # newer was discarded around it. Eight attempts on the backoff ladder is
-    # roughly four minutes of outage.
+    # roughly four minutes of outage; one to two when every attempt is
+    # refused with a Retry-After (MAX_REFUSED_RETRY_DELAY).
     MAX_RETRY_ATTEMPTS = 8
     # An unhandled exception asks for an immediate flush so it reaches the
     # platform without waiting out flush_interval. "Immediate" is this many
@@ -26,7 +27,23 @@ module Railwatch
     # is enough to turn a saturated stream into breathing room without the
     # long recovery and sparse telemetry a 16x cap would impose.
     MAX_BACKPRESSURE_FACTOR = 8.0
+    # A receiver that answers with a Retry-After (503 "disk almost full" or
+    # "database busy", 429 "rate limit exceeded") is refusing, not failing.
+    # The next attempt waits for its Retry-After instead of the ladder, up
+    # to this long. Railwatch's receivers send 15 s for a busy database,
+    # honoured as given, and 60 s for the disk floor and the rate-limit
+    # window, which are not forecasts: the floor is re-checked every 10 s
+    # and lifts the moment space is back, and a window can end at any time.
+    # The ladder alone was worse than either: a minute into a refusal its
+    # rungs were 16-60 s apart, and a recovered app stayed sampled down
+    # until the next one. A longer wait is cut to between half and all of
+    # this, jittered so processes refused together do not return together:
+    # one POST per process every 7.5-15 s.
+    MAX_REFUSED_RETRY_DELAY = 15.0
     DeliveryBatch = Data.define(:id, :records, :bytes, :dropped, :dropped_bytes, :prepared)
+    # From the first refusal to the next accepted delivery: when it began,
+    # what the receiver said, and the loss counters as they stood then.
+    Refusal = Struct.new(:started_at, :reason, :overflowed, :sampled_out, :gave_up)
 
     class DeliveryError < StandardError
       attr_reader :status, :records, :bytes, :dropped, :dropped_bytes
@@ -66,6 +83,8 @@ module Railwatch
       @in_flight_bytes = 0
       @in_flight_dropped_bytes = 0
       @shutdown_notified = false
+      @refusal = nil
+      @sampled_out = 0
     end
 
     def buffer
@@ -74,6 +93,13 @@ module Railwatch
     end
 
     attr_reader :backpressure_factor
+
+    # The sampler calls this for an execution the configured rate kept and
+    # backpressure did not. Only reached while the factor is above one.
+    def note_sampled_out
+      ensure_process!
+      @mutex.synchronize { @sampled_out += 1 }
+    end
 
     def write(record, bytes = nil)
       ensure_process!
@@ -146,6 +172,8 @@ module Railwatch
       @in_flight_bytes = 0
       @in_flight_dropped_bytes = 0
       @shutdown_notified = false
+      @refusal = nil
+      @sampled_out = 0
       remove_instance_variable(:@shutdown_deadline) if defined?(@shutdown_deadline)
       self
     end
@@ -348,6 +376,7 @@ module Railwatch
         # raise here and be retained as if it had failed.
         Railwatch.debug { "ingest rejected #{result.rejected} of #{batch.records.size} records" } if result.rejected.to_i.positive?
         delivery_succeeded
+        refusal_ended if @refusal
       elsif retryable?(result)
         retain(batch, result)
       else
@@ -370,22 +399,33 @@ module Railwatch
     end
 
     def retain(batch, result)
+      refused_until = result.retry_after_at if result.respond_to?(:retry_after_at)
+      refusal = nil
       gave_up = @mutex.synchronize do
         @in_flight_records = 0
         @in_flight_dropped = 0
         @in_flight_bytes = 0
         @in_flight_dropped_bytes = 0
+        if refused_until && !@refusal
+          refusal = @refusal = Refusal.new(started_at: Clock.monotonic, reason: failure_detail(result),
+                                           overflowed: @buffer.overflowed, sampled_out: @sampled_out, gave_up: 0)
+          # Nothing leaves this buffer until the receiver accepts again, and
+          # with retries now seconds apart, so are the flush ticks that would
+          # otherwise double the factor up to here. They hold it there.
+          @backpressure_factor = MAX_BACKPRESSURE_FACTOR if @config.backpressure
+        end
         @retry_attempt += 1
         if @retry_attempt > MAX_RETRY_ATTEMPTS
           @buffer.account_dropped(batch.records.size + batch.dropped,
                                   bytes: batch.bytes + batch.dropped_bytes)
+          @refusal.gave_up += batch.records.size if @refusal
           @retry_attempt = 0
           @retry_at = nil
           Railwatch.debug { "gave up on a batch of #{batch.records.size} records after #{MAX_RETRY_ATTEMPTS} retries (#{result.error || result.status}); dropped and counted" }
           next true
         end
         @retry_batch = batch
-        delay = retry_delay(@retry_attempt)
+        delay = refused_until ? refused_delay(refused_until) : retry_delay(@retry_attempt)
         @retry_at = Clock.monotonic + delay
         @wakeup.signal
         Railwatch.debug do
@@ -393,6 +433,17 @@ module Railwatch
             "(#{result.error || result.status}); retry #{@retry_attempt} in #{delay.round(3)}s"
         end
         false
+      end
+      # From here backpressure samples out executions the app asked to keep,
+      # and the receiver refusing them has no way to count them. Said once
+      # per refusal, and refusal_ended says what it cost.
+      if refusal
+        defer_notification(
+          DeliveryError.new("Railwatch ingest is refusing deliveries (#{refusal.reason}); holding " \
+                            "#{batch.records.size} #{batch.records.size == 1 ? "record" : "records"}" \
+                            "#{" and sampling down" if @config.backpressure} until it accepts again",
+                            status: result.status)
+        )
       end
       return unless gave_up
 
@@ -418,6 +469,42 @@ module Railwatch
                           status: result.status, records: batch.records.size, bytes: batch.bytes,
                           dropped: batch.dropped, dropped_bytes: batch.dropped_bytes)
       )
+    end
+
+    # The first delivery ingest accepted after refusing. The refusal was the
+    # pressure, so the divisor goes straight back to one, as it went up,
+    # rather than halving over three more flush ticks. A buffer still over
+    # its high-water mark raises it again on the next tick, as it would have
+    # anyway.
+    def refusal_ended
+      refusal, sampled_out, overflowed = @mutex.synchronize do
+        ended = @refusal
+        @refusal = nil
+        [ ended, @sampled_out - ended.sampled_out, @buffer.overflowed - ended.overflowed ]
+      end
+      @backpressure_factor = 1.0
+      dropped = overflowed + refusal.gave_up
+      seconds = (Clock.monotonic - refusal.started_at).round
+      defer_notification(
+        DeliveryError.new("Railwatch ingest is accepting deliveries again after refusing for #{seconds}s; " \
+                          "meanwhile backpressure sampled out #{sampled_out} " \
+                          "#{sampled_out == 1 ? "execution" : "executions"} and #{dropped} " \
+                          "#{dropped == 1 ? "record was" : "records were"} dropped",
+                          records: dropped)
+      )
+    end
+
+    # Never sooner than the ladder's rung either, so a receiver answering
+    # "Retry-After: 0" gets backoff, not a loop.
+    def refused_delay(retry_after_at)
+      wanted = retry_after_at - Time.now
+      return MAX_REFUSED_RETRY_DELAY * (0.5 + @random.rand * 0.5) if wanted > MAX_REFUSED_RETRY_DELAY
+
+      [ wanted, retry_delay(@retry_attempt) ].max.clamp(0.0, MAX_REFUSED_RETRY_DELAY)
+    end
+
+    def failure_detail(result)
+      [ result.status && "HTTP #{result.status}", result.error ].compact.reject { |part| part.to_s.empty? }.join(": ")
     end
 
     def discard_unauthorized

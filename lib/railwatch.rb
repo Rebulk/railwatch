@@ -355,8 +355,10 @@ module Railwatch
     # the gem recovered, and a subscriber that raises once is noise in
     # someone else's cron output. A DeliveryError is different. It is raised
     # only when records are already gone -- a batch dropped after the retry
-    # ladder, one the receiver permanently refused, or the ones still unsent
-    # when at_exit's bounded shutdown ran out of time -- and since 0.3.7 that
+    # ladder, one the receiver permanently refused, the ones still unsent
+    # when at_exit's bounded shutdown ran out of time, or the executions an
+    # ingest refusal sampled out (said when it starts, counted when it
+    # ends) -- and since 0.3.7 that
     # shutdown is the only delivery a rake task or runner gets. Behind
     # RAILWATCH_DEBUG that loss was invisible: a cron job whose exception
     # never reached the platform looked exactly like one that had nothing to

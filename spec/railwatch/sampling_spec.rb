@@ -53,6 +53,18 @@ RSpec.describe "sampling", type: :request do
     Railwatch.reporter.instance_variable_set(:@backpressure_factor, 1.0)
   end
 
+  it "counts only the executions backpressure took from the configured rate" do
+    Railwatch.config.sample[:requests] = 0.5
+    Railwatch.reporter.instance_variable_set(:@backpressure_factor, 4.0)
+    # 0.1 kept at 0.125; 0.3 kept by the configured rate, lost to backpressure; 0.7 lost either way.
+    allow(Random).to receive(:rand).and_return(0.1, 0.3, 0.7)
+
+    expect(3.times.map { Railwatch::Sampler.decide(:requests) }).to eq([ true, false, false ])
+    expect(Railwatch.reporter.instance_variable_get(:@sampled_out)).to eq(1)
+  ensure
+    Railwatch.reporter.instance_variable_set(:@backpressure_factor, 1.0)
+  end
+
   it "ships nothing for an unhandled exception when sampled out and exceptions rate is 0.0" do
     Railwatch.config.sample[:requests] = 0.0
     Railwatch.config.sample[:exceptions] = 0.0
