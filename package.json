@@ -21,7 +21,7 @@
     "rails-vite-plugin": "^0.1.2",
     "tw-animate-css": "^1.4.0",
     "typescript-eslint": "^8.29.1",
-    "vite": "^7.0.5",
+    "vite": "^7.3.7",
     "vitest": "^4.1.11"
   },
   "dependencies": {
@@ -76,7 +76,8 @@
   },
   "pnpm": {
     "overrides": {
-      "@tailwindcss/typography>postcss-selector-parser": "^7.1.6"
+      "@tailwindcss/typography>postcss-selector-parser": "^7.1.6",
+      "axios>follow-redirects": "^1.16.1"
     }
   }
 }

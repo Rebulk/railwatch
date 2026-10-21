@@ -6,6 +6,7 @@ settings:
 
 overrides:
   '@tailwindcss/typography>postcss-selector-parser': ^7.1.6
+  axios>follow-redirects: ^1.16.1
 
 importers:
 
@@ -61,7 +62,7 @@ importers:
         version: 0.5.20(tailwindcss@4.3.3)
       '@tailwindcss/vite':
         specifier: ^4.0.6
-        version: 4.3.3(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+        version: 4.3.3(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
       '@types/react':
         specifier: ^19.2.7
         version: 19.2.18
@@ -70,7 +71,7 @@ importers:
         version: 19.2.5(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.0.0
-        version: 5.2.0(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+        version: 5.2.0(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -116,7 +117,7 @@ importers:
         version: 9.39.5
       '@testing-library/jest-dom':
         specifier: ^7.0.1
-        version: 7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.11(jsdom@26.1.0)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0)))
+        version: 7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.11(jsdom@26.1.0)(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0)))
       '@testing-library/react':
         specifier: ^16.3.3
         version: 16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -161,7 +162,7 @@ importers:
         version: 0.7.4(prettier@3.9.6)
       rails-vite-plugin:
         specifier: ^0.1.2
-        version: 0.1.2(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+        version: 0.1.2(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -169,11 +170,11 @@ importers:
         specifier: ^8.29.1
         version: 8.69.0(eslint@9.39.5(jiti@2.7.0))(typescript@5.9.3)
       vite:
-        specifier: ^7.0.5
-        version: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+        specifier: ^7.3.7
+        version: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(jsdom@26.1.0)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+        version: 4.1.11(jsdom@26.1.0)(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
 
 packages:
 
@@ -253,6 +254,10 @@ packages:
     engines: {node: '>=6.9.0'}
     peerDependencies:
       '@babel/core': ^7.0.0-0
+
+  '@babel/runtime@7.29.10':
+    resolution: {integrity: sha512-NpugTzbKgGrNe45Ui32cN8vCFFMxVtP/9rtfwv0nP5FRDAjvYBxJcLVpYA9mr1jxP6cnIT7x9LUzuDTbWYYNRA==}
+    engines: {node: '>=6.9.0'}
 
   '@babel/runtime@7.29.7':
     resolution: {integrity: sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw==}
@@ -2466,8 +2471,8 @@ packages:
   flatted@3.4.4:
     resolution: {integrity: sha512-5+ybhBZANEJxaH3X5evAFatUxLfEHSr7n6kYJ+1Qd0mUqr4eu9gIf6GDbWHf8RJijHrjjO8G+la14SlL2SeS1Q==}
 
-  follow-redirects@1.16.0:
-    resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
+  follow-redirects@1.16.1:
+    resolution: {integrity: sha512-FNvFGzoMLWmE6Yj9spb/zjd7yiNCHiAW9/Tg9CXrQ8wuu32HtlJOwWO11OJafl5FfY3DxTdQ0vj42zU1kvv5jg==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -3574,8 +3579,8 @@ packages:
   victory-vendor@37.3.6:
     resolution: {integrity: sha512-SbPDPdDBYp+5MJHhBCAyI7wKM3d5ivekigc2Dk2s7pgbZ9wIgIBYGVw4zGHBml/qTFbexrofXW6Gu4noGxrOwQ==}
 
-  vite@7.3.6:
-    resolution: {integrity: sha512-4XP60spRGjSZFf1qYH+dJIkK2znL3zQfl9KkOV9MkkRR/3Dls0dxaBsQPTloEc5BLXWPL9vsOxopxyKoMmDueg==}
+  vite@7.3.7:
+    resolution: {integrity: sha512-AHEzTORMbi7/7aXp7w7KZ5+DCUdSeLsJz0grY8xHpc9DHdYb0vQu6DqJfm2tOw3gDExNgPgnJTXxM6syYFHaCA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -3841,6 +3846,8 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.7
       '@babel/helper-plugin-utils': 7.29.7
+
+  '@babel/runtime@7.29.10': {}
 
   '@babel/runtime@7.29.7': {}
 
@@ -5080,12 +5087,12 @@ snapshots:
       postcss-selector-parser: 7.1.6
       tailwindcss: 4.3.3
 
-  '@tailwindcss/vite@4.3.3(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))':
+  '@tailwindcss/vite@4.3.3(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))':
     dependencies:
       '@tailwindcss/node': 4.3.3
       '@tailwindcss/oxide': 4.3.3
       tailwindcss: 4.3.3
-      vite: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+      vite: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
 
   '@tanstack/react-virtual@3.14.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -5098,7 +5105,7 @@ snapshots:
   '@testing-library/dom@10.4.1':
     dependencies:
       '@babel/code-frame': 7.29.7
-      '@babel/runtime': 7.29.7
+      '@babel/runtime': 7.29.10
       '@types/aria-query': 5.0.4
       aria-query: 5.3.0
       dom-accessibility-api: 0.5.16
@@ -5106,7 +5113,7 @@ snapshots:
       picocolors: 1.1.1
       pretty-format: 27.5.1
 
-  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.11(jsdom@26.1.0)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0)))':
+  '@testing-library/jest-dom@7.0.1(@testing-library/dom@10.4.1)(vitest@4.1.11(jsdom@26.1.0)(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0)))':
     dependencies:
       '@adobe/css-tools': 4.5.0
       '@testing-library/dom': 10.4.1
@@ -5116,7 +5123,7 @@ snapshots:
       picocolors: 1.1.1
       redent: 3.0.0
     optionalDependencies:
-      vitest: 4.1.11(jsdom@26.1.0)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+      vitest: 4.1.11(jsdom@26.1.0)(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
 
   '@testing-library/react@16.3.3(@testing-library/dom@10.4.1)(@types/react-dom@19.2.5(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -5376,7 +5383,7 @@ snapshots:
   '@unrs/resolver-binding-win32-x64-msvc@1.12.2':
     optional: true
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -5384,7 +5391,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+      vite: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -5397,13 +5404,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))':
+  '@vitest/mocker@4.1.11(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+      vite: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -5549,7 +5556,7 @@ snapshots:
 
   axios@1.20.0:
     dependencies:
-      follow-redirects: 1.16.0
+      follow-redirects: 1.16.1
       form-data: 4.0.6
       https-proxy-agent: 5.0.1
       proxy-from-env: 2.1.0
@@ -6138,7 +6145,7 @@ snapshots:
 
   flatted@3.4.4: {}
 
-  follow-redirects@1.16.0: {}
+  follow-redirects@1.16.1: {}
 
   for-each@0.3.5:
     dependencies:
@@ -6822,10 +6829,10 @@ snapshots:
       '@types/react': 19.2.18
       '@types/react-dom': 19.2.5(@types/react@19.2.18)
 
-  rails-vite-plugin@0.1.2(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0)):
+  rails-vite-plugin@0.1.2(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0)):
     dependencies:
       picomatch: 4.0.7
-      vite: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+      vite: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
 
   react-aria@3.52.0(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
@@ -7352,7 +7359,7 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0):
+  vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0):
     dependencies:
       esbuild: 0.28.2
       fdir: 6.5.0(picomatch@4.0.7)
@@ -7365,10 +7372,10 @@ snapshots:
       jiti: 2.7.0
       lightningcss: 1.32.0
 
-  vitest@4.1.11(jsdom@26.1.0)(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0)):
+  vitest@4.1.11(jsdom@26.1.0)(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@7.3.6(jiti@2.7.0)(lightningcss@1.32.0))
+      '@vitest/mocker': 4.1.11(vite@7.3.7(jiti@2.7.0)(lightningcss@1.32.0))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -7385,7 +7392,7 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 7.3.6(jiti@2.7.0)(lightningcss@1.32.0)
+      vite: 7.3.7(jiti@2.7.0)(lightningcss@1.32.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       jsdom: 26.1.0
