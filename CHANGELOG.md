@@ -6,6 +6,20 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Sampling recovers as soon as ingest does. A receiver refusing with a
+  `Retry-After` (a Railwatch server below its disk floor answers 503 with
+  `Retry-After: 60`) kept the app at 1/8 sampling for 50-60 s after it was
+  accepting again: the factor only halved per accepted delivery, and those
+  waited on 32-60 s backoff rungs. A refusal is now retried after its
+  `Retry-After` or 7.5-15 s, whichever is sooner (never sooner than the
+  backoff rung), and the first accepted delivery puts the factor back to
+  1x.
+- A refusal is no longer silent. One `[railwatch]` line when ingest starts
+  refusing, and one when it accepts again, with how many executions
+  backpressure sampled out and how many records were dropped meanwhile.
+  Both go through `on_unrecoverable` / `warn_on_data_loss`, like lost
+  batches.
+
 ## 0.9.3 (2026-10-18)
 
 - The dashboard's route helpers and its browser beacon follow the

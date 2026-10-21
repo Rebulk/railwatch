@@ -411,7 +411,12 @@ result without inserting the payload twice. Records written while a request is i
 separate bounded buffer, so they never change the retained request's
 identity. At most one retained batch plus one live buffer are held in
 memory. The reporter retries with jittered exponential backoff, from one
-second up to 60 seconds. It does not busy-loop. A 401 marks the transport
+second up to 60 seconds. It does not busy-loop. A response with a
+`Retry-After` (a 503 for a full disk or busy database, a 429 rate limit) is a
+refusal: the next attempt waits for its `Retry-After` instead, but never
+less than the backoff rung and never more than 15 seconds (jittered down to
+7.5), because Railwatch's receivers send a fixed 60 there, not a forecast.
+A 401 marks the transport
 permanently unauthorized: no further HTTP attempts for the process's
 lifetime. It and other permanent client rejections are reported through
 `on_unrecoverable`. Delivery never raises into app code.
@@ -432,6 +437,15 @@ only writer, an ivar assignment is atomic, and one stale read only
 affects one probabilistic decision. Set `backpressure` false to keep the
 factor at 1. The current value is sent as
 `X-Railwatch-Backpressure-Factor` whenever it is greater than 1.
+
+A refusal from ingest (see above) sets the factor straight to 8x, and the
+first delivery accepted after it sets it straight back to 1x, so sampling
+recovers within one retry of the receiver recovering. Each refusal prints
+two `[railwatch]` lines, the same way lost records do (see
+`warn_on_data_loss`): one when it starts, and one when ingest accepts
+again, with how long it lasted, how many executions backpressure sampled
+out that the configured rates would have kept, and how many records were
+dropped.
 
 `Railwatch.flush` forces an immediate flush, on the calling thread and
 without a time limit, so it is yours to call when you know you want to
@@ -827,16 +841,19 @@ Railwatch.on_unrecoverable { |error| Rails.error.report(error, handled: true) }
 ```
 
 Called whenever Railwatch rescues one of its own internal errors, ingest
-permanently rejects a batch, or shutdown expires with retained records
-that could not be sent. Retryable delivery failures stay buffered and do
-not fire the callback on every attempt. With no callback registered, a
+permanently rejects a batch, ingest starts or stops refusing deliveries, or
+shutdown expires with retained records that could not be sent. Retryable
+delivery failures stay buffered and do not fire the callback on every
+attempt. With no callback registered, a
 recovered internal error falls back to `Railwatch.debug`, gated on
 `RAILWATCH_DEBUG` — the gem carried on and there is nothing to do about it.
 
 **Lost records are different, and are reported by default.** A batch
 dropped after its retry ladder, one the receiver permanently refused, or
 records still unsent when the bounded shutdown ran out of time each print
-one `[railwatch]` stderr line. Telemetry that vanishes silently looks
+one `[railwatch]` stderr line. So do the start and end of an ingest
+refusal, which samples down until it is over (see backpressure above).
+Telemetry that vanishes silently looks
 exactly like having nothing to report, and a short-lived process — a rake
 task, a `rails runner`, a cron job — gets one bounded shutdown and no
 second chance to mention it.
