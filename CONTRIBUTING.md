@@ -8,19 +8,18 @@ bundle exec rubocop
 bundle exec rake bench
 ```
 
-The dashboard is a React app under `app/frontend`; the gem ships its build.
-Working on it needs Node 22 and pnpm:
+The Inertia browser client the install generator copies into a host lives
+at `lib/generators/railwatch/install/templates/railwatch.ts`. Its tests
+(`spec/javascript`) need Node 22 and pnpm:
 
 ```sh
 pnpm install
-pnpm check && pnpm lint && pnpm format && pnpm test
-bundle exec rake dashboard:build     # compiles into public/railwatch (gitignored)
+pnpm test
 ```
 
-`rake package:verify` and `rake package:build` run that build first, so a
-release is `git tag vX.Y.Z && git push --tags`: the workflow builds the
-bundle, verifies the package, and publishes. A host application never sees
-Node; it installs the compiled bundle inside the gem.
+The gem itself ships no JavaScript build and a host application never needs
+Node for it. The dashboard is not in this repository: it is part of the
+server, [railwatch-rs](https://github.com/Rebulk/railwatch-rs).
 
 ### Versioning
 
@@ -58,8 +57,7 @@ the committed file for exactly this reason and will tell you first.
    version from the file rather than the tag, and a mismatch would publish
    the wrong one under a tag claiming otherwise.
 3. `.github/workflows/release.yml` runs the specs, verifies the package,
-   rebuilds the dashboard, refuses to publish a gem whose dashboard is
-   missing (`rake package:assert_dashboard`), and pushes to RubyGems.
+   builds the gem, and pushes to RubyGems.
 
 Publishing uses [RubyGems Trusted
 Publishing](https://guides.rubygems.org/trusted-publishing/), so there is

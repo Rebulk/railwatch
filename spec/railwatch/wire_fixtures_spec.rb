@@ -224,13 +224,6 @@ RSpec.describe "wire fixtures", type: :request do
     Railwatch.config.profile_sample = 0.0
   end
 
-  it "maps every shipped fixture through the gem's own mapper" do
-    Railwatch.wire_fixtures.each do |type, record|
-      row = type == "user" ? Railwatch::Ingest::Mapper.person_record(record) : Railwatch::Ingest::Mapper.row_for(record)
-      expect(row).to be_present, "#{type} did not map"
-    end
-  end
-
   it "ships compressed fields a receiver can decode" do
     %w[profile attachment].each do |type|
       record = Railwatch.wire_fixtures.fetch(type)

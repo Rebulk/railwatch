@@ -3,25 +3,20 @@
 This review covers the open-source gem that runs in a customer's Rails
 application. Railwatch Cloud is a separate service and is outside this review.
 
-## Embedded dashboard
+## Dashboard gate (railwatch-server)
 
-In embedded mode (the installer's default) the gem also serves a dashboard at
-the engine's mount, showing every query, log line and exception the app
-recorded. HTTP Basic authentication is on by default. With no credentials
-configured, every dashboard request is 401 in every environment except
-development, where it is open; the app logs a warning at boot outside
-development, and `railwatch:doctor` reports the gate. Credentials, once set,
-apply in development too. An app that turns Basic off gates pages with its own
-`base_controller_class` or a routes constraint; live updates over Action Cable
-are refused unless Basic, a `dashboard_user` resolver, or `dashboard_open`
-authorizes them. See [Embedded mode](embedded.md#authentication).
-
-The writer socket that web workers hand batches to is created with a 0700
-directory and a 0600 socket, so only the app's own user can connect.
+The gem serves no dashboard. With the separate `railwatch-server` gem
+installed, a dashboard showing every query, log line and exception the app
+recorded is proxied at `/railwatch`, and its gate is this gem's settings.
+HTTP Basic authentication is on by default. With no credentials configured,
+every dashboard request is 401 in every environment except development,
+where it is open. Credentials, once set, apply in development too. An app
+that turns Basic off gates the dashboard with its own `base_controller_class`,
+which railwatch-server's proxy controller inherits from. See
+[Configuration](configuration.md#dashboard-gate-railwatch-server).
 
 ## Transport
 
-This applies to a cloud install and to export from an embedded install.
 `Railwatch::Transport::Http` sends gzip NDJSON with `Net::HTTP`. HTTPS explicitly
 sets OpenSSL's `VERIFY_PEER`; a spec pins that setting. The transport does not
 implement redirect handling, so a redirect response is treated as a permanent
@@ -52,8 +47,7 @@ configuration and record specs:
   filtered. `Locals.inspect_value` rescues an `inspect` implementation that
   raises; this behavior is covered by an exception-record spec.
 - `capture_exception_source` is true. Source lines surrounding in-application
-  backtrace frames are recorded, and sent to Railwatch Cloud when the install
-  reports or exports there. Disable it if source context is outside the
+  backtrace frames are recorded and sent to the configured server. Disable it if source context is outside the
   application's telemetry policy.
 
 Log record messages are sent exactly as supplied to `Rails.logger`. Railwatch
@@ -107,8 +101,8 @@ application/deployment secret and must not be committed.
   application-specific credentials and personal data.
 - Keep secrets out of exception messages, log text, source files, tenant ids,
   user resolvers, and custom context.
-- In embedded mode, set dashboard credentials (or your own gate) before
-  deploying; see [Embedded mode](embedded.md#authentication).
+- With railwatch-server, set dashboard credentials (or your own gate) before
+  deploying; see [Configuration](configuration.md#dashboard-gate-railwatch-server).
 - Use HTTPS in production and keep TLS verification enabled.
 - Put a request-body limit at the reverse proxy when the public beacon is
   enabled, and choose a shared cache if rate limits must span processes.

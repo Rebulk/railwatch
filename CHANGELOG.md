@@ -6,6 +6,54 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- **Breaking: `railwatch` is the agent only.** It instruments the app and
+  sends to an ingest URL: Railwatch Cloud (the default,
+  `https://railwatch.rebulk.com`) or a self-hosted
+  [railwatch-rs](https://github.com/Rebulk/railwatch-rs) server
+  (`RAILWATCH_INGEST_URL`, `RAILWATCH_TOKEN`). Embedded mode is gone from
+  this gem: `transport :local` / `RAILWATCH_TRANSPORT`, the two SQLite
+  databases (`railwatch`, `railwatch_telemetry`) and their migrations, the
+  Puma writer (`plugin :railwatch`), the maintenance clock, export to the
+  cloud, the dashboard pages, its live channel and its compiled bundle.
+  The dashboard is part of the server now, and the gem has no runtime
+  dependency on `inertia_rails` or `tdigest`.
+  - The dashboard inside the app is the separate
+    [railwatch-server](https://github.com/Rebulk/railwatch-server) gem. It
+    runs the railwatch-rs server next to Puma and points this agent at it.
+  - Removed settings: `transport`, `issue_prefix`, `repository_url`,
+    `retention_days`, `dashboard_user`, `dashboard_open`, `writer_socket`,
+    `migration_busy_timeout`, and every `export_*`, with their
+    `RAILWATCH_*` variables. Removed rake tasks: `railwatch:vacuum`,
+    `railwatch:vacuum:status`, `railwatch:export:status`, `:rebind` and
+    `:discard`. Removed: `Railwatch.migrations_path`,
+    `Railwatch.url_helpers`, `Railwatch.frontend_path`.
+  - `http_basic_auth_enabled`, `http_basic_auth_user`,
+    `http_basic_auth_password`, `base_controller_class` and
+    `bin/rails railwatch:authentication:configure` stay. They are the gate
+    railwatch-server puts in front of its dashboard, and do nothing without
+    it.
+  - `bin/rails generate railwatch:install` sets up the agent only: token,
+    ingest URL (`--url` for a self-hosted server), the beacon mount, the
+    Kamal hook, the browser client and the test helpers. It no longer
+    writes `config/database.yml` or `config/puma.rb`, and `--cloud` is gone
+    because there is no other mode.
+  - The browser client moved to
+    `lib/generators/railwatch/install/templates/railwatch.ts`
+    (`Railwatch.browser_client_path`). Apps that already copied it keep
+    their copy at `app/frontend/lib/railwatch.ts`.
+  - Upgrading an embedded 0.x install: delete `c.transport = :local` (or
+    `RAILWATCH_TRANSPORT=local`), delete `plugin :railwatch` from
+    `config/puma.rb` (Puma refuses to boot with a plugin it cannot find),
+    and delete the `railwatch` and `railwatch_telemetry` entries from
+    `config/database.yml`. Then add `gem "railwatch-server"` and
+    `plugin :railwatch_server`. The old data in
+    `storage/<env>_railwatch.sqlite3` and
+    `storage/<env>_railwatch_telemetry.sqlite3` is not migrated: railwatch-rs
+    has no import for these files (`railwatch import-rails` reads a
+    Railwatch Cloud install, not this gem's embedded databases), so the new
+    dashboard starts empty. Keep the old files only if you want them; they
+    can be deleted.
+
 ## 0.9.4 (2026-10-22)
 
 - Sampling recovers as soon as ingest does. A receiver refusing with a

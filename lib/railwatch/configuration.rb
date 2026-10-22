@@ -60,23 +60,18 @@ module Railwatch
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
-    # What the dashboard controllers inherit from unless the host names its
-    # own. Also how `dashboard_gate` tells "they wired their own auth" from
-    # "they left the default".
+    # What railwatch-server's dashboard proxy inherits from unless the host
+    # names its own.
     DEFAULT_BASE_CONTROLLER = "ActionController::Base"
 
-    attr_accessor :export_enabled, :export_policy, :export_url, :export_token, :export_max_bytes,
-                  :export_max_deliveries, :export_max_age
-    attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment, :transport,
-                  :issue_prefix, :repository_url, :retention_days, :dashboard_user, :writer_socket,
+    attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment,
                   :http_basic_auth_enabled, :http_basic_auth_user, :http_basic_auth_password, :base_controller_class,
-                  :dashboard_open,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
                   :backpressure,
                   :flush_interval, :flush_threshold,
-                  :connect_timeout, :timeout, :shutdown_timeout, :migration_busy_timeout,
+                  :connect_timeout, :timeout, :shutdown_timeout,
                   :slow_query_threshold_ms, :n_plus_one_threshold,
                   :max_view_renders_per_execution, :ignored_cache_key_prefixes,
                   :beacon_enabled, :beacon_rate_limit, :beacon_global_rate_limit, :beacon_allowed_origins,
@@ -99,49 +94,24 @@ module Railwatch
     def initialize
       @enabled = env_bool("RAILWATCH_ENABLED", true)
       @token = ENV["RAILWATCH_TOKEN"]
-      @transport = ENV.fetch("RAILWATCH_TRANSPORT", "http").to_sym
-      # Embedded dashboard settings; ignored when transport is :http.
-      @issue_prefix = ENV["RAILWATCH_ISSUE_PREFIX"]
-      @repository_url = ENV["RAILWATCH_REPOSITORY_URL"]
-      @retention_days = env_int("RAILWATCH_RETENTION_DAYS", 7)
-      @dashboard_user = nil
-      # Mirroring an embedded install's telemetry to a remote receiver. Off
-      # unless asked for: an embedded install's promise is that nothing leaves
-      # the machine, and a token being present is not consent.
-      @export_enabled = env_bool("RAILWATCH_EXPORT_ENABLED", false)
-      @export_policy = ENV.fetch("RAILWATCH_EXPORT_POLICY", "everything").to_sym
-      @export_url = ENV["RAILWATCH_EXPORT_URL"]
-      @export_token = ENV["RAILWATCH_EXPORT_TOKEN"]
-      @export_max_bytes = env_int("RAILWATCH_EXPORT_MAX_BYTES", 256 * 1024 * 1024)
-      @export_max_deliveries = env_int("RAILWATCH_EXPORT_MAX_DELIVERIES", 100_000)
-      @export_max_age = env_int("RAILWATCH_EXPORT_MAX_AGE_SECONDS", 86_400)
-      # Dashboard access, the way Mission Control Jobs does it: HTTP Basic
+      # The gate in front of the dashboard railwatch-server serves at
+      # /railwatch, the way Mission Control Jobs does it: HTTP Basic
       # authentication is on and CLOSED by default. With no user and password
       # configured every dashboard request is 401, so an install that forgot
       # to set anything up is never a public page. Credentials come from
       # Rails credentials (railwatch.http_basic_auth_user/_password, written
       # by `bin/rails railwatch:authentication:configure`), from these env
       # vars, or by assignment here. A host with its own admin auth turns
-      # Basic off and names a base controller, or wraps the mount in a
-      # routes constraint.
+      # Basic off and names a base controller. Nothing here reads them unless
+      # railwatch-server is installed.
       @http_basic_auth_enabled = env_bool("RAILWATCH_HTTP_BASIC_AUTH_ENABLED", true)
       @http_basic_auth_user = ENV["RAILWATCH_HTTP_BASIC_AUTH_USER"]
       @http_basic_auth_password = ENV["RAILWATCH_HTTP_BASIC_AUTH_PASSWORD"]
-      # Only consulted when HTTP Basic is off: the host saying, in as many
-      # words, "I accept that anyone who can reach this URL can read it".
-      # A private network or a VPN is a real answer; this is how you say so,
-      # and it is what silences the boot warning and opens the live channel.
-      @dashboard_open = env_bool("RAILWATCH_DASHBOARD_OPEN", false)
-      # The dashboard controllers inherit from this class, so a host's own
-      # before_actions (require an admin, redirect to sign-in) run in front of
-      # every page. Default is the engine's own base, which authenticates
-      # nothing itself beyond HTTP Basic above.
+      # railwatch-server's dashboard proxy inherits from this class, so a
+      # host's own before_actions (require an admin, redirect to sign-in) run
+      # in front of every page. The default authenticates nothing itself
+      # beyond HTTP Basic above.
       @base_controller_class = ENV.fetch("RAILWATCH_BASE_CONTROLLER_CLASS", DEFAULT_BASE_CONTROLLER)
-      # Embedded mode's writer process (lib/railwatch/writer.rb): the Unix
-      # socket the Puma workers hand their batches to. Relative paths are
-      # under Rails.root. nil disables the writer and every process writes
-      # its own batches, as before.
-      @writer_socket = ENV.fetch("RAILWATCH_WRITER_SOCKET", "tmp/sockets/railwatch-writer.sock")
       @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://railwatch.rebulk.com")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
@@ -187,13 +157,6 @@ module Railwatch
       @connect_timeout = env_float("RAILWATCH_CONNECT_TIMEOUT", 1.0)
       @timeout = env_float("RAILWATCH_TIMEOUT", 3.0)
       @shutdown_timeout = env_float("RAILWATCH_SHUTDOWN_TIMEOUT", 2.0)
-      # Seconds a migration of the railwatch databases waits for SQLite's
-      # write lock (Patches::MigrationBusyTimeout). A deploy migrates while
-      # the old release's writer is still committing to the same file; the
-      # database's own `timeout` (5 s) is too short to get between its
-      # transactions when the disk is busy. Kept under a typical health-check
-      # window (Kamal's deploy_timeout defaults to 30 s and is often 90 s).
-      @migration_busy_timeout = env_float("RAILWATCH_MIGRATION_BUSY_TIMEOUT", 60.0)
       @slow_query_threshold_ms = env_float("RAILWATCH_SLOW_QUERY_MS", 5.0)
       @n_plus_one_threshold = env_int("RAILWATCH_N_PLUS_ONE_THRESHOLD", 5)
       @max_view_renders_per_execution = 20
@@ -318,67 +281,13 @@ module Railwatch
     end
 
     def enabled?
-      @enabled && (local? || token.present?)
+      @enabled && token.present?
     end
 
-    # :local writes telemetry into the engine's own database in-process;
-    # anything else ships it to ingest_url over HTTPS.
-    def local? = transport.to_s == "local"
+    # Always false: there is no embedded transport any more. Only
+    # railwatch-server 0.1.0 calls it.
+    def local? = false
 
-    # The receiver admits an unseen delivery for seven days; queueing one for
-    # longer cannot help.
-    MAX_EXPORT_AGE = 7 * 24 * 60 * 60
-
-    # Mirroring is a thing an embedded install opts into; it is meaningless
-    # for an install that is already sending everything over HTTP.
-    def export? = export_enabled && local? && export_problem.nil?
-
-    # Why export is configured but unusable, or nil when it is fine. The
-    # doctor reports this; nothing silently half-enables.
-    def export_problem
-      return nil unless export_enabled
-      return "export needs transport :local; an :http install already sends everything" unless local?
-      return "RAILWATCH_EXPORT_POLICY #{export_policy} is not implemented" unless export_policy.to_s == "everything"
-      return "no export token: set RAILWATCH_EXPORT_TOKEN or RAILWATCH_TOKEN" if resolved_export_token.to_s.empty?
-      return "no export url: set RAILWATCH_EXPORT_URL or RAILWATCH_INGEST_URL" if resolved_export_url.to_s.empty?
-      return "export url must be HTTPS (or set RAILWATCH_ALLOW_HTTP=true)" unless url_allowed?(resolved_export_url)
-      # Past this a receiver stops recognising a delivery's id, so holding one
-      # any longer just means discovering later that it can never be sent.
-      if export_max_age > MAX_EXPORT_AGE
-        return "RAILWATCH_EXPORT_MAX_AGE_SECONDS cannot exceed #{MAX_EXPORT_AGE} (the receiver stops recognising a delivery past that)"
-      end
-
-      nil
-    end
-
-    # The receiver, and the credential we are bound to it with. Both fall back
-    # to the ordinary ingest settings so switching an install from embedded to
-    # cloud needs no second set of values.
-    def resolved_export_url
-      url = export_url.presence || (ingest_url.presence && URI.join(ingest_url, "/ingest").to_s)
-      url&.sub(%r{/\z}, "")
-    rescue URI::Error
-      # BadURIError (a relative ingest_url) is not an InvalidURIError, and
-      # letting it out of here takes the doctor down with it.
-      nil
-    end
-
-    def resolved_export_token = export_token.presence || token
-
-    # Absolute path of the writer socket, or nil when the writer is off.
-    def writer_socket_path
-      path = writer_socket.to_s
-      return nil if path.empty?
-
-      root = defined?(Rails) && Rails.respond_to?(:root) && Rails.root ? Rails.root.to_s : Dir.pwd
-      File.expand_path(path, root)
-    end
-
-    # Who the embedded dashboard shows as the signed-in operator. A host
-    # passes a lambda taking the request (cookies, warden, whatever it uses)
-    # and returning a User, {id:, name:, email:} or nil. Authentication and
-    # authorisation stay the host's job: put the mount behind its own
-    # constraint. This only names the person for comments and saved views.
     # Both halves present. Read late (not at boot) so credentials set from an
     # initializer, an env var or the configure task all count.
     def http_basic_auth_configured?
@@ -386,17 +295,17 @@ module Railwatch
     end
 
     # Development with Basic on and nothing configured is open, so a first
-    # run is `rails g railwatch:install` and a page, not a password step
-    # first. Rails already shows full error pages there. Every other
-    # environment stays closed until credentials exist.
+    # run is a page, not a password step first. Rails already shows full
+    # error pages there. Every other environment stays closed until
+    # credentials exist.
     def http_basic_auth_waived?
       http_basic_auth_enabled && !http_basic_auth_configured? && defined?(Rails) && Rails.env.development?
     end
 
     # Whether the request carries the configured HTTP Basic credentials.
     # False when Basic is on and nothing is configured (closed), true when
-    # Basic is off (the host's base controller or routes constraint is the
-    # gate then). Shared by the dashboard controller and the live channel.
+    # Basic is off (the host's base controller is the gate then).
+    # railwatch-server's dashboard proxy calls it.
     def http_basic_auth_ok?(request)
       return true unless http_basic_auth_enabled
       return true if http_basic_auth_waived?
@@ -406,45 +315,6 @@ module Railwatch
         ActiveSupport::SecurityUtils.secure_compare(user, http_basic_auth_user.to_s) &
           ActiveSupport::SecurityUtils.secure_compare(password, http_basic_auth_password.to_s)
       end == true
-    end
-
-    # Which gate is in force, for the doctor, the boot warning and the live
-    # channel. :basic when HTTP Basic is on (closed until credentials exist),
-    # :controller when the host named its own base controller, :resolver when
-    # it gave a dashboard_user that can refuse, :open when it said the
-    # dashboard is deliberately public, and :undeclared when Basic is off and
-    # none of those is true -- which usually means a routes constraint the
-    # gem cannot see, and might mean nothing at all.
-    def dashboard_gate
-      return :basic if http_basic_auth_enabled
-      return :controller unless base_controller_class == DEFAULT_BASE_CONTROLLER
-      return :resolver if dashboard_user
-      return :open if dashboard_open
-
-      :undeclared
-    end
-
-    # Whether a live-update subscription is allowed. Action Cable runs on the
-    # host's own /cable endpoint, which a routes constraint around the
-    # engine's mount does not cover and a base controller cannot reach, so an
-    # undeclared gate refuses rather than assuming.
-    def dashboard_channel_allowed?(request)
-      return http_basic_auth_ok?(request) if http_basic_auth_enabled
-      if dashboard_user
-        return !!(dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user)
-      end
-
-      # A controller name is not evidence of authorization on /cable.
-      !!dashboard_open
-    end
-
-    def resolve_dashboard_user(request)
-      resolved = dashboard_user.respond_to?(:call) ? dashboard_user.call(request) : dashboard_user
-      case resolved
-      when User then resolved
-      when Hash then User.new(id: resolved[:id] || User::ID, name: resolved[:name].to_s.presence || "Operator", email: resolved[:email])
-      else User.default
-      end
     end
 
     def ingest_url_allowed?

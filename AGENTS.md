@@ -4,9 +4,11 @@ About *using* the `railwatch` gem from a Rails application; copy
 this into that application's repository. Index of everything else:
 [`llms.txt`](llms.txt).
 
-Railwatch instruments a Rails app end to end and stores linked telemetry in
-two SQLite databases of the app's own (embedded, the default) or sends it to
-Railwatch Cloud. Every request, job attempt, scheduled task run, and command is
+Railwatch instruments a Rails app end to end and sends linked telemetry over
+HTTPS to a Railwatch server: Railwatch Cloud (`https://railwatch.rebulk.com`,
+the default), a self-hosted [railwatch-rs](https://github.com/Rebulk/railwatch-rs),
+or the one the [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+gem runs next to Puma. Every request, job attempt, scheduled task run, and command is
 an **execution**; every query, cache read, log line, outgoing HTTP call, LLM
 call, view render, exception, and span is a child of one, linked by
 `execution_id`/`trace_id`. It never writes to the app's primary database.
@@ -15,40 +17,41 @@ call, view render, exception, and span is a child of one, linked by
 
 ```sh
 bundle add railwatch
-bin/rails generate railwatch:install                                 # embedded: dashboard at /railwatch
-bin/rails generate railwatch:install --prompt-token --kamal-secrets  # or: Railwatch Cloud
+bin/rails generate railwatch:install --prompt-token --kamal-secrets  # Railwatch Cloud
+bin/rails generate railwatch:install --url=https://telemetry.example.com  # self-hosted railwatch-rs
 ```
 
-With no flags the install is embedded (see [Embedded mode](docs/embedded.md)):
-telemetry stays in two SQLite databases the app owns (`railwatch`,
-`railwatch_telemetry`, added to `config/database.yml`), Puma forks one writer
-for them (`plugin :railwatch` in `config/puma.rb`), and the dashboard is served
-at `/railwatch`. It is open in development and answers 401 elsewhere until
-`RAILS_ENV=production bin/rails railwatch:authentication:configure` sets a
-password. An exported `RAILWATCH_TOKEN` alone does not change the mode.
-`--cloud`, or any of `--prompt-token`, `--token-stdin`, `--url`,
-`--kamal-secrets`, sends telemetry to Railwatch Cloud instead.
-
-Both modes write `config/initializers/railwatch.rb`, mount `Railwatch::Engine`
-at `/railwatch`, add the Kamal `post-deploy` hook and the Inertia browser client
-where the app has them, and require `railwatch/rspec` (or `railwatch/minitest`)
-in the test helper; the cloud install then runs `railwatch:doctor`. A
+The generator writes `config/initializers/railwatch.rb`, mounts
+`Railwatch::Engine` at `/railwatch` (it serves only the browser beacon), adds
+the Kamal `post-deploy` hook and the Inertia browser client where the app has
+them, requires `railwatch/rspec` (or `railwatch/minitest`) in the test helper,
+and runs `railwatch:doctor` (`--no-doctor` skips it). A
 prompted/stdin/environment token goes into `.env` only when Git confirms that
-file is ignored; token values are never printed. Configuration lives only in
-that initializer; every option also has a `RAILWATCH_*` environment variable.
-An embedded install mirrors to Railwatch Cloud as well with a token and
-`c.export_enabled = true`.
+file is ignored; token values are never printed. Without a token the gem is
+inert. Configuration lives only in that initializer; every option also has a
+`RAILWATCH_*` environment variable.
+
+Embedded (the dashboard inside the app, no token to manage): add
+`gem "railwatch-server"` to the Gemfile and `plugin :railwatch_server` to
+`config/puma.rb`. It provisions `storage/railwatch/<env>` on first boot and
+points this agent at it. Its dashboard at `/railwatch` is gated by this gem's
+`http_basic_auth_*` settings (open in development, 401 elsewhere until
+`RAILS_ENV=production bin/rails railwatch:authentication:configure` sets a
+password) or, with Basic off, by `c.base_controller_class`.
+
+Railwatch 0.x's in-gem embedded mode (`c.transport = :local`, `plugin :railwatch`,
+the `railwatch`/`railwatch_telemetry` databases) is gone in 1.0; remove all three
+and add railwatch-server. Its old SQLite files are not migrated.
 
 ## Rake tasks
 
 | Task | Does |
 |---|---|
-| `bin/rails railwatch:doctor` | ✓/✗ per check. Embedded: databases, migrations, writer process, last write, maintenance, dashboard access, export. Cloud: token, token storage, ingest URL, reachability. Both: middleware, engine mount, deploy, sample rates, ignored types, Kamal hook, browser client and whether an entrypoint calls it, profiler backend, test matchers. Exits non-zero on a missing database, pending migrations, broken export, a missing or tracked token, or an unreachable host. **Run this first when telemetry is missing.** |
-| `bin/rails railwatch:authentication:configure` | Sets the embedded dashboard's HTTP Basic credentials for the current `RAILS_ENV`. |
-| `bin/rails railwatch:export:status` | What the export queue holds and whether it can send. |
-| `bin/rails railwatch:token` | Where to create a Railwatch Cloud ingest token for this app. |
-| `bin/rails railwatch:mcp` | Paste-ready MCP client configuration for this app's Railwatch Cloud. |
-| `bin/rails railwatch:deploy[ref,name,url]` | Records a deploy marker (in the embedded database, or on the cloud). Use as a release step when not deploying with Kamal. |
+| `bin/rails railwatch:doctor` | ✓/✗ per check: token, token storage, ingest URL, reachability, middleware, engine mount, deploy, sample rates, ignored types, Kamal hook, browser client and whether an entrypoint calls it, profiler backend, test matchers. Exits non-zero on a missing or tracked token, or an unreachable host. **Run this first when telemetry is missing.** |
+| `bin/rails railwatch:authentication:configure` | Sets the HTTP Basic credentials that gate railwatch-server's dashboard, for the current `RAILS_ENV`. |
+| `bin/rails railwatch:token` | Where to create an ingest token for this app on the server `ingest_url` points at. |
+| `bin/rails railwatch:mcp` | Paste-ready MCP client configuration for that server. |
+| `bin/rails railwatch:deploy[ref,name,url]` | Records a deploy marker on the server. Use as a release step when not deploying with Kamal. |
 | `bin/rails 'railwatch:sourcemaps[public,true]'` | Uploads Vite source maps for the configured deploy, then deletes acknowledged files. Run after building and before publishing assets. Omit `true` to retain files. See [Source maps](docs/source-maps.md). |
 
 ## Facade
@@ -89,9 +92,9 @@ Per action, in a controller class body: `railwatch_sample 0.01, only: :index`,
 ## Specs
 
 `require "railwatch/rspec"` in `spec/rails_helper.rb` (or `"railwatch/minitest"` in
-`test/test_helper.rb`). Railwatch must be enabled in the test env: an embedded
-install is, and needs `RAILS_ENV=test bin/rails db:prepare` once so its test
-databases exist; a cloud install needs any non-blank `RAILWATCH_TOKEN`. Records
+`test/test_helper.rb`). Railwatch must be enabled in the test env, which
+needs any non-blank `RAILWATCH_TOKEN` there (railwatch-server is off in test
+and does not set one). Records
 go to an in-memory transport, never over the wire. All matchers are block
 matchers.
 
@@ -117,7 +120,8 @@ melt in production.
 
 ## MCP
 
-Railwatch Cloud (not embedded mode) is an MCP server at `<ingest host>/mcp`.
+Railwatch Cloud and railwatch-rs are MCP servers at `<ingest host>/mcp`
+(with railwatch-server: the app's host plus `/railwatch/mcp`).
 Generate a personal token at Settings → Profile → "API & MCP token", then:
 
 ```sh

@@ -51,26 +51,25 @@ A second gate, `bench/no_db_writes.rb`, drives 200 requests and a job with
 a `sql.active_record` subscriber watching for any `INSERT`/`UPDATE`/
 `DELETE` issued from a frame inside `lib/railwatch`, and fails if it finds
 one. **Railwatch never writes to your application's database.** Records
-live in memory and are delivered by a background thread, to the cloud or
-to the embedded writer process, which owns its own two SQLite files. That
+live in memory and are delivered by a background thread over HTTP to the
+Railwatch server, which owns its own storage. That
 is not a nicety: instrumentation that takes a write lock is what turns a
 single-writer SQLite app into a "database is locked" incident.
 
 ## Where does the data go, and how long is it kept?
 
-Embedded (the default): into the app's own `railwatch_telemetry` SQLite
-database under `storage/`, written by one writer process Puma forks.
-Raw rows are pruned nightly to `retention_days` (7 by default), and
-hourly rollups back the charts. Nothing leaves the machine unless you
-turn on export. See [Embedded mode](embedded.md).
+One gzip-NDJSON POST to `{ingest_url}/ingest` per batch, to Railwatch
+Cloud, a self-hosted railwatch-rs, or the server the `railwatch-server`
+gem runs next to the app. The gem keeps nothing on disk itself.
 
-Railwatch Cloud: one gzip-NDJSON POST to `{ingest_url}/ingest` per
-batch. The platform stores each monitored environment's telemetry in its
+Railwatch Cloud stores each monitored environment's telemetry in its
 own database, prunes raw rows on a retention window, and keeps hourly
 rollups for the charts. Retention there is set by the account's plan
-tier, not by the gem — 7, 30, or 90 days depending on the plan. For a
-self-hosted platform, retention, backups, and pruning are the operator's
-responsibility.
+tier, not by the gem — 7, 30, or 90 days depending on the plan. For
+railwatch-rs, self-hosted or through railwatch-server, retention and
+backups are server settings
+([railwatch-rs SELF-HOST.md](https://github.com/Rebulk/railwatch-rs/blob/main/docs/SELF-HOST.md),
+[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme)).
 
 ## What about PII?
 
@@ -125,15 +124,13 @@ Yes, on both sides, and it's the first-class target.
 
 **In your app:** the gem does no I/O on the request path and never writes
 to the app database, so there is no contention with SQLite's single
-writer. Embedded mode's own two databases are separate SQLite files,
-whatever the app runs on. SQL normalization is per adapter, so SQLite,
+writer. SQL normalization is per adapter, so SQLite,
 Postgres, MySQL, and Trilogy all group correctly.
 
-**On the platform:** telemetry is stored one SQLite database per
-monitored environment. That is what makes retention pruning, backup, and
-restore per-environment operations rather than one enormous table, and
-it's why log search gets FTS5 with snippet highlighting. The platform
-runs unchanged on Postgres if that's what's configured.
+**On the server:** telemetry is stored in SQLite per monitored
+environment. That is what makes retention pruning, backup, and restore
+per-environment operations rather than one enormous table, and it's why
+log search gets FTS5 with snippet highlighting.
 
 ## One database per environment — what does that mean for me?
 
@@ -168,12 +165,7 @@ Two features are Solid Queue-specific, because they read its tables:
 with `task_key`, `schedule`, and `drift`) and the queue depth and
 oldest-job age on `health` records.
 
-## What happens when the platform is unreachable?
-
-This section is about the cloud transport. In embedded mode the
-equivalent is the writer process being down, covered in
-[Embedded mode](embedded.md#the-writer-process), and export keeps its
-own durable queue.
+## What happens when the server is unreachable?
 
 Nothing, from your app's point of view. This is the property everything
 else is built around: **delivery never raises into application code.**

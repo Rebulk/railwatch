@@ -6,37 +6,26 @@ outgoing HTTP, storage, views, and logs, and links them into one trace
 per execution, for about half a millisecond per request plus tens of
 microseconds per query, with zero writes to your database.
 
-By default all of it stays inside the app:
-[embedded mode](docs/embedded.md) serves the full dashboard at
-`/railwatch` out of two SQLite files your app owns, with no token, no
-Node, no Redis and no job worker. Railwatch Cloud is optional: it
-delivers alerts to Slack, email, webhooks or Linear (including when the
-app is down), serves MCP to your AI assistant, and puts many apps and
-servers in one place.
+The gem is the agent. It sends what it records over HTTPS to a
+Railwatch server, which stores it, groups exceptions into issues, sends
+alerts, and serves the dashboard and an MCP server:
+
+- **Railwatch Cloud** at <https://railwatch.rebulk.com>, the default.
+- **Self-hosted [railwatch-rs](https://github.com/Rebulk/railwatch-rs)**,
+  one static binary for many apps ([Self-hosting](docs/self-hosting.md)).
+- **Embedded**: the [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+  gem runs that server next to Puma for one app and serves the dashboard
+  at `/railwatch`, with nothing else to run.
 
 ## Install
 
 ```sh
-bundle add railwatch                  # 1. add the public gem
-bin/rails generate railwatch:install  # 2. embedded: databases, Puma writer, dashboard at /railwatch
-```
-
-Restart and open `/railwatch`. It is open in development; before you
-deploy, give it a password with
-`RAILS_ENV=production bin/rails railwatch:authentication:configure`
-(it answers 401 in production until you do). On a PostgreSQL or MySQL
-app without the `sqlite3` gem, the generator adds it to the Gemfile;
-run `bundle install` and `bin/rails db:prepare` to finish.
-
-To send everything to Railwatch Cloud instead, pass `--cloud` or a token
-option:
-
-```sh
-bundle add railwatch
-bin/rails generate railwatch:install --prompt-token  # hidden token input plus app wiring
+bundle add railwatch                                # 1. add the public gem
+bin/rails generate railwatch:install --prompt-token # 2. hidden token input plus app wiring
 bin/rails railwatch:doctor                          # check every piece is wired up after restart
 ```
 
+For a self-hosted server, add `--url=https://telemetry.example.com`.
 The generator's flags, getting a token, and deploying with Kamal,
 Docker, Heroku, or Render are covered in
 [Getting started](docs/getting-started.md). For an unreleased revision,
@@ -45,6 +34,36 @@ use the Git source instead:
 ```ruby
 gem "railwatch", github: "Rebulk/railwatch"
 ```
+
+### Embedded
+
+To keep everything inside the app, add `railwatch-server` next to this
+gem:
+
+```ruby
+# Gemfile
+gem "railwatch"
+gem "railwatch-server"
+```
+
+```ruby
+# config/puma.rb
+plugin :railwatch_server
+```
+
+It provisions its data under `storage/railwatch/<env>` on first boot and
+points this gem at it, so there is no token to manage. The dashboard at
+`/railwatch` is open in development and answers 401 elsewhere until you
+give it a password with
+`RAILS_ENV=production bin/rails railwatch:authentication:configure`, or
+put it behind your own admin authentication
+([Configuration](docs/configuration.md#dashboard-gate-railwatch-server)).
+Everything else is in the
+[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
+
+Railwatch 0.x kept embedded telemetry in two SQLite databases written by
+`plugin :railwatch`. 1.0 removes that mode; see
+[Coming from 0.x embedded mode](docs/getting-started.md#coming-from-0x-embedded-mode).
 
 ## What you get
 
@@ -63,8 +82,8 @@ gem "railwatch", github: "Rebulk/railwatch"
   and browser errors ([Getting started](docs/getting-started.md)).
 - RSpec and Minitest matchers that turn a query budget into a CI gate
   ([Testing](docs/testing.md)).
-- With Railwatch Cloud, an MCP server so Claude Code, Cursor, VS Code, or
-  Zed can read your production data
+- An MCP server on the Railwatch server, so Claude Code, Cursor, VS Code,
+  or Zed can read your production data
   ([AI assistants and MCP](docs/ai-and-mcp.md)).
 
 Configuration lives in `config/initializers/railwatch.rb`; most options
@@ -85,36 +104,12 @@ expect { get "/widgets" }.to have_railwatch_queries(at_most: 6)
 expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 ```
 
-## Embedded mode
-
-Telemetry goes to two SQLite files the app owns -- `railwatch` for
-issues, comments and saved views, `railwatch_telemetry` for what the app
-reports -- and the dashboard is served at `/railwatch` from a bundle
-shipped inside the gem. Nothing leaves the machine unless you turn on
-export to Railwatch Cloud, and there is nothing else to run.
-
-Puma forks a single writer process (`plugin :railwatch`, which the
-installer adds) that owns both files. The web workers hand it batches
-over a Unix socket instead of writing SQLite on their own threads, and it
-runs the maintenance clock too, so exception grouping, rollups, retention
-and threshold scans happen without a queue.
-
-That dashboard reads every query, log line and exception the app
-produced, so it is gated the way Mission Control Jobs is: HTTP Basic is
-on, and with no credentials every request is 401 until you set them
-with `bin/rails railwatch:authentication:configure`. Development is the
-exception: with no credentials set there, it is open. Apps that would
-rather use their own authentication turn Basic off and gate the pages
-with `base_controller_class` or a routes constraint around the mount; a
-`dashboard_user` resolver then names the operator and authorizes live
-updates, but does not gate pages. [Embedded mode](docs/embedded.md)
-covers all of it, including upgrades and what it costs to store.
-
 ## Documentation
 
-- [Getting started](docs/getting-started.md) — the embedded install, the
-  Railwatch Cloud install and its token, the three optional lines, and
-  deploying with Kamal, Docker, Heroku, Render, or none of them.
+- [Getting started](docs/getting-started.md) — the install and its token,
+  embedded with railwatch-server, moving from 0.x embedded mode, the three
+  optional lines, and deploying with Kamal, Docker, Heroku, Render, or none
+  of them.
 - [Configuration](docs/configuration.md) — every option and `RAILWATCH_*`
   variable, field by field.
 - [Record types](docs/records.md) — every record Railwatch ships and every
@@ -122,17 +117,13 @@ covers all of it, including upgrades and what it costs to store.
 - [Testing](docs/testing.md) — the RSpec and Minitest matchers, and a CI
   performance gate.
 - [AI assistants and MCP](docs/ai-and-mcp.md) — connecting Claude Code,
-  Cursor, VS Code, or Zed to your production data through Railwatch
-  Cloud.
+  Cursor, VS Code, or Zed to your production data.
 - [Replacing Sentry](docs/replacing-sentry.md) — a step-by-step migration,
   option by option and call site by call site.
 - [Coming from Laravel Nightwatch](docs/replacing-nightwatch.md) — the
   record-type mapping and the sampling model, for Laravel people.
-- [Embedded mode](docs/embedded.md) — the default: the whole dashboard
-  inside your app, telemetry in your own SQLite files, and optional
-  export to Railwatch Cloud.
 - [Self-hosting](docs/self-hosting.md) — pointing the gem at your own
-  Railwatch Cloud.
+  railwatch-rs server.
 - [Troubleshooting](docs/troubleshooting.md) — every failure mode, paired
   with the `railwatch:doctor` line it shows up as.
 - [FAQ](docs/faq.md) — overhead numbers, retention, PII posture, SQLite.

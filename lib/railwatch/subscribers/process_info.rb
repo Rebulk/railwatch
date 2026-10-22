@@ -89,8 +89,7 @@ module Railwatch
       # $PROGRAM_NAME after boot and would otherwise turn the supervisor,
       # dispatcher, and scheduler into "web" on every health sample.
       def role
-        if defined?(Railwatch::Writer) && Railwatch::Writer.running? then "writer"
-        elsif defined?(::SolidQueue) && ($PROGRAM_NAME.include?("jobs") || $PROGRAM_NAME.start_with?("solid-queue-") || ARGV.first.to_s.start_with?("solid_queue:")) then "worker"
+        if defined?(::SolidQueue) && ($PROGRAM_NAME.include?("jobs") || $PROGRAM_NAME.start_with?("solid-queue-") || ARGV.first.to_s.start_with?("solid_queue:")) then "worker"
         elsif defined?(::Rails::Console) then "console"
         elsif $PROGRAM_NAME.end_with?("rake") then "command"
         elsif defined?(::Puma) then "web"
