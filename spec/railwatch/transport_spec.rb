@@ -395,6 +395,41 @@ RSpec.describe Railwatch::Reporter do
       expect(reporter.backpressure_factor).to eq(2.0)
     end
 
+    it "does not sample down while the receiver refuses connections" do
+      down = true
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |records, **|
+        if down
+          Railwatch::Transport::Http::Result.new(ok: false, retryable_error: true,
+                                                 error: "Errno::ECONNREFUSED: Failed to open TCP connection to 127.0.0.1:28790")
+        else
+          Railwatch::Transport::Http::Result.new(ok: true, status: 200, accepted: records.size)
+        end
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ t: "log" })
+
+      4.times { reporter.flush }
+      expect(reporter.backpressure_factor).to eq(1.0)
+
+      down = false
+      reporter.flush
+      expect(reporter.buffer.stats.first).to eq(0)
+    end
+
+    it "still samples down while the receiver times out" do
+      transport = Object.new
+      transport.define_singleton_method(:deliver) do |*, **|
+        Railwatch::Transport::Http::Result.new(ok: false, retryable_error: true, error: "Net::ReadTimeout")
+      end
+      reporter = described_class.new(reporter_config, transport: transport)
+      reporter.buffer.push({ t: "log" })
+
+      4.times { reporter.flush }
+
+      expect(reporter.backpressure_factor).to eq(described_class::MAX_BACKPRESSURE_FACTOR)
+    end
+
     it "stays at one when adaptive backpressure is disabled" do
       config = reporter_config
       config.backpressure = false

@@ -284,10 +284,6 @@ module Railwatch
       @enabled && token.present?
     end
 
-    # Always false: there is no embedded transport any more. Only
-    # railwatch-server 0.1.0 calls it.
-    def local? = false
-
     # Both halves present. Read late (not at boot) so credentials set from an
     # initializer, an env var or the configure task all count.
     def http_basic_auth_configured?

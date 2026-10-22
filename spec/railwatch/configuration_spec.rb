@@ -172,12 +172,6 @@ RSpec.describe Railwatch::Configuration do
       with_env("RAILWATCH_TOKEN" => "rw_x") { |config| expect(config.enabled?).to be(true) }
       with_env("RAILWATCH_TOKEN" => "rw_x", "RAILWATCH_ENABLED" => "0") { |config| expect(config.enabled?).to be(false) }
     end
-
-    # railwatch-server 0.1.0 asks before wiring the agent to its server and
-    # before its Puma plugin flushes the reporter at shutdown.
-    it "is never the removed embedded transport" do
-      expect(described_class.new.local?).to be(false)
-    end
   end
 
   # The gate railwatch-server's dashboard proxy applies before it forwards

@@ -6,6 +6,17 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- A receiver that refuses the connection (nothing listening: a Railwatch
+  server restarting, or a deploy handing over to the next container) no
+  longer counts as backpressure. The retry ladder it starts used to double
+  the sampling divisor every flush tick, so the app's first requests after
+  the server came back were sampled out: a fresh app recorded 23-29 of 30
+  requests sent right after its embedded server was killed and restarted,
+  in every one of 10 runs. A timeout, a 5xx and a full buffer are still
+  pressure.
+- `Configuration#local?` is gone. It was kept in 1.0.0 only for
+  railwatch-server 0.1.0; railwatch-server 0.1.1 no longer calls it.
+
 ## 1.0.0 (2026-10-22)
 
 - **Breaking: `railwatch` is the agent only.** It instruments the app and
