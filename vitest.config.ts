@@ -1,19 +1,19 @@
-import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 
-const frontendDir = new URL("./app/frontend", import.meta.url).pathname
+// The browser client's tests. "@/lib/railwatch" is the path a host imports it
+// by once the install generator has copied it into app/frontend/lib.
+const client = new URL("./lib/generators/railwatch/install/templates/railwatch.ts", import.meta.url).pathname
+const inertia = new URL("./spec/javascript/inertia-stub.ts", import.meta.url).pathname
 
 export default defineConfig({
-  plugins: [react()],
   resolve: {
     alias: {
-      "@": frontendDir,
-      "~": frontendDir,
+      "@/lib/railwatch": client,
+      "@inertiajs/react": inertia,
     },
   },
   test: {
     environment: "jsdom",
-    setupFiles: ["./app/frontend/test-setup.ts"],
-    include: ["app/frontend/**/*.test.{ts,tsx}"],
+    include: ["spec/javascript/**/*.test.ts"],
   },
 })

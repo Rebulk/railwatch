@@ -67,8 +67,8 @@ jobs:
       # `git tag v0.4.0` on a tree still saying 0.3.8 built, verified and
       # pushed 0.3.8 under a tag claiming otherwise, and the "already
       # published?" check would then skip the real 0.3.8 as done. Fails here,
-      # before the dashboard build, because a wrong version is not something
-      # to discover at `gem push`.
+      # first, because a wrong version is not something to discover at
+      # `gem push`.
       - name: The tag and lib/railwatch/version.rb must agree
         run: |
           tagged="${GITHUB_REF_NAME#v}"
@@ -80,30 +80,11 @@ jobs:
           fi
           echo "Tag and version.rb agree on ${declared}."
 
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      # public/railwatch is a build artifact, so a fresh checkout has no
-      # manifest and the embedded dashboard specs fail on it. ci.yml learned
-      # this; this workflow had the same gap, which is what turned the
-      # v0.2.0.pre1 tag red before it ever reached the publish step.
-      - name: Build the dashboard bundle
-        run: bundle exec rake dashboard:build
-
       - name: Run specs
         run: bundle exec rspec
 
-      # The script, not `rake package:verify`: that task depends on
-      # dashboard:build, which would repeat the pnpm install and vite build
-      # just done above. The CI package job still uses the rake task, where
-      # nothing has built the bundle yet.
       - name: Verify package
-        run: bundle exec ruby script/verify_package
+        run: bundle exec rake package:verify
 
   publish:
     needs: test
@@ -124,22 +105,6 @@ jobs:
         with:
           ruby-version: "3.4"
           bundler-cache: true
-
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
-
-      # The gem ships the compiled dashboard, so it has to exist before
-      # `gem build` reads the file list.
-      - name: Build dashboard bundle
-        run: bundle exec rake dashboard:build
-
-      - name: Refuse to publish a gem with no dashboard in it
-        run: bundle exec rake package:assert_dashboard
 
       - name: Build gem
         id: build
@@ -171,8 +136,8 @@ jobs:
       # rubygems/release-gem runs `bundle exec rake release`, which needs a
       # `release` task (bundler/gem_tasks) this Rakefile does not define, and
       # which rebuilds the gem from the gemspec -- so what it pushes is not
-      # the file the dashboard assertion above just inspected. Exchanging the
-      # credential and pushing the verified artifact keeps that gate binding.
+      # the file built above. Exchanging the credential and pushing that
+      # artifact keeps the two the same.
       #
       # The cost is release-gem's build attestation, which this does not
       # produce. Worth revisiting if `gem push` gains it natively.
