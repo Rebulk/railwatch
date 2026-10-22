@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 0.9.4 (2026-10-22)
+
 - Sampling recovers as soon as ingest does. A receiver refusing with a
   `Retry-After` (a Railwatch server below its disk floor answers 503 with
   `Retry-After: 60`) kept the app at 1/8 sampling for 50-60 s after it was
