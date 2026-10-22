@@ -281,7 +281,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       previous_token = ENV["RAILWATCH_TOKEN"]
       ENV["RAILWATCH_TOKEN"] = "rw_from_environment"
 
-      Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
+      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(File.read(env_file)).to eq("RAILWATCH_TOKEN=rw_from_environment\n")
     ensure
@@ -446,7 +446,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "finishes by running railwatch:doctor in process and printing its checklist" do
       stub_request(:get, "http://railwatch.test/ingest/ping").to_return(status: 200, body: "ok")
 
-      output = Dir.chdir(destination_root) { run_generator %w[--cloud] }
+      output = Dir.chdir(destination_root) { run_generator %w[] }
 
       expect(output).to include("bin/rails railwatch:doctor")
       expect(output).to include("✓ token: test-t... (10 chars)")
@@ -456,7 +456,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     it "reports the failing checks without raising when the doctor aborts" do
       stub_request(:get, "http://railwatch.test/ingest/ping").to_return(status: 500, body: "err")
 
-      output = Dir.chdir(destination_root) { run_generator %w[--cloud] }
+      output = Dir.chdir(destination_root) { run_generator %w[] }
 
       expect(output).to include("✗ ingest reachable:")
       expect(output).to include("only picked up after a restart")
@@ -465,7 +465,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
   describe "next steps" do
     it "tells you how to set the token with Kamal or credentials and how to verify the install" do
-      output = Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
+      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(output).to include("Set RAILWATCH_TOKEN")
       expect(output).to include(".kamal/secrets")
@@ -478,7 +478,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     end
   end
 
-  describe "embedded, the default" do
+  describe "the agent, and nothing else" do
     def write_file(path, contents)
       full = File.join(destination_root, path)
       FileUtils.mkdir_p(File.dirname(full))
@@ -488,262 +488,55 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
     def read(path) = File.read(File.join(destination_root, path))
 
-    let(:flat_database_yml) do
-      <<~YAML
-        default: &default
-          adapter: sqlite3
-          timeout: 5000
-
-        development:
-          <<: *default
-          database: storage/development.sqlite3
-
-        # Warning: test is erased.
-        test:
-          <<: *default
-          database: storage/test.sqlite3
-
-        production:
-          primary:
-            <<: *default
-            database: storage/production.sqlite3
-          queue:
-            <<: *default
-            database: storage/production_queue.sqlite3
-            migrations_paths: db/queue_migrate
-      YAML
-    end
-
-    it "sends to the cloud only when asked: --cloud or an option that only means something there" do
-      # --prompt-token is in the same list (CLOUD_OPTIONS) but reads with noecho, which needs a TTY.
-      [ %w[--cloud], %w[--token-stdin], %w[--url=https://t.example.com], %w[--kamal-secrets] ].each do |flags|
-        prepare_destination
-        FileUtils.mkdir_p(File.join(destination_root, "config"))
-        File.write(File.join(destination_root, "config/routes.rb"), "Rails.application.routes.draw do\nend\n")
-        previous_stdin = $stdin
-        $stdin = StringIO.new("\n")
-        Dir.chdir(destination_root) { run_generator flags + %w[--no-doctor] }
-        $stdin = previous_stdin
-
-        expect(read("config/initializers/railwatch.rb")).not_to include("c.transport = :local"), "#{flags.join} stayed embedded"
-      end
-    end
-
-    it "stays embedded when RAILWATCH_TOKEN is exported but no cloud option is given" do
-      previous_token = ENV["RAILWATCH_TOKEN"]
-      ENV["RAILWATCH_TOKEN"] = "rw_from_environment"
-
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      expect(read("config/initializers/railwatch.rb")).to include("c.transport = :local")
-      expect(File).not_to exist(File.join(destination_root, ".env"))
-    ensure
-      previous_token.nil? ? ENV.delete("RAILWATCH_TOKEN") : ENV["RAILWATCH_TOKEN"] = previous_token
-    end
-
-    it "writes an initializer that keeps telemetry in the app instead of asking for a token" do
-      write_file("config/database.yml", flat_database_yml)
+    it "writes an initializer that asks for a token and names the ingest URL" do
       Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       initializer = read("config/initializers/railwatch.rb")
-      expect(initializer).to include("c.transport = :local")
-      expect(initializer).to include('c.ignored_request_paths += ["/railwatch"')
-      expect(initializer).not_to include("(required)")
-      expect(File).not_to exist(File.join(destination_root, ".env"))
+      expect(initializer).to include(%(# c.token = ENV["RAILWATCH_TOKEN"]))
+      expect(initializer).to include(%(# c.ingest_url = "https://railwatch.rebulk.com"))
+      expect(initializer).not_to include("transport")
     end
 
-    it "adds railwatch and railwatch_telemetry databases to every environment, nesting a flat one under primary" do
-      write_file("config/database.yml", flat_database_yml)
+    it "leaves config/database.yml, config/puma.rb and db/ alone" do
+      database_yml = "development:\n  adapter: sqlite3\n  database: storage/development.sqlite3\n"
+      puma = "threads 3, 3\nplugin :tmp_restart\n"
+      write_file("config/database.yml", database_yml)
+      write_file("config/puma.rb", puma)
+
       Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
-      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
-      expect(yml["development"].keys).to eq(%w[primary railwatch railwatch_telemetry])
-      expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
-      expect(yml["development"]["railwatch"]["database"]).to eq("storage/development_railwatch.sqlite3")
-      expect(yml["development"]["railwatch"]["migrations_paths"]).to end_with("/db/railwatch_migrate")
-      expect(yml["development"]["railwatch_telemetry"]["migrations_paths"]).to end_with("/db/railwatch_telemetry_migrate")
-      expect(yml["development"]["railwatch"]["schema_dump"]).to be(false)
-      expect(yml["development"]["railwatch_telemetry"]["pragmas"]["journal_mode"]).to eq("wal")
-      expect(yml["test"].keys).to eq(%w[primary railwatch railwatch_telemetry])
-      expect(yml["production"].keys).to eq(%w[primary queue railwatch railwatch_telemetry])
-      expect(yml["production"]["queue"]["migrations_paths"]).to eq("db/queue_migrate")
-      expect(read("config/database.yml")).to include("# Warning: test is erased.")
+      expect(read("config/database.yml")).to eq(database_yml)
+      expect(read("config/puma.rb")).to eq(puma)
+      expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
-    # A runner like parallel_tests gives each worker its own TEST_ENV_NUMBER
-    # and expects one database per worker, the way Rails' own test database
-    # naming does. Sharing two SQLite files across four workers fails as
-    # PendingMigrationError and "disk I/O error" out of configure_connection.
-    it "gives each parallel test worker its own databases" do
-      write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
+    it "points at railwatch-server for a dashboard inside the app" do
+      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
-      raw = read("config/database.yml")
-      expect(raw).to include(%(database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>_railwatch.sqlite3))
-      expect(raw).to include(%(database: storage/test<%= ENV["TEST_ENV_NUMBER"] %>_railwatch_telemetry.sqlite3))
-
-      worker = ENV["TEST_ENV_NUMBER"]
-      begin
-        ENV["TEST_ENV_NUMBER"] = "3"
-        yml = YAML.safe_load(ERB.new(raw).result, aliases: true)
-        expect(yml["test"]["railwatch"]["database"]).to eq("storage/test3_railwatch.sqlite3")
-        expect(yml["test"]["railwatch_telemetry"]["database"]).to eq("storage/test3_railwatch_telemetry.sqlite3")
-
-        # Worker 1 sets no number by parallel_tests' convention, and an app
-        # with no parallel runner never sets one: the name must stay plain.
-        ENV.delete("TEST_ENV_NUMBER")
-        plain = YAML.safe_load(ERB.new(raw).result, aliases: true)
-        expect(plain["test"]["railwatch"]["database"]).to eq("storage/test_railwatch.sqlite3")
-      ensure
-        worker.nil? ? ENV.delete("TEST_ENV_NUMBER") : ENV["TEST_ENV_NUMBER"] = worker
-      end
+      expect(output).to include(%(gem "railwatch-server"), "plugin :railwatch_server")
     end
 
-    it "writes SQLite entries that do not inherit a PostgreSQL app's adapter" do
-      write_file("config/database.yml", <<~YAML)
-        default: &default
-          adapter: postgresql
-          encoding: unicode
-          pool: 5
-
-        development:
-          <<: *default
-          database: shop_development
-
-        test:
-          <<: *default
-          database: shop_test
-
-        production:
-          primary:
-            <<: *default
-            database: shop_production
-      YAML
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
-      %w[development test production].each do |env|
-        expect(yml[env]["railwatch"]["adapter"]).to eq("sqlite3")
-        expect(yml[env]["railwatch_telemetry"]["adapter"]).to eq("sqlite3")
-        expect(yml[env]["railwatch_telemetry"]["database"]).to eq("storage/#{env}_railwatch_telemetry.sqlite3")
-      end
-      expect(yml["development"]["primary"]["adapter"]).to eq("postgresql")
-    end
-
-    it "adds the databases to a custom environment, not only development, test and production" do
-      write_file("config/database.yml", <<~YAML)
-        default: &default
-          adapter: sqlite3
-
-        development:
-          <<: *default
-          database: storage/development.sqlite3
-
-        staging:
-          <<: *default
-          database: storage/staging.sqlite3
-      YAML
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
-      expect(yml["staging"]["railwatch_telemetry"]["database"]).to eq("storage/staging_railwatch_telemetry.sqlite3")
-      expect(yml["staging"]["primary"]["database"]).to eq("storage/staging.sqlite3")
-      # The YAML anchor is not an environment.
-      expect(yml).not_to have_key("railwatch")
-    end
-
-    it "writes usable entries into a database.yml that has no &default anchor" do
-      write_file("config/database.yml", <<~YAML)
-        development:
-          adapter: sqlite3
-          database: storage/development.sqlite3
-      YAML
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      yml = YAML.safe_load(ERB.new(read("config/database.yml")).result, aliases: true)
-      expect(yml["development"]["railwatch"]["adapter"]).to eq("sqlite3")
-      expect(yml["development"]["primary"]["database"]).to eq("storage/development.sqlite3")
+    it "no longer takes --cloud: sending to a server is the only mode" do
+      expect(described_class.class_options.keys).not_to include(:cloud)
     end
 
     it "offers the json pin in the app's Gemfile when Rails and json cannot decode together" do
       allow(Railwatch::JsonCompat).to receive(:broken?).and_return(true)
-      write_file("config/database.yml", flat_database_yml)
       write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
 
       output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
       expect(read("Gemfile")).to include(%(gem "json", "< 3"), "rails/rails#58784")
       expect(output).to include("bundle install")
-      # The databases are not created behind a bundle that is about to change.
-      expect(output).not_to include("Both databases were created")
-    end
-
-    it "adds the sqlite3 gem when the app has not got one, since the two databases are SQLite files" do
-      allow(Gem).to receive(:loaded_specs).and_return({})
-      write_file("config/database.yml", flat_database_yml)
-      write_file("Gemfile", %(source "https://rubygems.org"\ngem "rails"\n))
-
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      expect(read("Gemfile")).to include(%(gem "sqlite3"))
-    end
-
-    it "copies no schema or migration files: the engine migrates both databases from the gem" do
-      write_file("config/database.yml", flat_database_yml)
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
-    end
-
-    it "adds the writer plugin to config/puma.rb once, at the end, and only in embedded mode" do
-      write_file("config/database.yml", flat_database_yml)
-      puma = "threads 3, 3\nport ENV.fetch(\"PORT\", 3000)\nplugin :tmp_restart\n"
-      write_file("config/puma.rb", puma)
-
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-      Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      updated = read("config/puma.rb")
-      expect(updated).to start_with(puma)
-      expect(updated.scan("plugin :railwatch").size).to eq(1)
-      # Unconditional: `bundle exec puma` evaluates config/puma.rb before it
-      # loads the app, so a `if defined?(Railwatch)` guard would be false
-      # there and the writer would never start.
-      expect(updated).to end_with("plugin :railwatch\n")
-    end
-
-    it "leaves config/puma.rb alone with --cloud" do
-      write_file("config/puma.rb", "plugin :tmp_restart\n")
-
-      Dir.chdir(destination_root) { run_generator %w[--cloud --no-doctor] }
-
-      expect(read("config/puma.rb")).to eq("plugin :tmp_restart\n")
-    end
-
-    it "leaves config/recurring.yml alone: maintenance runs on Railwatch's own clock, not Solid Queue" do
-      write_file("config/database.yml", flat_database_yml)
-      recurring = <<~YAML
-        production:
-          clear_solid_queue_finished_jobs:
-            command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
-            schedule: every hour at minute 12
-      YAML
-      write_file("config/recurring.yml", recurring)
-      output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-
-      expect(read("config/recurring.yml")).to eq(recurring)
-      expect(output).to include("No job worker")
     end
 
     it "changes nothing on a second run" do
-      write_file("config/database.yml", flat_database_yml)
-      write_file("config/recurring.yml", "production:\n  x:\n    class: XJob\n    schedule: every hour\n")
       Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
-      first = [ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]
+      first = [ read("config/initializers/railwatch.rb"), read("config/routes.rb") ]
 
       Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
-      expect([ read("config/database.yml"), read("config/recurring.yml"), read("config/initializers/railwatch.rb") ]).to eq(first)
+      expect([ read("config/initializers/railwatch.rb"), read("config/routes.rb") ]).to eq(first)
     end
   end
 end

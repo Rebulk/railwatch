@@ -46,7 +46,11 @@ RSpec.describe Railwatch::Configuration do
       "RAILWATCH_BEACON" => [ :beacon_enabled, "0", false, true ],
       "RAILWATCH_CAPTURE_CONSOLE" => [ :capture_console, "1", true, false ],
       "RAILWATCH_DETECT_DEPLOY" => [ :detect_deploy, "0", false, true ],
-      "RAILWATCH_DEBUG" => [ :debug, "1", true, false ]
+      "RAILWATCH_DEBUG" => [ :debug, "1", true, false ],
+      "RAILWATCH_HTTP_BASIC_AUTH_ENABLED" => [ :http_basic_auth_enabled, "0", false, true ],
+      "RAILWATCH_HTTP_BASIC_AUTH_USER" => [ :http_basic_auth_user, "ops", "ops", nil ],
+      "RAILWATCH_HTTP_BASIC_AUTH_PASSWORD" => [ :http_basic_auth_password, "s3cret", "s3cret", nil ],
+      "RAILWATCH_BASE_CONTROLLER_CLASS" => [ :base_controller_class, "AdminController", "AdminController", "ActionController::Base" ]
     }.each do |env_key, (attr, raw, expected, default)|
       it "maps #{env_key} to config.#{attr}, defaulting to #{default.inspect}" do
         with_env(env_key => raw) { |config| expect(config.public_send(attr)).to eq(expected) }
@@ -159,6 +163,72 @@ RSpec.describe Railwatch::Configuration do
       %w[0 false no off garbage].each do |value|
         with_env("RAILWATCH_IGNORE_QUERIES" => value) { |c| expect(c.ignored?(:queries)).to be(false) }
       end
+    end
+  end
+
+  describe "#enabled?" do
+    it "needs a token: with none there is nowhere to report" do
+      with_env("RAILWATCH_TOKEN" => nil) { |config| expect(config.enabled?).to be(false) }
+      with_env("RAILWATCH_TOKEN" => "rw_x") { |config| expect(config.enabled?).to be(true) }
+      with_env("RAILWATCH_TOKEN" => "rw_x", "RAILWATCH_ENABLED" => "0") { |config| expect(config.enabled?).to be(false) }
+    end
+
+    # railwatch-server 0.1.0 asks before wiring the agent to its server and
+    # before its Puma plugin flushes the reporter at shutdown.
+    it "is never the removed embedded transport" do
+      expect(described_class.new.local?).to be(false)
+    end
+  end
+
+  # The gate railwatch-server's dashboard proxy applies before it forwards
+  # /railwatch to the bundled server.
+  describe "HTTP Basic gate" do
+    def request(user = nil, password = nil)
+      env = Rack::MockRequest.env_for("/railwatch")
+      env["HTTP_AUTHORIZATION"] = ActionController::HttpAuthentication::Basic.encode_credentials(user, password) if user
+      ActionDispatch::Request.new(env)
+    end
+
+    def config_with(user: nil, password: nil, enabled: true)
+      described_class.new.tap do |config|
+        config.http_basic_auth_enabled = enabled
+        config.http_basic_auth_user = user
+        config.http_basic_auth_password = password
+      end
+    end
+
+    it "is closed outside development when no credentials are configured" do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("production"))
+      config = config_with
+
+      expect(config.http_basic_auth_configured?).to be(false)
+      expect(config.http_basic_auth_ok?(request)).to be(false)
+      expect(config.http_basic_auth_ok?(request("ops", "anything"))).to be(false)
+    end
+
+    it "is open in development with no credentials, so a first run needs no password step" do
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("development"))
+
+      expect(config_with.http_basic_auth_ok?(request)).to be(true)
+      expect(config_with(user: "ops", password: "s3cret").http_basic_auth_ok?(request)).to be(false)
+    end
+
+    it "accepts the configured credentials and nothing else" do
+      config = config_with(user: "ops", password: "s3cret")
+
+      expect(config.http_basic_auth_ok?(request("ops", "s3cret"))).to be(true)
+      expect(config.http_basic_auth_ok?(request("ops", "wrong"))).to be(false)
+      expect(config.http_basic_auth_ok?(request("other", "s3cret"))).to be(false)
+      expect(config.http_basic_auth_ok?(request)).to be(false)
+    end
+
+    it "counts blank halves as not configured" do
+      expect(config_with(user: "ops", password: " ").http_basic_auth_configured?).to be(false)
+      expect(config_with(user: "", password: "s3cret").http_basic_auth_configured?).to be(false)
+    end
+
+    it "stands aside when the host turns Basic off to gate with its own base controller" do
+      expect(config_with(enabled: false).http_basic_auth_ok?(request)).to be(true)
     end
   end
 

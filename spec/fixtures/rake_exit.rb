@@ -25,7 +25,6 @@ class RakeExitApplication < Rails::Application
 end
 
 Railwatch.configure do |c|
-  c.transport = :http
   c.token = "rake-exit-token"
   c.ingest_url = "http://127.0.0.1:#{ENV.fetch('RAKE_EXIT_PORT')}"
 end

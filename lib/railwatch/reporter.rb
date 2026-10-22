@@ -183,20 +183,11 @@ module Railwatch
     # where the command patch starts the execution, and sampling that
     # execution builds the reporter -- before the task's `:environment`
     # prerequisite boots Rails and runs config/initializers. A token in the
-    # environment is enough for Railwatch to be enabled that early, so an
-    # embedded app gets a reporter aimed at HTTP, chosen from a config that
-    # had not yet been told the app is embedded. Left alone it stays aimed
-    # there: the memo outlives the configuration that produced it, and every
-    # record from that process goes to the receiver instead of the app's own
-    # database, skipping the export queue and the replay receipts it earns.
+    # environment is enough for Railwatch to be enabled that early.
     #
     # Nothing has been recorded at that point -- starting an execution
     # decides sampling and pushes nothing -- so deciding again here is free.
     def adopt_final_config!
-      # The swap forked_transport already makes, for the same reason: the
-      # situation this transport was chosen for is not the situation now.
-      reselected = Railwatch.local_transport if @config.local?
-      @transport = reselected if reselected && reselected.class != @transport.class
       # Sized from the config as it stood, which was the default one. Safe
       # only while the buffer is still empty: resizing means a new buffer,
       # and anything already in the old one would go with it.
@@ -248,12 +239,6 @@ module Railwatch
     end
 
     def forked_transport
-      # A child may be a different kind of process from its parent: the
-      # writer forked from a Puma master must write SQLite itself, not hand
-      # batches back to the socket it is about to serve.
-      reselected = Railwatch.local_transport if @config.local?
-      return reselected if reselected && reselected.class != @transport.class
-
       transport = @transport.dup
       transport.reset_after_fork! if transport.respond_to?(:reset_after_fork!)
       transport
@@ -447,9 +432,8 @@ module Railwatch
       end
       return unless gave_up
 
-      # Losing a batch is not a debug-level event: with an ingest (or an
-      # embedded writer) that never comes back this is the only place the
-      # loss is ever reported, and the dropped counter it leaves behind
+      # Losing a batch is not a debug-level event: with an ingest that never
+      # comes back this is the only place the loss is ever reported, and the dropped counter it leaves behind
       # rides on the NEXT successful delivery, which may never happen.
       #
       # Reported here, after the lock is released, never inside it. The

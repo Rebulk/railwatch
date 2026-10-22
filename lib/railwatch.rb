@@ -21,19 +21,9 @@ require "railwatch/current"
 require "railwatch/record"
 require "railwatch/buffer"
 require "railwatch/transport/wire_encoder"
-require "railwatch/export/policy"
-require "railwatch/export/lease"
-require "railwatch/export/outbox"
-require "railwatch/export/client"
-require "railwatch/export/sender"
 require "railwatch/transport/http"
-require "railwatch/transport/local"
-require "railwatch/transport/socket"
-require "railwatch/writer"
 require "railwatch/authentication"
 require "railwatch/json_compat"
-require "railwatch/embedded"
-require "railwatch/ingest_request_body_limit"
 require "railwatch/reporter"
 require "railwatch/sampler"
 require "railwatch/redactor"
@@ -69,7 +59,7 @@ module Railwatch
     end
 
     def reporter
-      @reporter ||= Reporter.new(config, transport: local_transport)
+      @reporter ||= Reporter.new(config)
     end
 
     # Called once config/initializers has run, so a reporter built before
@@ -85,16 +75,6 @@ module Railwatch
       # memo costs a rebuild on next use and nothing else; it holds only caches.
       @redactor = nil
       @reporter&.adopt_final_config!
-    end
-
-    # Embedded mode: a Puma worker hands its batches to the writer process
-    # over the socket; the writer itself, and any process when no socket is
-    # configured, writes them straight into SQLite. nil means HTTP.
-    def local_transport
-      return nil unless config.local?
-      return Transport::Local.new(config) if Writer.running? || config.writer_socket_path.nil?
-
-      Transport::Socket.new(config)
     end
 
     def redactor
@@ -124,9 +104,7 @@ module Railwatch
       Subscribers::Users.restart_after_fork!
       Subscribers::ProcessInfo.restart_after_fork!
       Health.restart_after_fork!
-      Export::Sender.restart_after_fork!
       Sessions.restart_after_fork!
-      Maintenance.restart_after_fork!
     end
 
     # --- execution lifecycle -------------------------------------------------
@@ -619,43 +597,14 @@ module Railwatch
 end
 
 require "railwatch/subscribers"
-require "railwatch/dashboard_assets"
 
 module Railwatch
-  # Where the engine's two databases migrate from. database.yml names them
-  # (`migrations_paths: <%= Railwatch.migrations_path(:railwatch) %>`) so a
-  # host's db:prepare creates the tables on install and migrates them after
-  # every gem update, from the gem's own history, the way Active Storage
-  # migrates its tables. Nothing is copied into the app.
-  def self.migrations_path(database)
-    File.expand_path("../db/#{database}_migrate", __dir__)
-  end
-
-  # Where links the models build (a trace from an execution page, a saved
-  # view's page) resolve. The engine's own routes serve the embedded
-  # dashboard; a host that mounts these pages on its own routes, as
-  # Railwatch Cloud does, points this at them.
-  def self.url_helpers
-    @url_helpers || Engine.routes.url_helpers
-  end
-
-  def self.url_helpers=(helpers)
-    @url_helpers = helpers
-  end
-
-  # The one browser client, relative to the gem root. The dashboard bundle
-  # is built from it and the install generator copies it into a host.
-  BROWSER_CLIENT = "app/frontend/lib/railwatch.ts"
+  # The Inertia browser client, relative to the gem root. The install
+  # generator copies it into a host's app/frontend/lib.
+  BROWSER_CLIENT = "lib/generators/railwatch/install/templates/railwatch.ts"
 
   def self.browser_client_path
     File.expand_path("../#{BROWSER_CLIENT}", __dir__)
-  end
-
-  # The dashboard's frontend source. Railwatch Cloud builds its bundle from
-  # this directory plus its own hosting pages, so there is one copy of every
-  # dashboard page and component.
-  def self.frontend_path
-    File.expand_path("../app/frontend", __dir__)
   end
 
   # One realistic wire record per record type, exactly as the gem's own
@@ -669,12 +618,5 @@ module Railwatch
   def self.wire_fixtures
     @wire_fixtures ||= JSON.parse(File.read(wire_fixtures_path)).freeze
   end
-
-  # Raised when the engine's models are used in an app whose database.yml
-  # has no entry for them. They must never fall back to the host's primary
-  # connection: the telemetry tables are unprefixed (`sessions`, `visits`,
-  # `people`, `notifications`, `logs`), so a query there would read, and a
-  # write would corrupt, the application's own tables.
-  class DatabaseNotConfigured < StandardError; end
 end
 require "railwatch/engine" if defined?(Rails::Engine)

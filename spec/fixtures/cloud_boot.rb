@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
-# A fresh process is essential: the regular dummy app has both Railwatch
-# databases and has already loaded its models before any example runs.
+# A fresh process is essential: the regular dummy app has already booted
+# before any example runs.
 require "bundler/setup"
 require "rails"
 require "active_record/railtie"
@@ -50,7 +50,6 @@ Railwatch.flush
 Railwatch.reporter.shutdown
 abort "exception was not sent over HTTP" unless records.any? { |record| record["t"] == "exception" && record["message"] == "cloud boot regression" }
 abort "beacon was not sent over HTTP" unless records.any? { |record| record["t"] == "visit" && record["component"] == "CloudBoot" }
-abort "cloud mode loaded TelemetryRecord" if $LOADED_FEATURES.any? { |path| path.end_with?("/railwatch/telemetry_record.rb") }
-abort "cloud mode loaded embedded database models" if ActiveRecord::Base.descendants.any? { |model| model.name&.start_with?("Railwatch::") }
+abort "railwatch defined Active Record models" if ActiveRecord::Base.descendants.any? { |model| model.name&.start_with?("Railwatch::") }
 
 puts "CLOUD_BOOT_AND_REPORT_OK"

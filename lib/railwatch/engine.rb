@@ -1,78 +1,14 @@
 # frozen_string_literal: true
 
-# The dashboard controllers are Inertia controllers; a host that does not use
-# Inertia itself never requires the gem, so the engine does.
-require "inertia_rails"
-# The engine's jobs (grouping, rollups, scans) are Active Job classes even
-# though embedded mode calls their perform directly, so a host built with
-# `rails new --minimal` (no Active Job) still needs the framework loaded.
-# Part of the rails gem this one depends on, so nothing new is pulled in.
-require "active_job/railtie"
-
 module Railwatch
-  # isolate_namespace would give every model a railwatch_ prefix. Only the
-  # engine's own records (issues, comments, deploys: Railwatch::ApplicationRecord)
-  # carry it; the telemetry tables are the hosted platform's schema and stay
-  # unprefixed. Defined before isolate_namespace runs, which only adds a
-  # prefix when none is set.
-  def self.table_name_prefix = ""
-
+  # Mounted for the browser beacon (POST <mount>/beacon), its only route.
   class Engine < ::Rails::Engine
     isolate_namespace Railwatch
-
-    config.railwatch = ActiveSupport::OrderedOptions.new
-
-    # The dashboard bundle is built into the gem at release time; serve it
-    # from here so a host app needs no asset pipeline integration at all.
-    # Where it goes in the stack is DashboardAssets.install!'s decision.
-    initializer "railwatch.dashboard_assets" do |app|
-      Railwatch::DashboardAssets.install!(app, root: root.join("public/railwatch").to_s)
-    end
-
-    # Action Cable is optional: live dashboard updates need it, nothing else
-    # does. A host without it (`rails new --minimal`, --skip-action-cable)
-    # must not eager-load the engine's channel, which inherits from a class
-    # that does not exist there.
-    initializer "railwatch.channels", before: :setup_main_autoloader do
-      Rails.autoloaders.main.ignore(root.join("app/channels")) unless defined?(::ActionCable)
-    end
-
-    # The dashboard bundle subscribes to "EnvironmentChannel" by name; Action
-    # Cable constantizes that, so the engine's channel needs the bare name.
-    # Only defined when the host has not got one of its own.
-    initializer "railwatch.live_channel" do
-      next unless defined?(::ActionCable)
-
-      # Action Cable constantizes the subscription's channel name at
-      # subscribe time; the alias only has to exist by then, and it must
-      # not clobber a host channel of the same name.
-      config.to_prepare do
-        Object.const_set(:EnvironmentChannel, Railwatch::EnvironmentChannel) unless Object.const_defined?(:EnvironmentChannel)
-      end
-    end
 
     # The request middleware goes first so wall time includes every other
     # middleware, exactly like Nightwatch's GlobalMiddleware.
     initializer "railwatch.middleware", before: :load_config_initializers do |app|
       app.middleware.insert_before 0, Railwatch::Middleware::Request
-    end
-
-    # HTTP installs have no embedded databases or job backend. Loading their
-    # models still registers them with Active Record, whose schema-cache boot
-    # hook asks every descendant for its connection_pool (e.g. with
-    # activerecord-tenanted). Decide after the host's initializer selects the
-    # transport. Keep autoloading available for the local installer and tools;
-    # only local installs should eagerly load the embedded models and jobs.
-    # Dashboard controllers also reference model constants in their class
-    # bodies. The beacon is the only controller a cloud install needs.
-    initializer "railwatch.embedded_eager_loading", after: :load_config_initializers, before: :setup_main_autoloader do
-      next if Railwatch.config.local?
-
-      Rails.autoloaders.main.do_not_eager_load(root.join("app/models"))
-      Rails.autoloaders.main.do_not_eager_load(root.join("app/jobs"))
-      root.glob("app/controllers/railwatch/*.rb").each do |path|
-        Rails.autoloaders.main.do_not_eager_load(path) unless path.basename.to_s == "beacon_controller.rb"
-      end
     end
 
     # Before anything subscribes or starts a thread, and after the app's own
@@ -81,8 +17,9 @@ module Railwatch
       Railwatch::Console.silence!
     end
 
-    # Same source Mission Control Jobs reads: railwatch.http_basic_auth_user
-    # and _password in Rails credentials, which `bin/rails
+    # The dashboard gate railwatch-server's proxy applies. Same source
+    # Mission Control Jobs reads: railwatch.http_basic_auth_user and
+    # _password in Rails credentials, which `bin/rails
     # railwatch:authentication:configure` writes. An initializer or env var
     # that already set them wins.
     initializer "railwatch.http_basic_auth", after: :load_config_initializers do |app|
@@ -91,49 +28,26 @@ module Railwatch
       config.http_basic_auth_password ||= app.credentials.dig(:railwatch, :http_basic_auth_password)
     end
 
-    # Three things worth one line in the log at boot, because all are
-    # invisible until something is already wrong: a Rails/json pair that
-    # cannot decode, an embedded dashboard with nothing declared in front of
-    # it, and one that is closed to everyone because Basic has no
-    # credentials outside development.
+    # Worth one line in the log at boot, because it is invisible until
+    # something is already wrong: a Rails/json pair that cannot decode.
     initializer "railwatch.warnings", after: :load_config_initializers do
       config.after_initialize do
         next unless Railwatch.enabled?
 
         Rails.logger.warn("[railwatch] #{Railwatch::JsonCompat.advice}") if Railwatch::JsonCompat.broken?
-
-        if Railwatch.config.local? && Railwatch.config.dashboard_gate == :basic &&
-           !Railwatch.config.http_basic_auth_configured? && !Rails.env.local?
-          Rails.logger.warn(
-            "[railwatch] the dashboard is closed: HTTP Basic is on and no credentials are configured for " \
-            "#{Rails.env}, so every request to it is 401. Run `RAILS_ENV=#{Rails.env} bin/rails " \
-            "railwatch:authentication:configure`, or gate it with your own auth and set " \
-            "`c.http_basic_auth_enabled = false` (docs/embedded.md)."
-          )
-        end
-
-        if Railwatch.config.local? && Railwatch.config.dashboard_gate == :undeclared && !Rails.env.local?
-          Rails.logger.warn(
-            "[railwatch] the dashboard at the engine's mount has no gate this gem can see: HTTP Basic is off and " \
-            "no base_controller_class, dashboard_user or dashboard_open is set. If a routes constraint or your " \
-            "network already gates it, authorize /cable separately with `c.dashboard_user`, or set `c.dashboard_open = true` " \
-            "only when the network protects both endpoints. Otherwise anyone who can reach the dashboard can read every query, log line and exception this app records."
-          )
-        end
       end
     end
 
     # A rake process starts its command execution before this point -- the
     # top-level task is invoked before its `:environment` prerequisite boots
-    # Rails -- so a reporter can already exist, built from a config that had
-    # not yet been told the app is embedded. This is the first moment the
-    # app's own configuration is final.
+    # Rails -- so a reporter can already exist, built from a config that was
+    # not final. This is the first moment the app's own configuration is.
     initializer "railwatch.adopt_final_config", after: :load_config_initializers do
       Railwatch.adopt_final_config!
     end
 
     initializer "railwatch.transport_security", after: :load_config_initializers do
-      next if Railwatch.config.local? || Railwatch.config.ingest_url_allowed?
+      next if Railwatch.config.ingest_url_allowed?
 
       Rails.logger.warn(
         "Railwatch will not send telemetry to #{Railwatch.config.ingest_url}: plain HTTP is allowed only for loopback " \
@@ -243,28 +157,6 @@ module Railwatch
       at_exit { Railwatch::Sessions.stop! }
     end
 
-    # The embedded install's maintenance clock (release health, scans,
-    # pruning). Same shape and ordering rationale as "railwatch.health":
-    # stopped before the reporter's final flush. Maintenance.start! is a
-    # no-op unless the transport is local.
-    initializer "railwatch.maintenance" do
-      next unless Railwatch.enabled?
-
-      Railwatch::Maintenance.start!
-      at_exit { Railwatch::Maintenance.stop! }
-    end
-
-    # Draining the export queue. Same shape and ordering as the others:
-    # stopped before the reporter's final flush, so its last claim is
-    # released rather than left to expire. Sender.start! is a no-op unless
-    # export is configured and usable.
-    initializer "railwatch.export" do
-      next unless Railwatch.enabled?
-
-      Railwatch::Export::Sender.start!
-      at_exit { Railwatch::Export::Sender.stop! }
-    end
-
     # lib/tasks/railwatch_tasks.rake is picked up by Rails::Engine's default
     # lib/tasks convention; the rake_tasks block above only installs the
     # Rake::Task patch.
@@ -274,7 +166,6 @@ end
 require "railwatch/console"
 require "railwatch/health"
 require "railwatch/sessions"
-require "railwatch/maintenance"
 require "railwatch/middleware/request"
 require "railwatch/job_tracing"
 require "railwatch/controller_helpers"
