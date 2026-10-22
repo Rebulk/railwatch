@@ -1,6 +1,7 @@
 # AI assistants and MCP
 
-Railwatch Cloud is an [MCP](https://modelcontextprotocol.io) server. Point
+Railwatch Cloud, and any railwatch-rs server, is an
+[MCP](https://modelcontextprotocol.io) server. Point
 Claude Code, Claude Desktop, Cursor, VS Code, or Zed at it and the assistant
 sitting in your editor can read the same production data your dashboards
 show: issues and their stack traces, slow routes, the queries and N+1s
@@ -9,13 +10,13 @@ crash-free rates per release. It can also write — resolve an issue, set a
 priority, leave a comment — and every write is signed with your user and the
 agent's name in the issue's activity feed.
 
-MCP is a Railwatch Cloud feature. The embedded dashboard at `/railwatch`
-does not serve it; an embedded install gets it by
-[exporting to the cloud](embedded.md#three-ways-to-run-it).
-
 The endpoint is `<your ingest host>/mcp`. For the hosted platform that's
 `https://railwatch.rebulk.com/mcp`; if you self-host, it is your own host (see
-[`self-hosting.md`](self-hosting.md)). The gem knows which one you're on:
+[`self-hosting.md`](self-hosting.md)). With the `railwatch-server` gem the
+server runs under the app's dashboard path, so the endpoint is the app's own
+host plus `/railwatch/mcp`; see the
+[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
+For Railwatch Cloud and a self-hosted server the gem knows which one you're on:
 
 ```sh
 bin/rails railwatch:mcp
@@ -225,9 +226,9 @@ Copy either into your own app's repo to give its agent the same context.
 
 ## See also
 
-- [`getting-started.md`](getting-started.md) — install, the cloud token,
+- [`getting-started.md`](getting-started.md) — install, the token,
   first request.
 - [`self-hosting.md`](self-hosting.md) — pointing the gem, and this endpoint,
-  at your own platform.
+  at your own server.
 - [`troubleshooting.md`](troubleshooting.md) — when something isn't
   reporting.

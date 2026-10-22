@@ -8,29 +8,9 @@ below are keyed to those lines.
 bin/rails railwatch:doctor
 ```
 
-The first lines depend on the transport. An embedded install checks its
-databases, writer and dashboard; a cloud install checks its token and
-ingest host. The task exits non-zero only on the lines marked fatal
-below. Everything else is informational: a `✗` there means a feature
-isn't wired, not that the install is broken.
-
-Embedded (`transport = :local`):
-
-| Doctor line | What a `✗` means |
-|---|---|
-| `export` | Only shown with `export_enabled` on. Export is on and cannot work: no token, no URL, a plain-HTTP URL, or an unsupported policy. Fatal. |
-| `export destination` | The export queue is blocked or deferred; the line gives the reason. `bin/rails railwatch:export:rebind` clears a credential block. |
-| `railwatch database`, `railwatch_telemetry database` | The database is missing from `config/database.yml` for this environment. Fatal. Re-run the install generator. |
-| `railwatch migrations`, `railwatch_telemetry migrations` | Migrations are pending. Fatal. Run `bin/rails db:prepare`. |
-| `telemetry disk` | The telemetry database is not in incremental auto-vacuum, so pruning never shrinks the file. See [Embedded mode](embedded.md#giving-the-disk-back). |
-| `maintenance` | No maintenance tick in the last ten minutes. Expected when the app is stopped: the clock runs in the app's processes, not in rake. |
-| `writer process` | The writer socket is not answering, `plugin :railwatch` is missing from `config/puma.rb`, or the socket path is over Linux's 108-byte limit. Expected when the app is stopped. |
-| `last write` | Shown when the writer answers: nothing written in five minutes. With the app serving traffic, the writer is stuck or workers are not reaching it. |
-| `dashboard access` | HTTP Basic is on with no credentials outside development, so every page is 401; or Basic is off and nothing else is declared. Run `bin/rails railwatch:authentication:configure`, or see [Embedded mode](embedded.md#authentication). |
-| `json compatibility` | The installed `json` gem cannot decode on this Rails; see [below](#binjobs-dies-in-a-loop-with-wrong-number-of-arguments-given-2-expected-1). |
-| `recurring.yml` | `config/recurring.yml` still lists `Railwatch::*` jobs from a pre-release. Remove them. |
-
-Cloud (`transport = :http`):
+The task exits non-zero only on the lines marked fatal below. Everything
+else is informational: a `✗` there means a feature isn't wired, not that
+the install is broken.
 
 | Doctor line | What a `✗` means |
 |---|---|
@@ -39,11 +19,6 @@ Cloud (`transport = :http`):
 | `ingest url` | `ingest_url` isn't a parseable HTTP(S) URL. |
 | `ingest transport security` | The ingest URL is plain HTTP on a non-loopback host without `RAILWATCH_ALLOW_HTTP=true`. |
 | `ingest reachable` | `GET {ingest_url}/ingest/ping` didn't return success. Fatal. The ping carries the token, so a missing or wrong token fails this line too; fix `token` first. |
-
-Both:
-
-| Doctor line | What a `✗` means |
-|---|---|
 | `request middleware` | `Railwatch::Middleware::Request` isn't in the stack, so requests aren't executions. |
 | `engine mounted` | `mount Railwatch::Engine, at: "/railwatch"` is missing from `config/routes.rb`; the browser beacon has nowhere to post. |
 | `deploy` | `config.deploy` is unset — records ship, charts get no deploy markers. |
@@ -64,32 +39,29 @@ app takes.
 Work down this list. Most of it is the same root cause seen from
 different angles: Railwatch decided not to record.
 
-**Embedded: the writer is not writing.** Run `railwatch:doctor` with the
-app serving traffic. `writer process` and `last write` say whether the
-writer is up and when it last wrote; the migrations lines catch a
-database that was never prepared.
-
-**Cloud: the token is missing or blank.** With `transport = :http`,
+**The token is missing or blank.**
 `Railwatch.enabled?` is `config.enabled && token.present?`. With no token
 the engine's `railwatch.subscribe` initializer returns early, so no
 subscribers and no patches are installed at all. Fix: set
 `RAILWATCH_TOKEN`, restart, and re-run `railwatch:doctor`. The `token`
 line prints the first 6 characters and the length, which is enough to
-spot a truncated or quoted value.
+spot a truncated or quoted value. With railwatch-server installed, the
+token is set when the server's data directory is provisioned; its boot
+log line says whether the agent was wired.
 
-**Cloud: the token is wrong.** A 401 from the ingest marks the transport
+**The token is wrong.** A 401 from the ingest marks the transport
 permanently unauthorized: no further flush is attempted for the lifetime
 of that process. Fixing the env var isn't enough. Restart the process.
 `railwatch:doctor`'s `ingest reachable` line catches this before you
 deploy.
 
-**Cloud: `RAILWATCH_INGEST_URL` points somewhere else.** Records go where
+**`RAILWATCH_INGEST_URL` points somewhere else.** Records go where
 you sent them. `railwatch:status` prints the URL it is actually using.
-Compare it against the platform you're looking at. Self-hosting: see
+Compare it against the server you're looking at. Self-hosting: see
 [`self-hosting.md`](self-hosting.md).
 
 **`config.enabled` is false.** `RAILWATCH_ENABLED=0` (or `false`/`no`/`off`)
-turns everything off, embedded or not.
+turns everything off.
 
 **Sample rates are at zero.** `c.sample = { requests: 0.0 }` means no
 request records. So does the per-route `railwatch_never_sample` macro on
@@ -329,13 +301,7 @@ hook below.
 
 **Cause and fix**, in the order the hook itself checks:
 
-- **Embedded: `RAILWATCH_TRANSPORT=local` isn't exported to the hook.**
-  The hook reads the deployer's environment, not your initializer. With
-  that variable set it runs `bin/rails railwatch:deploy[$KAMAL_VERSION]`
-  in the primary container, which writes the marker to the embedded
-  database. Without it, the hook treats the install as a cloud one and
-  exits at the next check, since an embedded install has no token.
-- **Cloud: `RAILWATCH_TOKEN` isn't exported to the hook.** The next thing
+- **`RAILWATCH_TOKEN` isn't exported to the hook.** The first thing
   `.kamal/hooks/post-deploy` does is `[ -z "$RAILWATCH_TOKEN" ] && exit 0`.
   The hook runs on the deployer machine, in your shell, not in a
   container. So a token that only exists in `.kamal/secrets` for the

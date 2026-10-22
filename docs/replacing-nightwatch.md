@@ -3,10 +3,11 @@
 Railwatch is the same product shape for Rails: one package instruments the
 framework end to end, records are grouped under the execution that
 produced them, and a dashboard turns them into routes, jobs, queries,
-issues, and alerts. Unlike Nightwatch, that dashboard runs inside your
-app by default ([embedded mode](embedded.md)); Railwatch Cloud is the
-hosted option. If you know Nightwatch, you already know how to read
-Railwatch — this page maps the vocabulary and points out the three
+issues, and alerts. Railwatch Cloud is the hosted option; unlike
+Nightwatch, the server can also be self-hosted
+([railwatch-rs](self-hosting.md)) or run inside your app with the
+[`railwatch-server`](getting-started.md#embedded-railwatch-server) gem.
+If you know Nightwatch, you already know how to read Railwatch — this page maps the vocabulary and points out the three
 places the Rails answer is genuinely different.
 
 Railwatch is an independent product and is not affiliated with Laravel or
@@ -21,8 +22,8 @@ separate daemon POSTs them.
 Puma and Solid Queue workers *are* long-lived, so Railwatch skips that
 tier. A single reporter thread per process holds a bounded buffer
 (16 MiB and 10,000 records by default, oldest dropped and counted) and
-flushes batches every 2 seconds or every 500 records: to the embedded
-writer process Puma forks, or as gzip-NDJSON POSTs to Railwatch Cloud.
+flushes batches every 2 seconds or every 500 records, as gzip-NDJSON
+POSTs to the Railwatch server.
 There is no daemon to install, supervise, or forget to restart.
 
 The thread is re-armed after `fork`, so clustered Puma workers and
@@ -184,7 +185,7 @@ every setting still has an env var — `NIGHTWATCH_*` becomes `RAILWATCH_*`.
 | `nightwatch:agent` | Nothing — the reporter thread lives in the app process. |
 | `nightwatch:status` | `bin/rails railwatch:status` |
 | `nightwatch:deploy {deploy} --ref --name --url` | `bin/rails railwatch:deploy[ref,name,url]`, or the generated `.kamal/hooks/post-deploy` |
-| — | `bin/rails railwatch:doctor`, which checks the whole install and exits non-zero if the embedded databases, the token, or the ingest host is wrong |
+| — | `bin/rails railwatch:doctor`, which checks the whole install and exits non-zero if the token or the ingest host is wrong |
 
 ## The three things worth knowing about Rails
 
