@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.1.0 (2026-10-22)
+
 - A receiver that refuses the connection (nothing listening: a Railwatch
   server restarting, or a deploy handing over to the next container) no
   longer counts as backpressure. The retry ladder it starts used to double
