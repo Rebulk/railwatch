@@ -401,7 +401,7 @@ module Railwatch
           @backpressure_factor = MAX_BACKPRESSURE_FACTOR if @config.backpressure
         end
         @retry_attempt += 1
-        @unreachable = result.error.to_s.start_with?("Errno::ECONNREFUSED")
+        @unreachable = result.status.nil? && result.error.to_s.start_with?("Errno::ECONNREFUSED")
         if @retry_attempt > MAX_RETRY_ATTEMPTS
           @buffer.account_dropped(batch.records.size + batch.dropped,
                                   bytes: batch.bytes + batch.dropped_bytes)
