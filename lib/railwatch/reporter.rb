@@ -72,6 +72,7 @@ module Railwatch
       @flush_requested = false
       @urgent_at = nil
       @retry_attempt = 0
+      @unreachable = false
       @retry_at = nil
       @retry_batch = nil
       # Ruby ivars hold object references atomically. The reporter is the
@@ -400,6 +401,7 @@ module Railwatch
           @backpressure_factor = MAX_BACKPRESSURE_FACTOR if @config.backpressure
         end
         @retry_attempt += 1
+        @unreachable = result.error.to_s.start_with?("Errno::ECONNREFUSED")
         if @retry_attempt > MAX_RETRY_ATTEMPTS
           @buffer.account_dropped(batch.records.size + batch.dropped,
                                   bytes: batch.bytes + batch.dropped_bytes)
@@ -506,6 +508,7 @@ module Railwatch
         @in_flight_dropped_bytes = 0
         @retry_attempt = 0
         @retry_at = nil
+        @unreachable = false
       end
     end
 
@@ -600,8 +603,14 @@ module Railwatch
 
       buffered, _, buffered_bytes, = @buffer.stats
       high_water = @config.backpressure_high_water
+      # A retry ladder is pressure when the receiver is struggling (a timeout,
+      # a 5xx). Not when nothing listens (ECONNREFUSED): that is a server
+      # restarting or a deploy handing over, back in a second or two, and
+      # sampling down meanwhile only lost the app's first requests after it.
+      # The buffer's high-water mark still bounds a receiver that stays away.
+      retrying = @retry_attempt.positive? && !@unreachable
       pressured = buffered >= @config.buffer_size * high_water ||
-        buffered_bytes >= @config.buffer_bytes * high_water || @retry_attempt.positive?
+        buffered_bytes >= @config.buffer_bytes * high_water || retrying
       @backpressure_factor = if pressured
         [ @backpressure_factor * 2.0, MAX_BACKPRESSURE_FACTOR ].min
       else
