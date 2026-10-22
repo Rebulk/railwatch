@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.0.0 (2026-10-22)
+
 - **Breaking: `railwatch` is the agent only.** It instruments the app and
   sends to an ingest URL: Railwatch Cloud (the default,
   `https://railwatch.rebulk.com`) or a self-hosted
