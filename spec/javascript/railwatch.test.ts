@@ -768,6 +768,47 @@ describe("startRailwatch breadcrumbs", () => {
   })
 })
 
+// The first page load ships as a visit named after the server-rendered
+// component, read off the serialized page object. inertia_rails 3.23+ puts
+// it in a <script data-page="app">; older ones on <div id="app">.
+describe("startRailwatch initial page load", () => {
+  function loadWith(markup: string) {
+    document.body.innerHTML = markup
+    vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+      {
+        entryType: "navigation",
+        startTime: 0,
+        responseStart: 120,
+        responseEnd: 300,
+        loadEventEnd: 900,
+      } as unknown as PerformanceEntry,
+    ])
+    start()
+    listenerFor("pagehide")(new Event("pagehide"))
+    return lastFlush().visits?.[0]
+  }
+
+  afterEach(() => {
+    document.body.innerHTML = ""
+    vi.restoreAllMocks()
+  })
+
+  it("names it from <script data-page> (inertia_rails 3.23+)", () => {
+    const visit = loadWith(
+      '<script data-page="app" type="application/json">{"component":"orders/Show","props":{}}</script><div id="app"></div>',
+    )
+    expect(visit?.component).toBe("orders/Show")
+    expect(visit?.ttfb).toBe(120)
+  })
+
+  it("names it from <div id=app data-page> (older inertia_rails)", () => {
+    const visit = loadWith(
+      `<div id="app" data-page='{"component":"home/Index","props":{}}'></div>`,
+    )
+    expect(visit?.component).toBe("home/Index")
+  })
+})
+
 describe("startRailwatch tenant hint", () => {
   it("sends the tenant the app resolves, re-read on every flush", () => {
     let org = "acme"

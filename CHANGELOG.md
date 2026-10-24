@@ -6,6 +6,15 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The browser client names the first page load after its Inertia
+  component again on inertia_rails 3.23+, which renders the page object as
+  `<script data-page="app" type="application/json">` instead of a
+  `data-page` attribute on `<div id="app">`. The client only read the
+  attribute, so every initial load (the only visits that carry LCP, CLS,
+  INP and TTFB) arrived with no component: per-page web vitals were empty.
+  Apps that copied the client (`app/frontend/lib/railwatch.ts`) need the
+  same change in their copy.
+
 ## 1.1.0 (2026-10-22)
 
 - A receiver that refuses the connection (nothing listening: a Railwatch

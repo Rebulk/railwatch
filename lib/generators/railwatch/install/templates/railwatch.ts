@@ -659,13 +659,18 @@ function startVitals() {
   )
 }
 
-// The component the server rendered this page with, off the root element's
-// serialized page object. Inertia's own events take over from here.
+// The component the server rendered this page with, off the serialized page
+// object: inertia_rails 3.23+ renders it as <script data-page="app"
+// type="application/json">, older ones as <div id="app" data-page="...">.
+// Inertia's own events take over from here.
 function pageComponent(): string | undefined {
   try {
-    const page = JSON.parse(
-      document.getElementById("app")?.dataset.page ?? "{}",
-    ) as { component?: string }
+    const script = document.querySelector(
+      'script[data-page="app"][type="application/json"]',
+    )
+    const raw =
+      script?.textContent || document.getElementById("app")?.dataset.page
+    const page = JSON.parse(raw ?? "{}") as { component?: string }
     return page.component
   } catch {
     // Not an Inertia-rendered page, or the payload moved. Report it anyway.
