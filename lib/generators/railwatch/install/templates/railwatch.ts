@@ -668,8 +668,9 @@ function pageComponent(): string | undefined {
     const script = document.querySelector(
       'script[data-page="app"][type="application/json"]',
     )
-    const raw =
-      script?.textContent || document.getElementById("app")?.dataset.page
+    const raw = script
+      ? script.textContent
+      : document.getElementById("app")?.dataset.page
     const page = JSON.parse(raw ?? "{}") as { component?: string }
     return page.component
   } catch {
