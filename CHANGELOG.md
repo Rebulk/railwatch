@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.1.1 (2026-10-24)
+
 - The browser client names the first page load after its Inertia
   component again on inertia_rails 3.23+, which renders the page object as
   `<script data-page="app" type="application/json">` instead of a
