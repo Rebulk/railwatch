@@ -50,7 +50,8 @@ RSpec.describe Railwatch::Configuration do
       "RAILWATCH_HTTP_BASIC_AUTH_ENABLED" => [ :http_basic_auth_enabled, "0", false, true ],
       "RAILWATCH_HTTP_BASIC_AUTH_USER" => [ :http_basic_auth_user, "ops", "ops", nil ],
       "RAILWATCH_HTTP_BASIC_AUTH_PASSWORD" => [ :http_basic_auth_password, "s3cret", "s3cret", nil ],
-      "RAILWATCH_BASE_CONTROLLER_CLASS" => [ :base_controller_class, "AdminController", "AdminController", "ActionController::Base" ]
+      "RAILWATCH_BASE_CONTROLLER_CLASS" => [ :base_controller_class, "AdminController", "AdminController", "ActionController::Base" ],
+      "RAILWATCH_TIMING_HEADERS" => [ :timing_headers, "1", true, nil ]
     }.each do |env_key, (attr, raw, expected, default)|
       it "maps #{env_key} to config.#{attr}, defaulting to #{default.inspect}" do
         with_env(env_key => raw) { |config| expect(config.public_send(attr)).to eq(expected) }

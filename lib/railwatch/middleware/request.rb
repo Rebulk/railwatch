@@ -20,6 +20,10 @@ module Railwatch
       # CONTENT_TYPE test Subscribers::Requests uses before its params walk.
       MULTIPART = "multipart/form-data"
       NO_FILES = [].freeze
+      # Response headers written with config.timing_headers. Lower case, as
+      # Rack 3 requires; Rack::Headers matches any case.
+      SERVER_TIMING = "server-timing"
+      EXECUTION_ID = "x-railwatch-execution-id"
 
       # Returns [trace_id, parent_id, sampled] from an inbound traceparent,
       # or nil when the header is absent or malformed.
@@ -58,6 +62,7 @@ module Railwatch
         status = headers = body = nil
         begin
           status, headers, body = @app.call(env)
+          timing_headers(env, exe, headers) if headers && Railwatch.config.timing_headers?
         rescue Exception => e # rubocop:disable Lint/RescueException
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "railwatch.middleware")
           raise
@@ -69,6 +74,34 @@ module Railwatch
       end
 
       private
+
+      # config.timing_headers (development by default): what this request
+      # cost, on the response, so `curl -i` or the browser's network panel
+      # shows it without opening the dashboard, and the execution id an
+      # agent passes to get_execution. Everything here is already known:
+      # the counters, and the runtimes the process_action subscriber put
+      # in env. Appended to a Server-Timing the app (Rails' own, with
+      # config.server_timing) already set. The id only for an execution
+      # that ships: a sampled-out one would be an id the server never has.
+      def timing_headers(env, exe, headers)
+        total = exe.duration / 1000.0
+        db = env["railwatch.db_runtime"]
+        view = env["railwatch.view_runtime"]
+        queries = exe.counters[:queries]
+        cached = exe.counters[:cached_queries]
+        desc = cached.positive? ? "#{queries} queries, #{cached} cached" : "#{queries} #{queries == 1 ? "query" : "queries"}"
+        metrics = [ format("total;dur=%.1f", total), db ? format("db;dur=%.1f;desc=\"%s\"", db, desc) : "db;desc=\"#{desc}\"" ]
+        metrics << format("view;dur=%.1f", view) if view
+        metrics << format("other;dur=%.1f;desc=\"not db or view\"", [ total - db.to_f - view.to_f, 0 ].max) if db || view
+        # A plain Hash may hold it title-cased; Rack::Headers finds either.
+        existing = headers[SERVER_TIMING] || headers.delete("Server-Timing")
+        headers[SERVER_TIMING] = existing.to_s.empty? ? metrics.join(", ") : "#{existing}, #{metrics.join(", ")}"
+        headers[EXECUTION_ID] = exe.id if exe.sampled? || exe.keep
+      rescue StandardError => e
+        # A frozen header hash (a Rack app that returns a constant): the
+        # response is the app's, unchanged.
+        Railwatch.debug { "timing headers skipped: #{e.class}: #{e.message}" }
+      end
 
       def ignored_request?(env)
         path = env["PATH_INFO"].to_s

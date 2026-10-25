@@ -129,6 +129,13 @@ claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
   --header "Authorization: Bearer rwp_your_token_here"
 ```
 
+In development with railwatch-server no token is needed from the same
+machine: `claude mcp add --transport http railwatch http://localhost:3000/railwatch/mcp`,
+or `bin/rails generate railwatch:agents` to write `.mcp.json`, a marked
+block in `AGENTS.md`/`CLAUDE.md` and a Claude Code skill. Development
+responses carry `Server-Timing` and `X-Railwatch-Execution-Id` for
+`get_execution`.
+
 `bin/rails railwatch:mcp` prints this and the Claude Desktop, Cursor, VS Code, and
 Zed equivalents for whichever platform the app points at. Call
 `list_applications` first; then `list_issues`, `get_issue` (stack frames,

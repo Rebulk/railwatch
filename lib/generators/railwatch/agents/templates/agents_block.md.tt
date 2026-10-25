@@ -1,0 +1,27 @@
+## Railwatch (performance and errors, in development)
+
+Every request, job and command this app runs in development is recorded by
+the `railwatch` gem into the server `railwatch-server` runs beside it: SQL
+(with the `file:line` that ran it), N+1s, views, logs and exceptions, all
+linked to one execution.
+
+- MCP server `<%= SERVER_NAME %>` at <%= mcp_url %> (in `.mcp.json`). No token from
+  this machine in development. Tools take `application_slug: "<%= app_slug %>"`
+  and `environment: "development"`; `list_applications` lists them.
+- Dashboard, for the human: <%= dashboard_url %>
+
+The loop after a change:
+
+1. Hit the page: `curl -si <%= app_url %>/path | grep -i -e server-timing -e x-railwatch`.
+   `Server-Timing` has total, db (with the query count), view and other;
+   `X-Railwatch-Execution-Id` names the execution.
+2. `get_execution` with that id: the timeline of every query, render and log,
+   each query with its `source` (`file:line`). The same SQL repeated from one
+   line is an N+1.
+3. `get_route` for the route: its N+1s, each with the source line and an
+   `includes` to add, and its slowest queries.
+4. Fix, hit the page again, compare the query count and db time.
+
+`search_requests`, `list_slow_routes`, `list_issues` and `get_issue` cover the
+rest. A `last_execution` tool (the newest request, optionally by path)
+arrives with a later railwatch-rs release; until then use the header.

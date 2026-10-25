@@ -86,7 +86,7 @@ module Railwatch
                   :capture_job_arguments, :capture_job_retry_errors, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths, :ignored_request_paths,
-                  :capture_llm_content
+                  :capture_llm_content, :timing_headers
 
     attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
                 :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
@@ -238,6 +238,13 @@ module Railwatch
         DEFAULT_INTERACTIVE_RUNNER_PATHS.dup
       @ignored_request_paths = ENV["RAILWATCH_IGNORED_REQUEST_PATHS"]&.split(",")&.map(&:strip)&.reject(&:empty?) ||
         DEFAULT_IGNORED_REQUEST_PATHS.dup
+      # Server-Timing (total, db with the query count, view, other) and
+      # X-Railwatch-Execution-Id on each recorded request's response, for
+      # `curl -i`, the browser's network panel, and an agent that wants the
+      # execution it just caused. nil: on in development only
+      # (#timing_headers?), since elsewhere they tell every visitor how the
+      # app spends its time.
+      @timing_headers = env_bool("RAILWATCH_TIMING_HEADERS", nil)
       @user_resolver = nil
       @beacon_user_resolver = nil
       @fingerprint_resolver = nil
@@ -362,6 +369,11 @@ module Railwatch
 
     def environment_name
       @environment || (defined?(Rails) ? Rails.env.to_s : "production")
+    end
+
+    # Whether the request middleware adds its timing headers (#timing_headers).
+    def timing_headers?
+      @timing_headers.nil? ? defined?(Rails) && Rails.env.development? : @timing_headers
     end
 
     # Matches Railwatch.reject_cache_keys entries and DEFAULT_VENDOR_CACHE_KEYS

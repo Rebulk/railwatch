@@ -67,6 +67,9 @@ begin
     config/routes.rb
     docs/getting-started.md
     docs/security.md
+    lib/generators/railwatch/agents/agents_generator.rb
+    lib/generators/railwatch/agents/templates/SKILL.md.tt
+    lib/generators/railwatch/agents/templates/agents_block.md.tt
     lib/generators/railwatch/install/install_generator.rb
     lib/generators/railwatch/install/templates/initializer.rb.tt
     lib/generators/railwatch/install/templates/railwatch.ts
