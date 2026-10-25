@@ -19,6 +19,8 @@ module Railwatch
     @thread = nil
     @pid = nil
     @stopping = false
+    @manifest_digest = nil
+    @manifest_sent_at = nil
 
     module_function
 
@@ -51,6 +53,8 @@ module Railwatch
       @thread = nil
       @pid = nil
       @stopping = false
+      @manifest_digest = nil
+      @manifest_sent_at = nil
       remove_instance_variable(:@puma_server) if defined?(@puma_server)
       start!
     end
@@ -81,6 +85,7 @@ module Railwatch
         puma = puma_stats
         pool = pool_stats
         queue = solid_queue_stats
+        fields = detail(puma, queue)
         Railwatch.record(:health,
           pid: Process.pid,
           role: Subscribers::ProcessInfo.role,
@@ -93,7 +98,10 @@ module Railwatch
           pool_waiting: pool[:waiting],
           queue_depth: queue[:queue_depth],
           queue_latency: queue[:queue_latency],
-          detail: JSON.generate(detail(puma, queue)))
+          detail: JSON.generate(fields))
+        # Only once the sample is recorded: a sample that raised must not
+        # count as having sent the manifest, or the next one leaves it out.
+        manifest_sent(fields[:recurring_tasks]) if fields[:recurring_tasks]
       end
     rescue StandardError => e
       Railwatch.debug { "health sample failed: #{e.class}: #{e.message}" }
@@ -122,11 +130,39 @@ module Railwatch
     # with scheduled-task detection). Left out rather than sent empty when
     # there are none or the table could not be read: Jobs folds a failed
     # read into an empty set, and "no manifest" must not read as "no tasks".
+    #
+    # The manifest is a property of the deploy, not of the sample: it is
+    # identical in every process and changes only when config/recurring.yml
+    # does. Sending it every interval made it 94% of every health sample --
+    # 1,312 of 1,417 bytes per row on a 28-task app, the same string stored
+    # 32,694 times over nineteen hours. So it is re-sent when it changes, and
+    # otherwise only once per MANIFEST_INTERVAL. Nothing is lost: the
+    # server's scheduled-task check takes the newest sample that *carries* a
+    # manifest from the last ten minutes, and the floor is half that.
     def recurring_tasks
       schedules = Subscribers::Jobs.recurring_tasks[:schedules]
-      schedules.empty? ? nil : schedules
+      return nil if schedules.empty?
+      return nil unless manifest_due?(schedules)
+
+      schedules
     rescue StandardError
       nil
+    end
+
+    # Five minutes, as a duration rather than a count of samples:
+    # health_interval is configurable, so any count would outrun the reader's
+    # ten-minute window once an app slowed its sampling down.
+    MANIFEST_INTERVAL = 300
+
+    # Monotonic, so a clock step cannot park the manifest for five minutes or
+    # put it on every sample. Read and written only from the health thread.
+    def manifest_due?(schedules)
+      !(schedules.hash == @manifest_digest && @manifest_sent_at && Clock.monotonic - @manifest_sent_at < MANIFEST_INTERVAL)
+    end
+
+    def manifest_sent(schedules)
+      @manifest_digest = schedules.hash
+      @manifest_sent_at = Clock.monotonic
     end
 
     # Puma::Server#stats is the only public API exposing busy_threads, so it is

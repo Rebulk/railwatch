@@ -24,6 +24,10 @@ module WireFixtureStubs
   def stub_health_sources
     Railwatch::Execution.instance_variable_set(:@memory_sampled_at, 0.0)
     Railwatch::Health.remove_instance_variable(:@puma_server) if Railwatch::Health.instance_variable_defined?(:@puma_server)
+    # The fixture shows a sample that carries the recurring task manifest,
+    # which Health sends only when it changed or every five minutes.
+    Railwatch::Health.instance_variable_set(:@manifest_digest, nil)
+    Railwatch::Health.instance_variable_set(:@manifest_sent_at, nil)
     relation = Struct.new(:count)
     stub_const("Puma::Server", Class.new { def stats = { backlog: 3, running: 5, pool_capacity: 0, max_threads: 5, busy_threads: 4, requests_count: 1_234 } })
     stub_const("SolidQueue::ReadyExecution", Class.new {
