@@ -37,6 +37,8 @@ module Railwatch
         return say("Not touching .mcp.json: its top level is not a JSON object.", :red) unless config.is_a?(Hash)
 
         servers = config["mcpServers"] ||= {}
+        return say("Not touching .mcp.json: its mcpServers is not a JSON object.", :red) unless servers.is_a?(Hash)
+
         entry = { "type" => "http", "url" => mcp_url }
         return say_status(:identical, ".mcp.json", :blue) if servers[SERVER_NAME] == entry
 
@@ -76,14 +78,26 @@ module Railwatch
       end
 
       # `contents` with the marked block replaced by `block`, or with it
-      # appended (after a blank line) when there is none. Only the first
-      # marked block is replaced; a BEGIN with no END is left alone and the
-      # block appended, rather than deleting the rest of the file.
+      # appended (after a blank line) when there is none. The block replaced
+      # is the first BEGIN whose END comes before any other BEGIN, so a BEGIN
+      # left without its END is never paired with a later block's END (which
+      # would delete everything between them): it stays as it is, and the
+      # block is appended once and then found on every re-run.
       def self.with_block(contents, block)
         return block if contents.nil? || contents.strip.empty?
 
-        start = contents.index(BEGIN_MARKER)
-        finish = start && contents.index(END_MARKER, start)
+        start = finish = nil
+        at = 0
+        while (candidate = contents.index(BEGIN_MARKER, at))
+          after = candidate + BEGIN_MARKER.length
+          close = contents.index(END_MARKER, after)
+          reopen = contents.index(BEGIN_MARKER, after)
+          if close && (reopen.nil? || close < reopen)
+            start, finish = candidate, close
+            break
+          end
+          at = after
+        end
         if finish
           tail = contents[(finish + END_MARKER.length)..].sub(/\A\n/, "")
           "#{contents[0...start]}#{block}#{tail}"

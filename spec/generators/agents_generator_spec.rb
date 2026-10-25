@@ -52,6 +52,17 @@ RSpec.describe Railwatch::Generators::AgentsGenerator do
     expect(output).to include("Not touching .mcp.json")
   end
 
+  it "leaves an .mcp.json whose mcpServers is not an object, and still writes the rest" do
+    write(".mcp.json", JSON.generate("mcpServers" => []))
+
+    output = run_generator
+
+    expect(JSON.parse(read(".mcp.json"))).to eq("mcpServers" => [])
+    expect(output).to include("its mcpServers is not a JSON object")
+    expect(exist?("AGENTS.md")).to be(true)
+    expect(exist?(".claude/skills/railwatch/SKILL.md")).to be(true)
+  end
+
   it "creates AGENTS.md with the dev loop when the app has neither AGENTS.md nor CLAUDE.md" do
     run_generator
 
@@ -122,6 +133,11 @@ RSpec.describe Railwatch::Generators::AgentsGenerator do
 
     expect(read("AGENTS.md")).to include("user text after a broken marker")
     expect(read("AGENTS.md")).to end_with("#{described_class::END_MARKER}\n")
+    first = read("AGENTS.md")
+
+    run_generator
+
+    expect(read("AGENTS.md")).to eq(first), "a re-run must not pair the broken BEGIN with the appended block's END"
   end
 
   it "writes a Claude Code skill with the frontmatter Claude Code reads" do

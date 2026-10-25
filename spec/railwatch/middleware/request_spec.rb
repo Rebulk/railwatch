@@ -161,6 +161,23 @@ RSpec.describe Railwatch::Middleware::Request do
       expect(headers["server-timing"]).to start_with("total;dur=")
     end
 
+    it "keeps every value of an array-valued Server-Timing" do
+      _, headers, = respond_with({ "server-timing" => [ "cache;dur=2", "app;dur=3" ] }).call(env_for("http://customer.test/widgets"))
+
+      expect(headers["server-timing"]).to start_with("cache;dur=2, app;dur=3, total;dur=")
+    end
+
+    it "names an execution the tail decision kept, though the head sampled it out" do
+      Railwatch.config.sample = Railwatch.config.sample.merge(requests: 0.0)
+      Railwatch.config.tail_sample_slow_ms = 0.0
+
+      _, headers, = respond_with({}).call(env_for("http://customer.test/widgets"))
+
+      expect(headers["x-railwatch-execution-id"]).to eq(railwatch_records(:request).sole[:execution_id])
+    ensure
+      Railwatch.config.tail_sample_slow_ms = nil
+    end
+
     it "leaves a frozen header hash alone" do
       frozen = { "content-type" => "text/plain" }.freeze
 
