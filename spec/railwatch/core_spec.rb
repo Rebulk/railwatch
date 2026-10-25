@@ -385,6 +385,18 @@ RSpec.describe Railwatch do
       expect(cmd).to include(name: "railwatch_demo", exit_code: 0)
       expect(cmd[:counters][:queries]).to eq(1)
     end
+
+    # 18 counters exist; an execution that touches two should not ship the
+    # other 16 as explicit zeros. A reader reads an absent counter as zero.
+    it "sends only the counters that fired" do
+      require "rake"
+      Rake::Task.define_task(:railwatch_counted) { Widget.count }
+      Rake::Task[:railwatch_counted].execute
+      counters = railwatch_records(:command).sole[:counters]
+      expect(counters).to include(queries: 1)
+      expect(counters.values).to all(be_positive)
+      expect(counters.size).to be < Railwatch::Execution::COUNTERS.size
+    end
   end
 
   describe "job failures" do
