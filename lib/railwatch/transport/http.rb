@@ -69,9 +69,9 @@ module Railwatch
       end
 
       def deliver(records, dropped: 0, dropped_bytes: 0, backpressure_factor: 1.0, batch_id: SecureRandom.uuid)
-        unless destination_allowed?
-          return Result.new(ok: false, error: "plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true")
-        end
+        # Permanent: it cannot change between attempts, and with no status
+        # the result would read as retryable and walk the backoff ladder.
+        return permanent("plain HTTP ingest is disabled; use HTTPS or set RAILWATCH_ALLOW_HTTP=true") unless destination_allowed?
         return Result.new(ok: false, status: UNAUTHORIZED_STATUS, error: "unauthorized, flushing stopped") if @unauthorized
 
         encoded = @encoder.encode(records)

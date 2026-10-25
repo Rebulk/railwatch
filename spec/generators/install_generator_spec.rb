@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "open3"
+
 require "spec_helper"
 require "rails/generators"
 require "rails/generators/testing/behavior"
@@ -59,6 +61,30 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     expect(File).to exist(hook)
     expect(File.read(hook)).to include("bin/rails railwatch:deploy")
     expect(File.stat(hook).mode & 0o777).to eq(0o755)
+  end
+
+  # The hook sends the bearer token with curl, which takes an upper-case
+  # scheme or a bare host as plain HTTP: only the branches that allow a URL
+  # may reach curl.
+  it "never posts the token to an ingest URL that is not https, loopback, or explicitly allowed" do
+    template = File.expand_path("../../lib/generators/railwatch/install/templates/post-deploy", __dir__)
+    Dir.mktmpdir do |dir|
+      bin = File.join(dir, "bin")
+      FileUtils.mkdir_p(bin)
+      log = File.join(dir, "curl.log")
+      File.write(File.join(bin, "curl"), "#!/bin/sh\necho \"$@\" >> #{log}\n")
+      File.write(File.join(bin, "ruby"), "#!/bin/sh\necho '{}'\n")
+      FileUtils.chmod(0o755, Dir[File.join(bin, "*")])
+
+      [ "HTTP://railwatch.example", "railwatch.example", "ftp://railwatch.example" ].each do |url|
+        env = { "PATH" => "#{bin}:/usr/bin:/bin", "RAILWATCH_TOKEN" => "secret", "RAILWATCH_INGEST_URL" => url }
+        _out, err, status = Open3.capture3(env, "sh", template, chdir: dir)
+
+        expect(status).to be_success
+        expect(err).to include("unsupported ingest URL")
+        expect(File).not_to exist(log), "curl ran for #{url}"
+      end
+    end
   end
 
   it "creates the browser client only when app/frontend exists" do
