@@ -72,6 +72,45 @@ RSpec.describe "visit record", type: :request do
     end
   end
 
+  describe "TTFB phases" do
+    def post_phases(phases)
+      post_beacon([ { component: "Widgets/Index", url: "/sign_in", method: "GET",
+                      started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success", ttfb: 1200 }.merge(phases) ])
+      railwatch_records(:visit).last
+    end
+
+    it "captures how the initial load's TTFB splits into redirects, connection and server" do
+      visit = post_phases(redirect_ms: 1050.4, redirect_count: 2, connect_ms: 40.6, server_ms: 110.2)
+
+      expect(visit.values_at(:redirect_ms, :redirect_count, :connect_ms, :server_ms)).to eq([ 1050, 2, 41, 110 ])
+    end
+
+    # A cross-origin hop makes the browser report 0 redirects; the client
+    # leaves the count out then, and the time it still measured must land.
+    it "keeps redirect time with no count, so a hidden redirect is not stored as none" do
+      visit = post_phases(redirect_ms: 900)
+
+      expect(visit[:redirect_ms]).to eq(900)
+      expect(visit[:redirect_count]).to be_nil
+    end
+
+    it "leaves every phase nil for a visit that did not measure them" do
+      visit = post_phases({})
+
+      expect(visit.values_at(:redirect_ms, :redirect_count, :connect_ms, :server_ms)).to eq([ nil, nil, nil, nil ])
+    end
+
+    it "clamps a phase like any other millisecond metric" do
+      expect(post_phases(redirect_ms: -3)[:redirect_ms]).to eq(0)
+      expect(post_phases(server_ms: 999_999_999)[:server_ms]).to eq(120_000)
+    end
+
+    it "clamps a redirect count to the browser's 20-hop limit" do
+      expect(post_phases(redirect_count: 500)[:redirect_count]).to eq(20)
+      expect(post_phases(redirect_count: -1)[:redirect_count]).to eq(0)
+    end
+  end
+
   it "caps at 50 visits from a single beacon POST even when more are sent" do
     visits = 60.times.map { |i| { component: "C#{i}", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "200" } }
     post_beacon(visits)

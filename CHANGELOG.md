@@ -6,6 +6,18 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The initial-load visit splits its TTFB into `redirect_ms`,
+  `connect_ms` and `server_ms`, which add up to `ttfb`, plus
+  `redirect_count`. TTFB is measured from navigation start, so it holds
+  every redirect before the page: a 1.2 s TTFB on a route the server
+  answers in 100 ms was a redirect chain, and nothing said so.
+  `redirect_ms` (navigation start to `fetchStart`) is still measured when
+  a hop is cross-origin, where browsers report `redirectCount` 0; the
+  client then leaves `redirect_count` out rather than claim no redirect.
+  The beacon accepts and clamps the four fields. Receivers must store them
+  for them to show anywhere. Apps that copied the client
+  (`app/frontend/lib/railwatch.ts`) need the same change in their copy.
+
 ## 1.2.0 (2026-10-25)
 
 - Executions send only the counters that fired. Every parent record

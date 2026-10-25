@@ -768,7 +768,11 @@ entirely if `config.beacon_enabled` is off.
 | `lcp` | Largest Contentful Paint, integer ms, clamped to 0–120000. Initial load only. |
 | `cls` | Cumulative Layout Shift — the largest session window, float rounded to 4 decimals, clamped to 0–100. Initial load only. |
 | `inp` | Interaction to Next Paint, integer ms, clamped to 0–120000. The slowest interaction, not the spec's high percentile. Initial load only. |
-| `ttfb` | Time to First Byte from navigation timing's `responseStart`, integer ms, clamped to 0–120000. Initial load only. |
+| `ttfb` | Time to First Byte from navigation timing's `responseStart`, integer ms, clamped to 0–120000. Initial load only. Includes every redirect before the page. |
+| `redirect_ms` | The part of `ttfb` before the final request started: navigation start to `fetchStart` (`workerStart` when a service worker started first). Every redirect hop, plus a few ms of the browser's own work. Still measured when a hop is cross-origin, when the browser hides the count. Integer ms, clamped to 0–120000. Initial load only. |
+| `redirect_count` | Redirects the browser **showed** (`redirectCount`), clamped to 0–20. Nil when it showed none, which is either no redirect or a cross-origin hop it hid: never read nil as "no redirect", read `redirect_ms`. Initial load only. |
+| `connect_ms` | `ttfb` from the final request's start to `requestStart`: service worker startup, HTTP cache, DNS, TCP and TLS. Integer ms, clamped to 0–120000. Initial load only. |
+| `server_ms` | `ttfb` from `requestStart` to `responseStart`: the network round trip plus the server's time. Integer ms, clamped to 0–120000. Initial load only. |
 | `user` | Resolved server-side from the beacon request's session/cookies, same resolver as every other record. |
 | `tenant` | Current tenant context. |
 | `user_agent` | Truncated to 256 chars. |
@@ -781,7 +785,10 @@ never routed it. It has `method` `"GET"`, `status` `"success"`, and
 four Core Web Vitals. It is held back until the page is first hidden, on
 `visibilitychange`/`pagehide`, so those numbers are final when it ships.
 Every vital is nil on a browser that doesn't support the
-`PerformanceObserver` entry type behind it.
+`PerformanceObserver` entry type behind it. `redirect_ms`, `connect_ms`
+and `server_ms` add up to `ttfb` exactly (the boundaries are rounded
+before subtracting); all three are nil when the browser's timestamps are
+missing or out of order.
 
 ### `session`
 

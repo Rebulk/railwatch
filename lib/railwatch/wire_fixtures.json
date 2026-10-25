@@ -605,6 +605,10 @@
     "cls": null,
     "inp": null,
     "ttfb": null,
+    "redirect_ms": null,
+    "redirect_count": null,
+    "connect_ms": null,
+    "server_ms": null,
     "user": null,
     "tenant": null,
     "user_agent": ""

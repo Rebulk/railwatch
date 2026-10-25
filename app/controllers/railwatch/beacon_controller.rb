@@ -10,6 +10,8 @@ module Railwatch
     # forged beacon, not a page load, so it is clamped rather than stored.
     MAX_METRIC_MS = 120_000
     MAX_CLS = 100.0
+    # Browsers stop following a redirect chain at 20 (Fetch's limit).
+    MAX_REDIRECTS = 20
 
     MAX_REQUEST_BYTES = 256 * 1024
     MAX_VISITS = 50
@@ -50,6 +52,10 @@ module Railwatch
           cls: cumulative_layout_shift(v["cls"]),
           inp: metric_ms(v["inp"]),
           ttfb: metric_ms(v["ttfb"]),
+          redirect_ms: metric_ms(v["redirect_ms"]),
+          redirect_count: redirect_count(v["redirect_count"]),
+          connect_ms: metric_ms(v["connect_ms"]),
+          server_ms: metric_ms(v["server_ms"]),
           user: user_id,
           tenant: tenant,
           user_agent: safe_string(request.user_agent, 256))
@@ -277,6 +283,14 @@ module Railwatch
     def metric_ms(value)
       return nil if value.nil? || value == ""
       safe_float(value).round.clamp(0, MAX_METRIC_MS)
+    end
+
+    # How many redirects the browser SHOWED. It hides them when any hop was
+    # cross-origin, so the client sends nothing then rather than 0, and a
+    # nil here must stay nil: "none" and "hidden" are different answers.
+    def redirect_count(value)
+      return nil if value.nil? || value == ""
+      safe_integer(value).clamp(0, MAX_REDIRECTS)
     end
 
     def cumulative_layout_shift(value)

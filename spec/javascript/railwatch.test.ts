@@ -809,6 +809,113 @@ describe("startRailwatch initial page load", () => {
   })
 })
 
+// TTFB is navigation start to first byte, so it includes every redirect
+// before the page. The initial visit splits it so a slow first byte can be
+// told apart from a slow server. Timings below are the shapes Chromium 152
+// and Firefox 156 produced for real redirect chains (300 ms per hop, 100 ms
+// server), rounded.
+describe("startRailwatch TTFB phases", () => {
+  function loadWith(timing: Record<string, number>) {
+    vi.spyOn(performance, "getEntriesByType").mockReturnValue([
+      {
+        entryType: "navigation",
+        startTime: 0,
+        redirectStart: 0,
+        redirectEnd: 0,
+        redirectCount: 0,
+        workerStart: 0,
+        responseEnd: 0,
+        loadEventEnd: 0,
+        ...timing,
+      } as unknown as PerformanceEntry,
+    ])
+    start()
+    listenerFor("pagehide")(new Event("pagehide"))
+    return lastFlush().visits?.[0]
+  }
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("puts same-origin redirect time and its count in the redirect phase", () => {
+    const visit = loadWith({
+      redirectStart: 1,
+      redirectEnd: 605,
+      redirectCount: 2,
+      fetchStart: 605,
+      requestStart: 606,
+      responseStart: 706,
+    })
+
+    expect(visit).toMatchObject({
+      ttfb: 706,
+      redirect_ms: 605,
+      redirect_count: 2,
+      connect_ms: 1,
+      server_ms: 100,
+    })
+  })
+
+  it("still measures a cross-origin chain's redirect time, without claiming a count", () => {
+    // The browser hides cross-origin redirects: count and redirectStart/End
+    // read 0, but fetchStart is still the final request's start.
+    const visit = loadWith({
+      fetchStart: 605,
+      requestStart: 605,
+      responseStart: 706,
+    })
+
+    expect(visit?.redirect_ms).toBe(605)
+    expect(visit).not.toHaveProperty("redirect_count")
+    expect(visit?.server_ms).toBe(101)
+  })
+
+  it("reports a near-zero redirect phase and no count when nothing redirected", () => {
+    const visit = loadWith({
+      fetchStart: 0.6,
+      requestStart: 1.3,
+      responseStart: 101.8,
+    })
+
+    expect(visit).toMatchObject({ redirect_ms: 1, connect_ms: 0, server_ms: 101 })
+    expect(visit).not.toHaveProperty("redirect_count")
+  })
+
+  it("starts the final request at workerStart when a service worker started first", () => {
+    const visit = loadWith({
+      workerStart: 40,
+      fetchStart: 90,
+      requestStart: 95,
+      responseStart: 300,
+    })
+
+    expect(visit).toMatchObject({ redirect_ms: 40, connect_ms: 55, server_ms: 205 })
+  })
+
+  it("adds the phases up to TTFB", () => {
+    const visit = loadWith({
+      fetchStart: 1180.4,
+      requestStart: 1230.2,
+      responseStart: 1342.9,
+    })
+
+    expect(visit!.redirect_ms! + visit!.connect_ms! + visit!.server_ms!).toBe(
+      visit!.ttfb,
+    )
+  })
+
+  it("sends no phases rather than a wrong split when timestamps are out of order", () => {
+    const visit = loadWith({
+      fetchStart: 300,
+      requestStart: 200,
+      responseStart: 400,
+    })
+
+    expect(visit?.ttfb).toBe(400)
+    for (const key of ["redirect_ms", "connect_ms", "server_ms"])
+      expect(visit).not.toHaveProperty(key)
+  })
+})
+
 describe("startRailwatch tenant hint", () => {
   it("sends the tenant the app resolves, re-read on every flush", () => {
     let org = "acme"
