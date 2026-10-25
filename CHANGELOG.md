@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.3.0 (2026-10-25)
+
 - The initial-load visit splits its TTFB into `redirect_ms`,
   `connect_ms` and `server_ms`, which add up to `ttfb`, plus
   `redirect_count`. TTFB is measured from navigation start, so it holds
