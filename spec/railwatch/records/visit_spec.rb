@@ -105,6 +105,20 @@ RSpec.describe "visit record", type: :request do
       expect(post_phases(server_ms: 999_999_999)[:server_ms]).to eq(120_000)
     end
 
+    it "stores a non-finite phase as unmeasured and keeps the rest of the beacon" do
+      post_beacon([
+        { component: "Bad", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1,
+          status: "success", redirect_ms: "1e309", server_ms: "-1e309", ttfb: "1e309" },
+        { component: "Good", url: "/y", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1,
+          status: "success", redirect_ms: 12 }
+      ])
+
+      expect(response).to have_http_status(:no_content)
+      bad, good = railwatch_records(:visit).last(2)
+      expect(bad.values_at(:component, :redirect_ms, :server_ms, :ttfb)).to eq([ "Bad", nil, nil, nil ])
+      expect(good.values_at(:component, :redirect_ms)).to eq([ "Good", 12 ])
+    end
+
     it "clamps a redirect count to the browser's 20-hop limit" do
       expect(post_phases(redirect_count: 500)[:redirect_count]).to eq(20)
       expect(post_phases(redirect_count: -1)[:redirect_count]).to eq(0)

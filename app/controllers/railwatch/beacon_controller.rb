@@ -280,9 +280,14 @@ module Railwatch
     # Web vitals only ride along on the initial-load visit, and only from
     # browsers that support the entry type behind them, so every one of these
     # is nil far more often than not.
+    # A value that is not a finite number ("1e309" parses to Infinity, which
+    # #round refuses) is nil, like a missing one: raising here would drop the
+    # whole beacon at the rescue below, every other visit in it included.
     def metric_ms(value)
       return nil if value.nil? || value == ""
-      safe_float(value).round.clamp(0, MAX_METRIC_MS)
+      float = safe_float(value)
+      return nil unless float.finite?
+      float.round.clamp(0, MAX_METRIC_MS)
     end
 
     # How many redirects the browser SHOWED. It hides them when any hop was
