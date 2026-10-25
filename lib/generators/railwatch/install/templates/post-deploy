@@ -37,6 +37,12 @@ case "$INGEST" in
       exit 0
     fi
     ;;
+  *)
+    # An upper-case scheme or a bare host: curl would send the token over
+    # plain HTTP, which none of the branches above allowed.
+    echo "Railwatch deploy marker skipped: unsupported ingest URL (use https://)" >&2
+    exit 0
+    ;;
 esac
 
 post() {

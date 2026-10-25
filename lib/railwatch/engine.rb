@@ -1,9 +1,13 @@
 # frozen_string_literal: true
 
+require "railwatch/middleware/beacon_limit"
+
 module Railwatch
   # Mounted for the browser beacon (POST <mount>/beacon), its only route.
   class Engine < ::Rails::Engine
     isolate_namespace Railwatch
+
+    config.middleware.use Railwatch::Middleware::BeaconLimit
 
     # The request middleware goes first so wall time includes every other
     # middleware, exactly like Nightwatch's GlobalMiddleware.

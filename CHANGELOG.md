@@ -6,6 +6,21 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The beacon refuses a body over 256 KiB before Rails parses it.
+  `limit_payload` ran as a before_action, after ActionController had
+  already parsed the params, and a chunked body was read whole to find its
+  length, so an unauthenticated client could make a worker buffer an
+  unbounded body. A middleware in the engine's stack now refuses an
+  oversized Content-Length unread and reads at most one byte past the
+  limit of a chunked body.
+- A plain-HTTP ingest URL that is not allowed is a permanent failure. The
+  result carried no status, which read as retryable, so the reporter kept
+  the batch and walked its whole backoff ladder for a setting that cannot
+  change between attempts.
+- The Kamal post-deploy hook skips an ingest URL that is not https,
+  loopback, or allowed plain HTTP. An upper-case scheme or a bare host fell
+  through the `case` to curl, which sent the token over plain HTTP.
+
 ## 1.3.0 (2026-10-25)
 
 - The initial-load visit splits its TTFB into `redirect_ms`,

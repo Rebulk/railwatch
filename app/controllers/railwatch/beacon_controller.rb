@@ -13,7 +13,7 @@ module Railwatch
     # Browsers stop following a redirect chain at 20 (Fetch's limit).
     MAX_REDIRECTS = 20
 
-    MAX_REQUEST_BYTES = 256 * 1024
+    MAX_REQUEST_BYTES = Middleware::BeaconLimit::MAX_BYTES
     MAX_VISITS = 50
     MAX_ERRORS = 50
     MAX_ERROR_MESSAGE = 1024
@@ -26,7 +26,9 @@ module Railwatch
 
     RATE_LIMIT_WINDOW = 60 # seconds
 
-    before_action :limit_payload, :verify_origin, :throttle, if: -> { Railwatch.config.beacon_enabled }
+    # The body size is enforced before this controller parses anything, by
+    # Middleware::BeaconLimit in the engine's stack.
+    before_action :verify_origin, :throttle, if: -> { Railwatch.config.beacon_enabled }
 
     def create
       return head :no_content unless Railwatch.config.beacon_enabled
@@ -141,10 +143,6 @@ module Railwatch
     def refuse_beacon
       response.set_header("Retry-After", RATE_LIMIT_WINDOW.to_s)
       head :too_many_requests
-    end
-
-    def limit_payload
-      head :content_too_large if request.raw_post.bytesize > MAX_REQUEST_BYTES
     end
 
     # The browser half of release health: one `session` record per beacon

@@ -33,6 +33,9 @@ RSpec.describe Railwatch::Transport::Http do
 
       expect(result.ok).to be(false)
       expect(result.error).to include("plain HTTP ingest is disabled")
+      # Nothing about the next attempt would differ, so the reporter must not
+      # keep the batch and walk its backoff ladder for it.
+      expect(result.retryable?).to be(false)
     end
 
     it "posts the batch as gzip NDJSON with the bearer token, gem version, and content headers" do

@@ -156,6 +156,44 @@ RSpec.describe "visit record", type: :request do
     expect(railwatch_records(:visit)).to be_empty
   end
 
+  it "refuses a body whose Content-Length is over the limit without reading it" do
+    body = StringIO.new("x" * (Railwatch::BeaconController::MAX_REQUEST_BYTES + 1))
+    expect(body).not_to receive(:read)
+
+    post "/railwatch/beacon", env: { "rack.input" => body, "CONTENT_LENGTH" => body.size.to_s,
+                                     "CONTENT_TYPE" => "application/json" }
+
+    expect(response).to have_http_status(:content_too_large)
+    expect(railwatch_records(:visit)).to be_empty
+  end
+
+  # Rack::Test sets CONTENT_LENGTH from rack.input; a chunked request has none.
+  def post_chunked(body)
+    env = Rack::MockRequest.env_for("/railwatch/beacon", method: "POST", input: body,
+                                                         "CONTENT_TYPE" => "application/json", "HTTP_TRANSFER_ENCODING" => "chunked")
+    env.delete("CONTENT_LENGTH")
+    Rails.application.call(env)
+  end
+
+  it "refuses a chunked body over the limit after reading only one byte past it" do
+    limit = Railwatch::BeaconController::MAX_REQUEST_BYTES
+    body = StringIO.new("x" * (limit * 4))
+
+    status, = post_chunked(body)
+
+    expect(status).to eq(413)
+    expect(body.pos).to eq(limit + 1)
+  end
+
+  it "records a chunked body under the limit" do
+    body = StringIO.new({ visits: [ { component: "Chunked", url: "/c" } ] }.to_json)
+
+    status, = post_chunked(body)
+
+    expect(status).to eq(204)
+    expect(railwatch_records(:visit).sole).to include(component: "Chunked")
+  end
+
   it "does not answer 500 for a JSON body containing invalid UTF-8" do
     body = "{\"visits\":[{\"component\":\"bad\xFFvalue\"}]}".b
     post "/railwatch/beacon", params: body, headers: { "Content-Type" => "application/json" }
