@@ -6,6 +6,15 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Executions send only the counters that fired. Every parent record
+  carried all 18 of `Execution::COUNTERS`, most of them zero: 281 bytes of
+  `counters` JSON on every request, job and command. A request that ran
+  two queries, a log line and a view now sends 59 bytes; a channel action
+  that did nothing sends `{}`. A counter missing from the hash is zero.
+  Needs a railwatch-rs that reads it that way (Rebulk/railwatch-rs#43);
+  older servers show a blank query count on the route page and `null`
+  from the MCP tools for a request that ran none.
+
 ## 1.1.1 (2026-10-24)
 
 - The browser client names the first page load after its Inertia
