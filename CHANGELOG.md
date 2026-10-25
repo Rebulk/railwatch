@@ -24,6 +24,18 @@
   scheduled-task check reads the newest sample that carries one from the
   last ten minutes, so it always finds one.
 
+- An execution whose record tree outgrew `execution_buffer_bytes` (8 MiB)
+  says so. The buffer keeps the earliest child records and drops the
+  rest, and the parent said nothing: a job that issued 5,048 queries
+  showed a plausible 3,155-query trace, and the loss was visible only as
+  the batch's dropped count. The parent record now carries
+  `dropped_records` and `dropped_bytes` when the tree lost anything.
+  railwatch-rs shows them on the execution page (Rebulk/railwatch-rs#44).
+- Stop building records the execution is about to drop. Once its buffer
+  has overflowed, `Execution#recording?` answers no and counts the record
+  the subscriber was about to build, so the SQL normalisation, redaction,
+  backtrace walk and weighing for it never run.
+
 ## 1.1.1 (2026-10-24)
 
 - The browser client names the first page load after its Inertia

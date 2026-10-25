@@ -33,8 +33,10 @@ module Railwatch
           subscribe("#{kind}.action_view") do |event|
             exe = execution
             exe&.count(:view_renders)
-            next unless recording?
+            # The cap first: a render past it is never built, so a full
+            # buffer's gate (Execution#recording?) must not count it dropped.
             next if exe && exe.counters[:view_renders] > Railwatch.config.max_view_renders_per_execution
+            next unless recording?
             p = event.payload
             identifier = p[:identifier].to_s.delete_prefix(Backtrace.app_root)
             Railwatch.record(:view_render,
