@@ -21,7 +21,7 @@ module Railwatch
 
         # Chunked: no length up front, so read at most one byte past the
         # limit and hand the rest of the stack a body it can read again.
-        body = input.read(@limit + 1).to_s
+        body = read_bounded(input)
         return too_large if body.bytesize > @limit
 
         env["rack.input"] = StringIO.new(body)
@@ -31,6 +31,19 @@ module Railwatch
       end
 
       private
+
+      # Rack lets read(n) return fewer than n bytes before the end, so keep
+      # reading until the end or one byte past the limit, never further.
+      def read_bounded(input)
+        body = +"".b
+        while body.bytesize <= @limit
+          chunk = input.read(@limit + 1 - body.bytesize) or break
+          break if chunk.empty?
+
+          body << chunk
+        end
+        body
+      end
 
       def too_large
         [ 413, { "content-type" => "text/plain" }, [] ]

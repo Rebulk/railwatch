@@ -185,6 +185,17 @@ RSpec.describe "visit record", type: :request do
     expect(body.pos).to eq(limit + 1)
   end
 
+  it "records a chunked body that arrives in short reads" do
+    json = { visits: [ { component: "Trickled", url: "/t" } ] }.to_json
+    body = StringIO.new(json)
+    allow(body).to receive(:read).and_wrap_original { |m, n = nil, *rest| m.call(n && [ n, 7 ].min, *rest) }
+
+    status, = post_chunked(body)
+
+    expect(status).to eq(204)
+    expect(railwatch_records(:visit).sole).to include(component: "Trickled")
+  end
+
   it "records a chunked body under the limit" do
     body = StringIO.new({ visits: [ { component: "Chunked", url: "/c" } ] }.to_json)
 
