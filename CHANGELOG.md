@@ -6,6 +6,16 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- In development each recorded request's response carries
+  `Server-Timing` (`total`, `db` with the query count, `view`, `other`) and
+  `X-Railwatch-Execution-Id`, so `curl -i`, the browser's network panel or a
+  coding agent sees what the request cost and which execution to open.
+  `timing_headers` / `RAILWATCH_TIMING_HEADERS` turns it on or off
+  elsewhere; about 4 µs per request when on.
+- `bin/rails generate railwatch:agents` points coding agents at the
+  development Railwatch: `.mcp.json` with the local MCP server, a marked
+  block in `AGENTS.md` and/or `CLAUDE.md` describing the dev loop, and a
+  Claude Code skill. Re-running it changes only its own block and entry.
 - The beacon refuses a body over 256 KiB before Rails parses it.
   `limit_payload` ran as a before_action, after ActionController had
   already parsed the params, and a chunked body was read whole to find its

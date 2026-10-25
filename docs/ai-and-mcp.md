@@ -16,13 +16,37 @@ The endpoint is `<your ingest host>/mcp`. For the hosted platform that's
 server runs under the app's dashboard path, so the endpoint is the app's own
 host plus `/railwatch/mcp`; see the
 [railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
-For Railwatch Cloud and a self-hosted server the gem knows which one you're on:
+In development that endpoint needs no token from the same machine (see
+[In development](#in-development) below). For Railwatch Cloud and a
+self-hosted server the gem knows which one you're on:
 
 ```sh
 bin/rails railwatch:mcp
 ```
 
 prints every block below with your platform's host already filled in.
+
+### In development
+
+With `railwatch-server`, the app's own `bin/dev` serves MCP at
+`http://localhost:3000/railwatch/mcp`, and the proxy signs agent requests
+for you, so no token is needed:
+
+```sh
+bin/rails generate railwatch:agents   # .mcp.json, AGENTS.md/CLAUDE.md block, Claude Code skill
+# or by hand:
+claude mcp add --transport http railwatch http://localhost:3000/railwatch/mcp
+```
+
+That holds only in development, for a request from the same machine to a
+`localhost`/`127.0.0.1`/`::1` host name, so anyone who can reach the dev
+server's port from this machine can read and comment on its development
+data, as they can already open its dashboard. Other environments need a
+token unless the app sets `Railwatch::Server.config.agent_access = true`.
+Each recorded development response also carries `Server-Timing` and
+`X-Railwatch-Execution-Id` (`timing_headers` in
+[`configuration.md`](configuration.md)), so an agent can `curl -i` a page and
+pass the id to `get_execution`.
 
 ## 1. Get a token
 
@@ -223,6 +247,15 @@ working *in a Rails app that uses Railwatch*:
   lines.
 
 Copy either into your own app's repo to give its agent the same context.
+
+For the development loop, `bin/rails generate railwatch:agents` writes into
+the app: `.mcp.json` with the local MCP server (Claude Code's
+[project scope](https://code.claude.com/docs/en/mcp)), a block between
+`<!-- BEGIN railwatch ... -->` and `<!-- END railwatch -->` in `AGENTS.md`
+and/or `CLAUDE.md` (whichever exist; `AGENTS.md` when neither does), and a
+[Claude Code skill](https://code.claude.com/docs/en/skills) at
+`.claude/skills/railwatch/SKILL.md` (`--no-skill` skips it). Re-running it
+replaces only its own block and entry; `--url` points it at another port.
 
 ## See also
 

@@ -1,0 +1,31 @@
+---
+name: railwatch
+description: Find out why a page or job in this Rails app is slow or failing in development, using Railwatch (SQL with file:line, N+1s, views, logs, exceptions per request). Use after changing code that touches the database or views, when a request is slow, or to check a performance fix.
+---
+
+# Railwatch in development
+
+The `railwatch` MCP server (<%= mcp_url %>, in `.mcp.json`) reads what
+this app recorded while it ran under `bin/dev`. No token is needed from this
+machine. Arguments: `application_slug: "<%= app_slug %>"`, `environment: "development"`.
+
+1. Make the request and read its cost from the response headers:
+
+   ```sh
+   curl -si <%= app_url %>/path | grep -i -e server-timing -e x-railwatch
+   ```
+
+   `Server-Timing: total;dur=…, db;dur=…;desc="N queries", view;dur=…, other;dur=…`
+   and `X-Railwatch-Execution-Id: <id>`. A request with a session needs its
+   cookie (`-b`), or use the id from the browser's network panel.
+2. `get_execution(execution_id: <id>)`: every query, render, log line and
+   exception in order. Each query has `source` (`file:line`). Many rows with
+   the same SQL from one `source` are an N+1.
+3. `get_route(route: "GET /path")`: the route's N+1s with the line and the
+   `includes` that fixes each, and its slowest queries. `explain_query` for a
+   query's plan.
+4. Change the code, repeat 1-2, and report the before and after query count
+   and db time.
+
+For a person, link the dashboard: <%= dashboard_url %>. Errors:
+`list_issues`, then `get_issue(key:)`.

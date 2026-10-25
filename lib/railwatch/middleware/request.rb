@@ -20,6 +20,10 @@ module Railwatch
       # CONTENT_TYPE test Subscribers::Requests uses before its params walk.
       MULTIPART = "multipart/form-data"
       NO_FILES = [].freeze
+      # Response headers written with config.timing_headers. Lower case, as
+      # Rack 3 requires; Rack::Headers matches any case.
+      SERVER_TIMING = "server-timing"
+      EXECUTION_ID = "x-railwatch-execution-id"
 
       # Returns [trace_id, parent_id, sampled] from an inbound traceparent,
       # or nil when the header is absent or malformed.
@@ -55,20 +59,57 @@ module Railwatch
         exe.keep! if upstream_sampled
         exe.enter_stage(:middleware_before)
         env["railwatch.execution"] = exe
-        status = headers = body = nil
+        status = headers = body = parent = nil
+        timing = Railwatch.config.timing_headers?
         begin
           status, headers, body = @app.call(env)
+          server_timing(env, exe, headers) if timing && headers
         rescue Exception => e # rubocop:disable Lint/RescueException
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "railwatch.middleware")
           raise
         ensure
           exe.enter_stage(:middleware_after) unless exe.stage == :middleware_after
-          finish(env, exe, status, headers)
+          parent = finish(env, exe, status, headers)
         end
+        execution_id(exe, headers) if timing && headers && parent
         [ status, headers, body ]
       end
 
       private
+
+      # config.timing_headers (development by default): what this request
+      # cost, on the response, so `curl -i` or the browser's network panel
+      # shows it without opening the dashboard. Everything here is already
+      # known: the counters, and the runtimes the process_action subscriber
+      # put in env. Appended to a Server-Timing the app (Rails' own, with
+      # config.server_timing) already set, whether one string or several.
+      def server_timing(env, exe, headers)
+        total = exe.duration / 1000.0
+        db = env["railwatch.db_runtime"]
+        view = env["railwatch.view_runtime"]
+        queries = exe.counters[:queries]
+        cached = exe.counters[:cached_queries]
+        desc = cached.positive? ? "#{queries} queries, #{cached} cached" : "#{queries} #{queries == 1 ? "query" : "queries"}"
+        metrics = [ format("total;dur=%.1f", total), db ? format("db;dur=%.1f;desc=\"%s\"", db, desc) : "db;desc=\"#{desc}\"" ]
+        metrics << format("view;dur=%.1f", view) if view
+        metrics << format("other;dur=%.1f;desc=\"not db or view\"", [ total - db.to_f - view.to_f, 0 ].max) if db || view
+        # A plain Hash may hold it title-cased; Rack::Headers finds either.
+        existing = Array(headers[SERVER_TIMING] || headers.delete("Server-Timing")).join(", ")
+        headers[SERVER_TIMING] = existing.empty? ? metrics.join(", ") : "#{existing}, #{metrics.join(", ")}"
+      rescue StandardError => e
+        # A frozen header hash (a Rack app that returns a constant): the
+        # response is the app's, unchanged.
+        Railwatch.debug { "timing headers skipped: #{e.class}: #{e.message}" }
+      end
+
+      # The execution an agent passes to get_execution. Only once the
+      # request record has shipped (head-sampled in, kept, or rescued by the
+      # tail decision): any other id is one the server never has.
+      def execution_id(exe, headers)
+        headers[EXECUTION_ID] = exe.id
+      rescue StandardError => e
+        Railwatch.debug { "execution id header skipped: #{e.class}: #{e.message}" }
+      end
 
       def ignored_request?(env)
         path = env["PATH_INFO"].to_s
@@ -111,13 +152,16 @@ module Railwatch
         # The block is only called when the request record is going to ship;
         # a head-sampled-out request nothing rescued skips the
         # ActionDispatch::Request and the header walk entirely.
-        Railwatch.finish_execution(:request) { parent_fields(env, exe, status, headers) }
+        parent = Railwatch.finish_execution(:request) { parent_fields(env, exe, status, headers) }
         # A request with no user and no session cookie has no session, and
         # Sessions.touch returns without writing anything.
         Sessions.touch(exe, env, status) if Railwatch.config.track_sessions
+        # The request record, when one shipped.
+        parent
       rescue StandardError => e
         Railwatch.debug { "request finish failed: #{e.class}: #{e.message}" }
         Railwatch.finish_execution
+        nil
       end
 
       def parent_fields(env, exe, status, headers)

@@ -135,4 +135,65 @@ RSpec.describe Railwatch::Middleware::Request do
 
     expect(railwatch_records(:request).map { |request| request[:files] }).to eq([ [], [] ])
   end
+
+  describe "timing headers" do
+    before { Railwatch.config.timing_headers = true }
+    after { Railwatch.config.timing_headers = nil }
+
+    def respond_with(headers)
+      described_class.new(->(_env) { [ 200, headers, [] ] })
+    end
+
+    it "appends to a Server-Timing the app already set, whatever its case" do
+      _, headers, = respond_with({ "Server-Timing" => "sql.active_record;dur=1.00" }).call(env_for("http://customer.test/widgets"))
+
+      expect(headers.keys).not_to include("Server-Timing")
+      expect(headers["server-timing"]).to start_with("sql.active_record;dur=1.00, total;dur=")
+      expect(headers["server-timing"]).to include('db;desc="0 queries"')
+    end
+
+    it "leaves out the execution id when the request was sampled out, since the server never gets it" do
+      Railwatch.config.sample = Railwatch.config.sample.merge(requests: 0.0)
+
+      _, headers, = respond_with({}).call(env_for("http://customer.test/widgets"))
+
+      expect(headers).not_to have_key("x-railwatch-execution-id")
+      expect(headers["server-timing"]).to start_with("total;dur=")
+    end
+
+    it "keeps every value of an array-valued Server-Timing" do
+      _, headers, = respond_with({ "server-timing" => [ "cache;dur=2", "app;dur=3" ] }).call(env_for("http://customer.test/widgets"))
+
+      expect(headers["server-timing"]).to start_with("cache;dur=2, app;dur=3, total;dur=")
+    end
+
+    it "names an execution the tail decision kept, though the head sampled it out" do
+      Railwatch.config.sample = Railwatch.config.sample.merge(requests: 0.0)
+      Railwatch.config.tail_sample_slow_ms = 0.0
+
+      _, headers, = respond_with({}).call(env_for("http://customer.test/widgets"))
+
+      expect(headers["x-railwatch-execution-id"]).to eq(railwatch_records(:request).sole[:execution_id])
+    ensure
+      Railwatch.config.tail_sample_slow_ms = nil
+    end
+
+    it "leaves a frozen header hash alone" do
+      frozen = { "content-type" => "text/plain" }.freeze
+
+      _, headers, = respond_with(frozen).call(env_for("http://customer.test/widgets"))
+
+      expect(headers).to equal(frozen)
+      expect(railwatch_records(:request).size).to eq(1)
+    end
+
+    it "is on by default only in development" do
+      Railwatch.config.timing_headers = nil
+      expect(Railwatch.config.timing_headers?).to be(false)
+      allow(Rails).to receive(:env).and_return(ActiveSupport::EnvironmentInquirer.new("development"))
+      expect(Railwatch.config.timing_headers?).to be(true)
+      Railwatch.config.timing_headers = false
+      expect(Railwatch.config.timing_headers?).to be(false)
+    end
+  end
 end

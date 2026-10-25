@@ -1,0 +1,20 @@
+[
+  "add_comment",
+  "explain_query",
+  "get_execution",
+  "get_issue",
+  "get_profile",
+  "get_route",
+  "list_alerts",
+  "list_applications",
+  "list_issues",
+  "list_slow_routes",
+  "list_tenants",
+  "recent_deploys",
+  "release_health",
+  "search_logs",
+  "search_requests",
+  "search_telemetry",
+  "update_issue",
+  "web_vitals"
+]
