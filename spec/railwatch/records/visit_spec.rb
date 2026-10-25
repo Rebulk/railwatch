@@ -72,6 +72,65 @@ RSpec.describe "visit record", type: :request do
     end
   end
 
+  describe "TTFB phases" do
+    def post_phases(phases)
+      post_beacon([ { component: "Widgets/Index", url: "/sign_in", method: "GET",
+                      started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success", ttfb: 1200 }.merge(phases) ])
+      railwatch_records(:visit).last
+    end
+
+    it "captures how the initial load's TTFB splits into redirects, connection and server" do
+      visit = post_phases(redirect_ms: 1050.4, redirect_count: 2, connect_ms: 40.6, server_ms: 110.2)
+
+      expect(visit.values_at(:redirect_ms, :redirect_count, :connect_ms, :server_ms)).to eq([ 1050, 2, 41, 110 ])
+    end
+
+    # A cross-origin hop makes the browser report 0 redirects; the client
+    # leaves the count out then, and the time it still measured must land.
+    it "keeps redirect time with no count, so a hidden redirect is not stored as none" do
+      visit = post_phases(redirect_ms: 900)
+
+      expect(visit[:redirect_ms]).to eq(900)
+      expect(visit[:redirect_count]).to be_nil
+    end
+
+    it "leaves every phase nil for a visit that did not measure them" do
+      visit = post_phases({})
+
+      expect(visit.values_at(:redirect_ms, :redirect_count, :connect_ms, :server_ms)).to eq([ nil, nil, nil, nil ])
+    end
+
+    # The phases add up to ttfb. Clamping one of them, or ttfb past its cap,
+    # would store a split that no longer does, so the split is dropped.
+    it "drops the whole split rather than store one that no longer adds up to ttfb" do
+      over = post_phases(ttfb: 121_000, redirect_ms: 119_000, connect_ms: 1_000, server_ms: 1_000)
+      expect(over[:ttfb]).to eq(120_000)
+      expect(over.values_at(:redirect_ms, :connect_ms, :server_ms)).to eq([ nil, nil, nil ])
+
+      negative = post_phases(redirect_ms: -3, connect_ms: 3, server_ms: 1_200)
+      expect(negative.values_at(:redirect_ms, :connect_ms, :server_ms)).to eq([ nil, nil, nil ])
+    end
+
+    it "stores a non-finite phase as unmeasured and keeps the rest of the beacon" do
+      post_beacon([
+        { component: "Bad", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1,
+          status: "success", redirect_ms: "1e309", server_ms: "-1e309", ttfb: "1e309" },
+        { component: "Good", url: "/y", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1,
+          status: "success", redirect_ms: 12 }
+      ])
+
+      expect(response).to have_http_status(:no_content)
+      bad, good = railwatch_records(:visit).last(2)
+      expect(bad.values_at(:component, :redirect_ms, :server_ms, :ttfb)).to eq([ "Bad", nil, nil, nil ])
+      expect(good.values_at(:component, :redirect_ms)).to eq([ "Good", 12 ])
+    end
+
+    it "clamps a redirect count to the browser's 20-hop limit" do
+      expect(post_phases(redirect_count: 500)[:redirect_count]).to eq(20)
+      expect(post_phases(redirect_count: -1)[:redirect_count]).to eq(0)
+    end
+  end
+
   it "caps at 50 visits from a single beacon POST even when more are sent" do
     visits = 60.times.map { |i| { component: "C#{i}", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "200" } }
     post_beacon(visits)

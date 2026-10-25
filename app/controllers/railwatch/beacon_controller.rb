@@ -10,6 +10,8 @@ module Railwatch
     # forged beacon, not a page load, so it is clamped rather than stored.
     MAX_METRIC_MS = 120_000
     MAX_CLS = 100.0
+    # Browsers stop following a redirect chain at 20 (Fetch's limit).
+    MAX_REDIRECTS = 20
 
     MAX_REQUEST_BYTES = 256 * 1024
     MAX_VISITS = 50
@@ -50,6 +52,7 @@ module Railwatch
           cls: cumulative_layout_shift(v["cls"]),
           inp: metric_ms(v["inp"]),
           ttfb: metric_ms(v["ttfb"]),
+          **ttfb_phases(v),
           user: user_id,
           tenant: tenant,
           user_agent: safe_string(request.user_agent, 256))
@@ -274,9 +277,38 @@ module Railwatch
     # Web vitals only ride along on the initial-load visit, and only from
     # browsers that support the entry type behind them, so every one of these
     # is nil far more often than not.
+    # A value that is not a finite number ("1e309" parses to Infinity, which
+    # #round refuses) is nil, like a missing one: raising here would drop the
+    # whole beacon at the rescue below, every other visit in it included.
     def metric_ms(value)
+      finite_ms(value)&.round&.clamp(0, MAX_METRIC_MS)
+    end
+
+    # The initial load's TTFB split into phases. They add up to ttfb, so if
+    # clamping any of them (or ttfb itself) would break that sum, the split is
+    # dropped rather than stored inconsistent: ttfb stays, the phases are nil.
+    def ttfb_phases(visit)
+      raw = %w[redirect_ms connect_ms server_ms].to_h { |key| [ key, finite_ms(visit[key]) ] }
+      phases = raw.transform_values { |ms| ms&.round&.clamp(0, MAX_METRIC_MS) }
+      total = finite_ms(visit["ttfb"])
+      clamped = raw.any? { |key, ms| ms && ms.round != phases[key] }
+      over = total && total.round > MAX_METRIC_MS
+      phases = phases.transform_values { nil } if clamped || over
+      phases.transform_keys(&:to_sym).merge(redirect_count: redirect_count(visit["redirect_count"]))
+    end
+
+    def finite_ms(value)
       return nil if value.nil? || value == ""
-      safe_float(value).round.clamp(0, MAX_METRIC_MS)
+      float = safe_float(value)
+      float.finite? ? float : nil
+    end
+
+    # How many redirects the browser SHOWED. It hides them when any hop was
+    # cross-origin, so the client sends nothing then rather than 0, and a
+    # nil here must stay nil: "none" and "hidden" are different answers.
+    def redirect_count(value)
+      return nil if value.nil? || value == ""
+      safe_integer(value).clamp(0, MAX_REDIRECTS)
     end
 
     def cumulative_layout_shift(value)

@@ -1,7 +1,8 @@
 // Railwatch browser client for Inertia. Reports each visit's duration,
 // component, and prop payload size to /railwatch/beacon so the platform can
-// show real page-load timing, plus Core Web Vitals (LCP, CLS, INP, TTFB)
-// for the initial page load, plus every JavaScript error the page throws
+// show real page-load timing, plus Core Web Vitals (LCP, CLS, INP, TTFB,
+// with TTFB split into redirect / connection / server time) for the
+// initial page load, plus every JavaScript error the page throws
 // with the breadcrumb trail that led to it.
 // No dependencies -- every metric comes from PerformanceObserver or the
 // navigation timing entry, and every API is feature-detected, so browsers
@@ -23,6 +24,11 @@ interface Visit {
   cls?: number
   inp?: number
   ttfb?: number
+  // TTFB split into phases (initial load only; see ttfbPhases).
+  redirect_ms?: number
+  redirect_count?: number
+  connect_ms?: number
+  server_ms?: number
 }
 
 // The tab's session, for release health. sessionStorage scopes it to the
@@ -679,6 +685,58 @@ function pageComponent(): string | undefined {
   }
 }
 
+// Where the initial load's TTFB went, in three phases that add up to it:
+//
+//   redirect_ms  navigation start -> the final request's start: every
+//                redirect hop, plus the browser's own few ms (so never
+//                quite 0).
+//   connect_ms   -> requestStart: service worker startup, HTTP cache, DNS,
+//                TCP and TLS for the final request.
+//   server_ms    -> responseStart: the network round trip and the server's
+//                time.
+//
+// The final request starts at fetchStart, or at workerStart when a service
+// worker had to start first (the web-vitals library cuts there too).
+//
+// redirect_ms stays honest when a hop is cross-origin. The browser then
+// zeroes redirectCount, redirectStart and redirectEnd (Navigation Timing 2),
+// but fetchStart is still the final request's start (Fetch's "post-redirect
+// start time"), so the hidden hops' time is still in it.
+//
+// redirect_count is sent only when the browser shows the redirects. A 0
+// means "no redirect" or "hidden", and a hidden redirect must never be
+// reported as no redirect.
+//
+// The boundaries are rounded before subtracting, so the three phases add up
+// to the reported ttfb exactly. A browser whose timestamps are missing or
+// out of order sends no phases rather than a wrong split.
+function ttfbPhases(nav: PerformanceNavigationTiming): Partial<Visit> {
+  const fetchStart =
+    nav.workerStart > 0 && nav.workerStart < nav.fetchStart
+      ? nav.workerStart
+      : nav.fetchStart
+  // Order is judged on the raw timestamps: rounding first would let a
+  // requestStart a hair before fetchStart through as a 0 ms phase.
+  const ordered =
+    nav.responseStart > 0 &&
+    fetchStart >= nav.startTime &&
+    nav.requestStart >= fetchStart &&
+    nav.responseStart >= nav.requestStart
+  if (!ordered) return {}
+  const [start, fetched, requested, responded] = [
+    nav.startTime,
+    fetchStart,
+    nav.requestStart,
+    nav.responseStart,
+  ].map(Math.round)
+  return {
+    redirect_ms: fetched - start,
+    redirect_count: nav.redirectCount > 0 ? nav.redirectCount : undefined,
+    connect_ms: requested - fetched,
+    server_ms: responded - requested,
+  }
+}
+
 // The first page load is a visit too -- it just wasn't routed by Inertia, so
 // the component name comes off the root element's serialized page object.
 function initialVisit(): Visit | null {
@@ -696,6 +754,7 @@ function initialVisit(): Visit | null {
     component,
     duration_ms: duration,
     status: "success",
+    ...ttfbPhases(nav),
   }
 }
 
