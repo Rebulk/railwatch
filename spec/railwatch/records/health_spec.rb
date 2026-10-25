@@ -256,6 +256,20 @@ RSpec.describe "the health record's recurring task manifest" do
     expect(Railwatch::Health::MANIFEST_INTERVAL * 2).to be <= 600
   end
 
+  it "ships on the next sample when the one that carried it failed to record" do
+    failed = false
+    allow(Railwatch).to receive(:record).and_wrap_original do |original, *args, **fields|
+      next original.call(*args, **fields) if failed
+
+      failed = true
+      raise IOError
+    end
+    Railwatch::Health.sample
+    Railwatch::Health.sample
+
+    expect(manifests.compact).to eq([ schedules ])
+  end
+
   it "ships in a forked child even when the parent just sent it" do
     Railwatch::Health.sample
     allow(Railwatch::Health).to receive(:start!)

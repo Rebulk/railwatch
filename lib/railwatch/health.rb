@@ -85,6 +85,7 @@ module Railwatch
         puma = puma_stats
         pool = pool_stats
         queue = solid_queue_stats
+        fields = detail(puma, queue)
         Railwatch.record(:health,
           pid: Process.pid,
           role: Subscribers::ProcessInfo.role,
@@ -97,7 +98,10 @@ module Railwatch
           pool_waiting: pool[:waiting],
           queue_depth: queue[:queue_depth],
           queue_latency: queue[:queue_latency],
-          detail: JSON.generate(detail(puma, queue)))
+          detail: JSON.generate(fields))
+        # Only once the sample is recorded: a sample that raised must not
+        # count as having sent the manifest, or the next one leaves it out.
+        manifest_sent(fields[:recurring_tasks]) if fields[:recurring_tasks]
       end
     rescue StandardError => e
       Railwatch.debug { "health sample failed: #{e.class}: #{e.message}" }
@@ -153,13 +157,12 @@ module Railwatch
     # Monotonic, so a clock step cannot park the manifest for five minutes or
     # put it on every sample. Read and written only from the health thread.
     def manifest_due?(schedules)
-      digest = schedules.hash
-      now = Clock.monotonic
-      return false if digest == @manifest_digest && @manifest_sent_at && now - @manifest_sent_at < MANIFEST_INTERVAL
+      !(schedules.hash == @manifest_digest && @manifest_sent_at && Clock.monotonic - @manifest_sent_at < MANIFEST_INTERVAL)
+    end
 
-      @manifest_digest = digest
-      @manifest_sent_at = now
-      true
+    def manifest_sent(schedules)
+      @manifest_digest = schedules.hash
+      @manifest_sent_at = Clock.monotonic
     end
 
     # Puma::Server#stats is the only public API exposing busy_threads, so it is
