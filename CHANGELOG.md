@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.2.0 (2026-10-25)
+
 - Executions send only the counters that fired. Every parent record
   carried all 18 of `Execution::COUNTERS`, most of them zero: 281 bytes of
   `counters` JSON on every request, job and command. A request that ran
