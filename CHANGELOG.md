@@ -15,6 +15,15 @@
   older servers show a blank query count on the route page and `null`
   from the MCP tools for a request that ran none.
 
+- Health samples stop repeating the recurring task manifest. `detail`
+  carried every Solid Queue recurring task key and schedule on every
+  sample, every 15 seconds, from every process: one unchanging string
+  that was 94% of the column (1,312 of 1,417 bytes a row on a 28-task
+  app). It is now sent when it changes, on a process's first sample, and
+  otherwise once every five minutes per process. railwatch-rs's
+  scheduled-task check reads the newest sample that carries one from the
+  last ten minutes, so it always finds one.
+
 ## 1.1.1 (2026-10-24)
 
 - The browser client names the first page load after its Inertia
