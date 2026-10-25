@@ -160,6 +160,10 @@ RSpec.describe Railwatch::Execution do
     # otherwise whichever example runs first within that window decides the
     # sample every other example in this block observes.
     before { Railwatch::Execution.instance_variable_set(:@memory_sampled_at, 0.0) }
+    # And after: the unreadable-statm example leaves a nil sample stamped
+    # fresh, so for the next second every execution in the process would
+    # ship peak_memory: nil (wire_fixtures_spec then sees a changed wire).
+    after { Railwatch::Execution.instance_variable_set(:@memory_sampled_at, 0.0) }
 
     it "returns the process RSS in bytes on Linux" do
       exe = new_execution
