@@ -788,7 +788,8 @@ Every vital is nil on a browser that doesn't support the
 `PerformanceObserver` entry type behind it. `redirect_ms`, `connect_ms`
 and `server_ms` add up to `ttfb` exactly (the boundaries are rounded
 before subtracting); all three are nil when the browser's timestamps are
-missing or out of order.
+missing or out of order, and when clamping `ttfb` or any phase to the
+120,000 ms cap would leave a split that no longer adds up.
 
 ### `session`
 

@@ -715,18 +715,20 @@ function ttfbPhases(nav: PerformanceNavigationTiming): Partial<Visit> {
     nav.workerStart > 0 && nav.workerStart < nav.fetchStart
       ? nav.workerStart
       : nav.fetchStart
+  // Order is judged on the raw timestamps: rounding first would let a
+  // requestStart a hair before fetchStart through as a 0 ms phase.
+  const ordered =
+    nav.responseStart > 0 &&
+    fetchStart >= nav.startTime &&
+    nav.requestStart >= fetchStart &&
+    nav.responseStart >= nav.requestStart
+  if (!ordered) return {}
   const [start, fetched, requested, responded] = [
     nav.startTime,
     fetchStart,
     nav.requestStart,
     nav.responseStart,
   ].map(Math.round)
-  const ordered =
-    nav.responseStart > 0 &&
-    fetched >= start &&
-    requested >= fetched &&
-    responded >= requested
-  if (!ordered) return {}
   return {
     redirect_ms: fetched - start,
     redirect_count: nav.redirectCount > 0 ? nav.redirectCount : undefined,

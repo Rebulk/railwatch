@@ -52,10 +52,7 @@ module Railwatch
           cls: cumulative_layout_shift(v["cls"]),
           inp: metric_ms(v["inp"]),
           ttfb: metric_ms(v["ttfb"]),
-          redirect_ms: metric_ms(v["redirect_ms"]),
-          redirect_count: redirect_count(v["redirect_count"]),
-          connect_ms: metric_ms(v["connect_ms"]),
-          server_ms: metric_ms(v["server_ms"]),
+          **ttfb_phases(v),
           user: user_id,
           tenant: tenant,
           user_agent: safe_string(request.user_agent, 256))
@@ -284,10 +281,26 @@ module Railwatch
     # #round refuses) is nil, like a missing one: raising here would drop the
     # whole beacon at the rescue below, every other visit in it included.
     def metric_ms(value)
+      finite_ms(value)&.round&.clamp(0, MAX_METRIC_MS)
+    end
+
+    # The initial load's TTFB split into phases. They add up to ttfb, so if
+    # clamping any of them (or ttfb itself) would break that sum, the split is
+    # dropped rather than stored inconsistent: ttfb stays, the phases are nil.
+    def ttfb_phases(visit)
+      raw = %w[redirect_ms connect_ms server_ms].to_h { |key| [ key, finite_ms(visit[key]) ] }
+      phases = raw.transform_values { |ms| ms&.round&.clamp(0, MAX_METRIC_MS) }
+      total = finite_ms(visit["ttfb"])
+      clamped = raw.any? { |key, ms| ms && ms.round != phases[key] }
+      over = total && total.round > MAX_METRIC_MS
+      phases = phases.transform_values { nil } if clamped || over
+      phases.transform_keys(&:to_sym).merge(redirect_count: redirect_count(visit["redirect_count"]))
+    end
+
+    def finite_ms(value)
       return nil if value.nil? || value == ""
       float = safe_float(value)
-      return nil unless float.finite?
-      float.round.clamp(0, MAX_METRIC_MS)
+      float.finite? ? float : nil
     end
 
     # How many redirects the browser SHOWED. It hides them when any hop was

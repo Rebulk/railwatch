@@ -100,9 +100,15 @@ RSpec.describe "visit record", type: :request do
       expect(visit.values_at(:redirect_ms, :redirect_count, :connect_ms, :server_ms)).to eq([ nil, nil, nil, nil ])
     end
 
-    it "clamps a phase like any other millisecond metric" do
-      expect(post_phases(redirect_ms: -3)[:redirect_ms]).to eq(0)
-      expect(post_phases(server_ms: 999_999_999)[:server_ms]).to eq(120_000)
+    # The phases add up to ttfb. Clamping one of them, or ttfb past its cap,
+    # would store a split that no longer does, so the split is dropped.
+    it "drops the whole split rather than store one that no longer adds up to ttfb" do
+      over = post_phases(ttfb: 121_000, redirect_ms: 119_000, connect_ms: 1_000, server_ms: 1_000)
+      expect(over[:ttfb]).to eq(120_000)
+      expect(over.values_at(:redirect_ms, :connect_ms, :server_ms)).to eq([ nil, nil, nil ])
+
+      negative = post_phases(redirect_ms: -3, connect_ms: 3, server_ms: 1_200)
+      expect(negative.values_at(:redirect_ms, :connect_ms, :server_ms)).to eq([ nil, nil, nil ])
     end
 
     it "stores a non-finite phase as unmeasured and keeps the rest of the beacon" do

@@ -914,6 +914,19 @@ describe("startRailwatch TTFB phases", () => {
     for (const key of ["redirect_ms", "connect_ms", "server_ms"])
       expect(visit).not.toHaveProperty(key)
   })
+
+  it("judges the order on the raw timestamps, not the rounded ones", () => {
+    // 10.49 and 10.48 both round to 10: a reversed pair must not pass as a
+    // 0 ms connection phase.
+    const visit = loadWith({
+      fetchStart: 10.49,
+      requestStart: 10.48,
+      responseStart: 120,
+    })
+
+    for (const key of ["redirect_ms", "connect_ms", "server_ms"])
+      expect(visit).not.toHaveProperty(key)
+  })
 })
 
 describe("startRailwatch tenant hint", () => {
