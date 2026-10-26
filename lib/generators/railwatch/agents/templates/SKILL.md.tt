@@ -18,9 +18,10 @@ machine. Arguments: `application_slug: "<%= app_slug %>"`, `environment: "develo
    `Server-Timing: total;dur=…, db;dur=…;desc="N queries", view;dur=…, other;dur=…`
    and `X-Railwatch-Execution-Id: <id>`. A request with a session needs its
    cookie (`-b`), or use the id from the browser's network panel.
-2. `get_execution(execution_id: <id>)`: every query, render, log line and
-   exception in order. Each query has `source` (`file:line`). Many rows with
-   the same SQL from one `source` are an N+1.
+2. `get_execution(execution_id: <id>)`, or `last_execution(path: "/path")`
+   without the id: `summary` first (where the time went, the repeated
+   queries and N+1s with their `source` `file:line` and a fix), then a page
+   of the timeline (`timeline_offset` for more).
 3. `get_route(route: "GET /path")`: the route's N+1s with the line and the
    `includes` that fixes each, and its slowest queries. `explain_query` for a
    query's plan.

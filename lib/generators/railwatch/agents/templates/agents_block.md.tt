@@ -15,13 +15,12 @@ The loop after a change:
 1. Hit the page: `curl -si <%= app_url %>/path | grep -i -e server-timing -e x-railwatch`.
    `Server-Timing` has total, db (with the query count), view and other;
    `X-Railwatch-Execution-Id` names the execution.
-2. `get_execution` with that id: the timeline of every query, render and log,
-   each query with its `source` (`file:line`). The same SQL repeated from one
-   line is an N+1.
+2. `get_execution` with that id, or `last_execution` (optionally with a
+   `path`): a summary of where the time went, the repeated queries and N+1s
+   with their `source` (`file:line`), then a page of the timeline.
 3. `get_route` for the route: its N+1s, each with the source line and an
    `includes` to add, and its slowest queries.
 4. Fix, hit the page again, compare the query count and db time.
 
 `search_requests`, `list_slow_routes`, `list_issues` and `get_issue` cover the
-rest. A `last_execution` tool (the newest request, optionally by path)
-arrives with a later railwatch-rs release; until then use the header.
+rest.

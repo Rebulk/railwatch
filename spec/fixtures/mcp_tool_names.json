@@ -5,6 +5,7 @@
   "get_issue",
   "get_profile",
   "get_route",
+  "last_execution",
   "list_alerts",
   "list_applications",
   "list_issues",
