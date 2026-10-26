@@ -73,13 +73,13 @@ RSpec.describe Railwatch::Generators::AgentsGenerator do
     expect(exist?("CLAUDE.md")).to be(false)
   end
 
-  it "only names tools the server has today, and says last_execution is still to come" do
+  it "only names tools the server has" do
     run_generator
 
     definitions = JSON.parse(File.read(File.expand_path("../fixtures/mcp_tool_names.json", __dir__)))
     named = read("AGENTS.md").scan(/`([a-z_]+)`/).flatten.uniq.select { |word| word.include?("_") && !word.start_with?("application_", "railwatch") }
-    expect(named - definitions).to eq([ "last_execution" ])
-    expect(read("AGENTS.md")).to match(/`last_execution`.*arrives with a later railwatch-rs release/m)
+    expect(named).to include("last_execution", "get_execution")
+    expect(named - definitions).to eq([])
   end
 
   it "writes the block into each of AGENTS.md and CLAUDE.md that exists, keeping what is around it" do

@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.4.0 (2026-10-26)
+
 - In development each recorded request's response carries
   `Server-Timing` (`total`, `db` with the query count, `view`, `other`) and
   `X-Railwatch-Execution-Id`, so `curl -i`, the browser's network panel or a
