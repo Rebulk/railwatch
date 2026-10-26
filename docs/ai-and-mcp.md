@@ -170,19 +170,24 @@ they're configured.
 
 Every tool returns JSON as the text body of a single content block. **All
 durations are milliseconds.** Every `window` argument takes `1h`, `6h`,
-`24h`, `7d`, or `30d`, and defaults to `24h`.
+`24h`, `7d`, or `30d`, and defaults to `24h`. `application_slug` and
+`environment` may be left out when the token sees one application, or the
+application has one environment. A result over 60 KB comes back as
+`{"truncated": {…, "hint"}, "result": …}`, still valid JSON, with a hint on how
+to narrow the call. Rows carry a dashboard `url` for the human.
 
 | Tool | Arguments | Returns |
 |---|---|---|
 | `list_applications` | — | applications, their account, and their environments. Start here — everything else takes the `application_slug` and `environment` this returns (plus `account_slug`/`application_id` when two accounts share a slug). |
-| `list_issues` | `application_slug?`, `environment?`, `status?` (`open`/`resolved`/`ignored`, default `open`), `limit?` | issues with key, title, kind, status, priority, occurrence and affected-user counts, culprit, first/last seen. |
-| `get_issue` | `key` or `issue_id` | one issue. For an exception, the sample and latest occurrences with stored stack frames, cause, locals, parsed context, browser breadcrumbs, and the execution it happened inside. For a performance or anomaly issue, the metric, limit or baseline, representative records, trend, and deploy comparison. |
+| `list_issues` | `application_slug?`, `environment?`, `status?` (`open`/`resolved`/`ignored`, default `open`), `sort?` (`impact`), `limit?` | issues with key, title, kind, status, priority, occurrence and affected-user counts, culprit, first/last seen and the dashboard `url`. Newest first by default; `sort: impact` ranks by occurrences discounted by days since last seen. |
+| `get_issue` | `key` or `issue_id`, `frames?` (`all`) | one issue and its dashboard `url`. For an exception, the sample occurrence with stored stack frames (runs of framework and gem frames collapsed to a count unless `frames: "all"`), cause, locals, parsed context, browser breadcrumbs, and the execution it happened inside; the latest occurrence is shown only when it differs from the sample. For a performance or anomaly issue, the metric, limit or baseline, representative records, trend, and deploy comparison. |
 | `update_issue` | `key`, `status?`, `priority?`, `assignee_email?`, `agent?` | the updated issue. Writes an activity entry attributed to your user and `agent`. |
 | `add_comment` | `key`, `body`, `agent?` | the created comment, attributed the same way. |
-| `list_slow_routes` | `application_slug`, `environment`, `window?` | the 20 slowest routes by p95, each with `group_hash`, count, errors, `p95_ms`. |
+| `list_slow_routes` | `application_slug?`, `environment?`, `window?`, `sort?` (`total`/`avg`/`p95`) | the 20 routes that cost the most request time (count × average) by default, each with `group_hash`, count, errors, `total_ms`, `avg_ms`, `p95_ms` and `url`. `sort: p95` ranks by per-request latency. |
 | `get_route` | `application_slug`, `environment`, `route` or `group_hash`, `window?` | one route's count/errors, p50/p95/p99/max, its slowest individual requests, the slowest queries those requests ran, and each N+1 with a concrete Active Record fix. |
 | `search_requests` | `application_slug`, `environment`, `q?`, `window?`, `limit?` | individual requests. `q` is the dashboard's filter grammar: `method:GET`, `route:/checkout`, `status:500` or `status:5xx`, `deploy:…`, `tenant:…`, `user:…`, `min_ms:250`; bare words match the route name. |
-| `get_execution` | `application_slug`, `environment`, `execution_id` | one execution and its full child timeline — every query, cache read, log line, outgoing request, view render, and exception, each offset in ms from the start. |
+| `get_execution` | `application_slug?`, `environment?`, `execution_id`, `timeline_offset?`, `timeline_limit?`, `timeline_type?` | why one execution took as long as it did. `summary` first: time split by sql, transactions, view, external, cache and untracked; the repeated queries and N+1s with their `source` (`file:line`) and an Active Record fix; the slowest records; notes on what to look at. Then one page of the timeline (25 rows by default, `timeline_offset` for more). |
+| `last_execution` | `application_slug?`, `environment?`, `path?`, `kind?` (`request`/`job`), `timeline_offset?`, `timeline_limit?`, `timeline_type?` | the newest request or job in `get_execution`'s shape: the dev loop. `path` matches the request path, route pattern or execution name. With no executions yet, it says why records may be missing. |
 | `explain_query` | `application_slug`, `environment`, `group_hash`, `window?` | the stored query plan for a query group, with the SQL and the sample's duration. `explain` is null unless the app sets `RAILWATCH_CAPTURE_QUERY_EXPLAIN`. `sql` is the normalized shape unless the app also sets `RAILWATCH_CAPTURE_SQL_VALUES`. |
 | `get_profile` | `application_slug`, `environment`, `profile_id?`, `execution_id?`, `limit?` | the hottest frames of a stack profile — self and total samples, each with a percentage. |
 | `search_logs` | `application_slug`, `environment`, `q`, `level?`, `limit?` | matching log lines, each with the `execution_id` to expand with `get_execution`. |
