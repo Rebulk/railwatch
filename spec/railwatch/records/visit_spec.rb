@@ -228,6 +228,37 @@ RSpec.describe "visit record", type: :request do
     expect(railwatch_records(:visit).sole[:tenant]).to eq("acme")
   end
 
+  describe "session_id and tab_id" do
+    def visit_with(fields)
+      post_beacon([ { component: "X", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success" }.merge(fields) ])
+      railwatch_records(:visit)
+    end
+
+    it "carries the session and tab each visit says it happened in" do
+      visits = visit_with(session_id: "3f2a9c1e7b4d6a08", tab_id: "9e8d7c6b5a4f3e21")
+
+      expect(visits.sole).to include(session_id: "3f2a9c1e7b4d6a08", tab_id: "9e8d7c6b5a4f3e21")
+    end
+
+    it "leaves both keys off a visit that carries neither" do
+      visit = visit_with({}).sole
+
+      expect(visit).not_to have_key(:session_id)
+      expect(visit).not_to have_key(:tab_id)
+    end
+
+    it "drops an id that is too long, the wrong shape, or not a string, and still records the visit" do
+      visit = visit_with(session_id: "a" * 65, tab_id: { "id" => "t1" }).sole
+      expect(visit).not_to have_key(:session_id)
+      expect(visit).not_to have_key(:tab_id)
+
+      railwatch_transport.batches.clear
+      visit = visit_with(session_id: "s 1", tab_id: "t-1_A").sole
+      expect(visit).not_to have_key(:session_id)
+      expect(visit[:tab_id]).to eq("t-1_A")
+    end
+  end
+
   it "responds 204 with nothing shipped when beacon_enabled is disabled" do
     Railwatch.config.beacon_enabled = false
     post_beacon([ { component: "X", url: "/x", method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1, status: "200" } ])

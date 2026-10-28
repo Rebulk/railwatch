@@ -109,7 +109,10 @@ RSpec.describe "wire fixtures", type: :request do
   # Every type, each block leaving at least one record of that type in the
   # transport. Kept in VERSIONS order so the file reads top to bottom.
   PRODUCERS = {
-    request: -> { User.create!(name: "Ada", email: "ada@example.com"); get "/widgets" },
+    request: -> {
+      User.create!(name: "Ada", email: "ada@example.com")
+      get "/widgets", headers: { "X-Railwatch-Session" => "3f2a9c1e7b4d6a08", "X-Railwatch-Tab" => "9e8d7c6b5a4f3e21" }
+    },
     job_attempt: -> { WidgetJob.perform_now("bob") },
     scheduled_task: -> {
       install_queue_schema
@@ -164,7 +167,8 @@ RSpec.describe "wire fixtures", type: :request do
     },
     visit: -> {
       post_beacon(visits: [ { component: "Widgets/Index", url: "/widgets", method: "GET", started_at: Time.now.to_f * 1000,
-                              duration_ms: 12.5, status: "200", partial: false, props_bytes: 42 } ])
+                              duration_ms: 12.5, status: "200", partial: false, props_bytes: 42,
+                              session_id: "3f2a9c1e7b4d6a08", tab_id: "9e8d7c6b5a4f3e21" } ])
     },
     process: -> { Railwatch::Subscribers::ProcessInfo.install!(Rails.application); Railwatch::Subscribers::ProcessInfo.record! },
     span: -> { in_command { Railwatch.span("pdf.render", vendor: "prawn") { :done } } },

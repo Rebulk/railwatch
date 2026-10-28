@@ -202,7 +202,8 @@ module Railwatch
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
-          files: env["railwatch.files"] || uploaded_files_fallback(req, env)
+          files: env["railwatch.files"] || uploaded_files_fallback(req, env),
+          **Sessions.browser_fields(env)
         }
       end
 

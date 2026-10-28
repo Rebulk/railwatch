@@ -104,6 +104,8 @@ boundaries. The `action`/`render` boundaries come from
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
 | `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). A non-multipart request body is never parsed to fill this in. |
+| `session_id` | The browser client's session id, from `X-Railwatch-Session` or else the `railwatch_session` cookie, so a full page load carries it too. Never the `"user:<id>"` key the server session falls back to. At most 64 of `[A-Za-z0-9_-]`; absent when missing or not that shape. |
+| `tab_id` | The browser client's tab id, from `X-Railwatch-Tab`, which it sends only on Inertia visits: a full page load has none. Same validation, absent otherwise. |
 | `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |
 
 ### `job_attempt`
@@ -776,6 +778,8 @@ entirely if `config.beacon_enabled` is off.
 | `user` | Resolved server-side from the beacon request's session/cookies, same resolver as every other record. |
 | `tenant` | Current tenant context. |
 | `user_agent` | Truncated to 256 chars. |
+| `session_id` | The browser session the visit happened in (see `session`), when the client sent one shaped like an id: at most 64 of `[A-Za-z0-9_-]`. Absent otherwise. |
+| `tab_id` | The tab the visit happened in: a 16-hex id the client keeps in `sessionStorage` (`railwatch.tab`), so it survives a reload of the tab but not a new tab. "Duplicate tab" copies `sessionStorage`, so a duplicated tab shares its original's id until one of them is reloaded fresh. Same validation, absent otherwise. |
 
 The **initial page load** is reported as a visit too, even though Inertia
 never routed it. It has `method` `"GET"`, `status` `"success"`, and
@@ -799,13 +803,23 @@ per deploy and reports crash-free rates from them. Two sources produce
 the same record:
 
 - **Browser**, `source: "browser"`. The client,
-  `app/frontend/lib/railwatch.ts`, mints a 16-hex id per tab in
-  `sessionStorage` under the key `railwatch.session`, so it dies with the
-  tab. It mirrors the id into a `railwatch_session` cookie and sends it
-  with every beacon flush. `Railwatch::BeaconController` writes at most
-  one `session` record per flush. The first, with no `duration_ms` yet,
-  opens the session. Later ones beat it along, and the
-  `pagehide`/`visibilitychange` flush closes it with `ended`.
+  `app/frontend/lib/railwatch.ts`, keeps one session per browser, shared
+  by every tab, the way GA4 and Amplitude do: a 16-hex id in
+  `localStorage` (`railwatch.session`, with `railwatch.session.at` when it
+  started and `railwatch.session.seen` for its last activity in any tab).
+  Activity is a page load, an Inertia visit the user waits on, and a tab
+  coming back into view. After 30 minutes with no activity in any tab, or
+  24 hours after it started, the next activity mints a new id. When
+  `localStorage` throws the session lives in `sessionStorage` (one per
+  tab), and when that throws too, in memory (one per page). The client
+  mirrors the id into a `railwatch_session` cookie that lapses after 30
+  minutes, renewed on every activity, and sends it with every beacon
+  flush. `Railwatch::BeaconController` writes at most one `session` record
+  per flush. The first, with no `duration_ms` yet, opens the session.
+  Later ones beat it along. Closing a tab does not end the session, since
+  other tabs may still be in it; a tab that sees the session time out
+  sends one last beat with `ended`, and a session no tab comes back to
+  ends only by the platform's own timeout.
 - **Server**, `source: "server"`. `lib/railwatch/sessions.rb` aggregates,
   per process, every request that resolves a user or carries that cookie
   or an `X-Railwatch-Session` header. A background thread ships one
@@ -830,7 +844,7 @@ halves of one session rather than counting it twice.
 | `requests` | Requests in this session so far (server only). |
 | `visits` | Inertia visits in this beacon flush (browser only). |
 | `errors` | Requests that 5xx'd or raised (server), or visits with status `"error"` in this flush (browser). |
-| `ended` | Whether this is the session's last record. |
+| `ended` | Whether this is the session's last record. A browser session is only `ended` when a tab saw it time out, never because a tab closed. |
 | `user` | Resolved user id, when there is one. |
 
 ### `process`

@@ -26,6 +26,9 @@ module Railwatch
     # a tab carries the id its beacons already use.
     COOKIE = /(?:\A|;\s*)railwatch_session=([^;]+)/
     KEY_LIMIT = 64
+    # What the browser client mints for a session or a tab id. Anything else
+    # in a header, cookie, or beacon is not one, and is not recorded as one.
+    BROWSER_ID = /\A[A-Za-z0-9_-]{1,64}\z/
 
     @mutex = Mutex.new
     @wakeup = ConditionVariable.new
@@ -85,6 +88,19 @@ module Railwatch
 
       user = exe.user_id
       user && "user:#{user}"[0, KEY_LIMIT]
+    end
+
+    # The browser session and tab a request came from, for the request
+    # record: only what the browser client sent, never the user fallback
+    # above, which names a person rather than a session.
+    def browser_fields(env)
+      session = browser_id(env["HTTP_X_RAILWATCH_SESSION"] || COOKIE.match(env["HTTP_COOKIE"])&.[](1))
+      tab = browser_id(env["HTTP_X_RAILWATCH_TAB"])
+      { session_id: session, tab_id: tab }.compact
+    end
+
+    def browser_id(value)
+      value if value.is_a?(String) && BROWSER_ID.match?(value)
     end
 
     def emit(key, entry, ended)

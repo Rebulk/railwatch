@@ -527,11 +527,16 @@ crash-free session and crash-free user rates are computed from. The
 There are two sources, and they meet on the same id:
 
 - **The browser client** is `app/frontend/lib/railwatch.ts`, installed by
-  `railwatch:install`. It mints one id per tab in `sessionStorage` and
-  mirrors it into a `railwatch_session` cookie. It rides along on the
-  beacon flushes the client already sends for visits, so this costs no
-  extra requests. This is the primary source for a web app, and it is
-  what makes session duration mean "how long the tab was open".
+  `railwatch:install`. It keeps one id per browser in `localStorage`,
+  shared by every tab and replaced after 30 minutes with no activity in
+  any tab or 24 hours after it started, and mirrors it into a
+  `railwatch_session` cookie. It also sends the id, with the tab's own
+  id, as `X-Railwatch-Session` and `X-Railwatch-Tab` on every Inertia
+  visit to the page's own origin. It rides along on the beacon flushes
+  the client already sends for visits, so this costs no extra requests.
+  This is the primary source for a web app, and it is what makes session
+  duration mean "how long the user was active". The client's 30 minutes
+  is fixed; it matches this setting's default.
 - **The request middleware** aggregates, in memory, every request that
   either resolves a user or carries that cookie or an
   `X-Railwatch-Session` header. It is the only source for an API-only

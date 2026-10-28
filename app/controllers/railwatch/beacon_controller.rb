@@ -55,6 +55,7 @@ module Railwatch
           inp: metric_ms(v["inp"]),
           ttfb: metric_ms(v["ttfb"]),
           **ttfb_phases(v),
+          **browser_fields(v),
           user: user_id,
           tenant: tenant,
           user_agent: safe_string(request.user_agent, 256))
@@ -212,6 +213,13 @@ module Railwatch
     def session_id_from(session)
       session = object(session)
       session ? safe_string(session["id"], 64) : ""
+    end
+
+    # The session and tab each visit says it happened in, which can differ
+    # within one beacon: visits queued before the session timed out ship
+    # with the next session's beat. Omitted unless shaped like an id.
+    def browser_fields(visit)
+      { session_id: Sessions.browser_id(visit["session_id"]), tab_id: Sessions.browser_id(visit["tab_id"]) }.compact
     end
 
     def record_error(error, name, origin, session_id, user_id, tenant)
