@@ -1059,7 +1059,12 @@ describe("startRailwatch session across tabs", () => {
     removeItem: () => undefined,
   }
 
+  // The suite's own beforeEach has already started a client; its timer
+  // would flush, and join sessions, alongside the tabs here. Only the tabs
+  // each test opens run.
   beforeEach(() => {
+    vi.clearAllTimers()
+    sendBeacon.mockClear()
     localStorage.clear()
     document.cookie = "railwatch_session=; path=/; max-age=0"
   })
@@ -1285,6 +1290,38 @@ describe("startRailwatch session across tabs", () => {
     expect(first.session_id).toMatch(/^[0-9a-f]{16}$/)
     expect(reloaded.session_id).toBe(first.session_id)
     expect(otherTab.session_id).not.toBe(first.session_id)
+  })
+
+  it("keeps the session it is in when storage starts throwing after startup", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError")
+      })
+    visitIn(tab)
+    visitIn(tab)
+    getItem.mockRestore()
+
+    const visits = sentVisits().filter((v) => v.url !== undefined)
+    expect(visits.map((v) => v.session_id)).toEqual([first.id, first.id])
+    expect(beats().some((s) => s.ended)).toBe(false)
+  })
+
+  it("starts when storage reads throw, with a session and a tab of its own", async () => {
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError")
+      })
+    const tab = await openTab(window.sessionStorage)
+    visitIn(tab)
+    getItem.mockRestore()
+
+    const [visit] = sentVisits().filter((v) => v.url !== undefined)
+    expect(visit.session_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(visit.tab_id).toMatch(/^[0-9a-f]{16}$/)
   })
 
   it("still reports a session and a tab when no storage works at all", async () => {

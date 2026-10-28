@@ -272,11 +272,38 @@ function remember(id: string) {
   }
 }
 
+// A store that passed the probe can still throw later: the user turns
+// storage off, or the browser revokes it. From then on the page keeps its
+// own copy, seeded with the session it is in, so losing storage neither
+// stops the client nor ends the session.
+function read(key: string): string | null {
+  try {
+    return sessions.getItem(key)
+  } catch {
+    sessions = memoryStore()
+    if (session) {
+      sessions.setItem(SESSION_ID_KEY, session.id)
+      sessions.setItem(SESSION_STARTED_KEY, String(session.started_at))
+      sessions.setItem(SESSION_SEEN_KEY, String(session.seen))
+    }
+    return sessions.getItem(key)
+  }
+}
+
+function readTab(): string | null {
+  try {
+    return tabs.getItem(TAB_KEY)
+  } catch {
+    tabs = memoryStore()
+    return null
+  }
+}
+
 function startSession() {
   sessions =
     storage("localStorage") ?? storage("sessionStorage") ?? memoryStore()
   tabs = storage("sessionStorage") ?? memoryStore()
-  tab = tabs.getItem(TAB_KEY) ?? randomId()
+  tab = readTab() ?? randomId()
   save(tabs, TAB_KEY, tab)
   touch(true)
 }
@@ -290,9 +317,9 @@ function startSession() {
 // left polling cannot hold its session open until the cap.
 function touch(active: boolean) {
   const now = Date.now()
-  const id = sessions.getItem(SESSION_ID_KEY)
-  const seen = Number(sessions.getItem(SESSION_SEEN_KEY)) || 0
-  const startedAt = Number(sessions.getItem(SESSION_STARTED_KEY)) || 0
+  const id = read(SESSION_ID_KEY)
+  const seen = Number(read(SESSION_SEEN_KEY)) || 0
+  const startedAt = Number(read(SESSION_STARTED_KEY)) || 0
   const live = id !== null && !expired(startedAt, seen, now)
   if (live && id === session?.id) session.seen = Math.max(session.seen, seen)
   else if (live) begin(id, startedAt, seen, false)
