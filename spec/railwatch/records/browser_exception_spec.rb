@@ -91,6 +91,32 @@ RSpec.describe "browser exception record", type: :request do
     expect(context["user_agent"]).to include("Chrome/141")
   end
 
+  it "carries the tab the error was thrown in beside its session" do
+    post_beacon(session: { id: "3f2a9c1e7b4d6a08", started_at: Time.now.to_f * 1000 },
+                errors: [ { name: "TypeError", message: "boom", stack: STACK, tab_id: "9e8d7c6b5a4f3e21" } ])
+
+    context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
+    expect(context).to include("session" => "3f2a9c1e7b4d6a08", "tab" => "9e8d7c6b5a4f3e21")
+  end
+
+  it "leaves the session and tab out when either is not shaped like an id, rather than cutting it to fit" do
+    post_beacon(session: { id: "a" * 65, started_at: Time.now.to_f * 1000 },
+                errors: [ { name: "TypeError", message: "boom", stack: STACK, tab_id: "tab id<script>" } ])
+
+    context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
+    expect(context).not_to have_key("session")
+    expect(context).not_to have_key("tab")
+  end
+
+  it "keeps a 64-character session id whole" do
+    post_beacon(session: { id: "a" * 64, started_at: Time.now.to_f * 1000 },
+                errors: [ { name: "TypeError", message: "boom", stack: STACK } ])
+
+    context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
+    expect(context["session"]).to eq("a" * 64)
+    expect(context).not_to have_key("tab")
+  end
+
   it "timestamps the error at the moment the browser caught it, not the moment the beacon arrived" do
     caught_at = Time.now.to_f - 30
     ex = post_error(at: caught_at * 1000)

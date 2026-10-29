@@ -13,8 +13,11 @@
   request record carries the `session_id` from the `X-Railwatch-Session`
   header or `railwatch_session` cookie and the `tab_id` from
   `X-Railwatch-Tab`, which the client now sends on same-origin Inertia
-  visits. A closing tab no longer marks the session `ended`: the
-  browser's other tabs may still be in it. Apps that copied the client
+  visits. A browser error's `context.browser` carries the `tab` it was
+  thrown in beside its `session`, and both are dropped rather than cut
+  when they are not shaped like an id. A closing tab no longer marks the
+  session `ended`: the browser's other tabs may still be in it. Apps that
+  copied the client
   (`app/frontend/lib/railwatch.ts`) need the same change in their copy.
 
 ## 1.4.0 (2026-10-26)

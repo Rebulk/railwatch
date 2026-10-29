@@ -398,8 +398,9 @@ the normalized message. So browser errors group, split, merge, resolve,
 and regress through the same Issue machinery.
 
 `context` carries a `browser` key with the page `url`, the Inertia
-`component`, the `visit` the error happened in if any, the tab's
-`session` id, the `user_agent`, and up to 20 `breadcrumbs`. Each
+`component`, the `visit` the error happened in if any, the browser
+`session` id and the `tab` id it was thrown in (each at most 64 of
+`[A-Za-z0-9_-]`, absent otherwise), the `user_agent`, and up to 20 `breadcrumbs`. Each
 breadcrumb is `{at, kind, text}`, with `kind` being `console`, `click`,
 or `navigate`. The breadcrumbs are the trail the client recorded before
 the crash. Anything the app passed as `reportError(error, context)` is

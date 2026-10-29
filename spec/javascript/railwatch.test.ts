@@ -348,6 +348,7 @@ describe("startRailwatch error capture", () => {
         message: "kaboom",
         stack: error.stack,
         url: "/",
+        tab_id: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
     ])
   })
@@ -1255,6 +1256,20 @@ describe("startRailwatch session across tabs", () => {
     visitIn(tab)
 
     expect(sentVisits().at(-1)?.session_id).toBe(first.id)
+  })
+
+  it("sends each error with the tab it was thrown in", async () => {
+    const tab = await openTab()
+    visitIn(tab)
+    tab.listeners.error({
+      error: new Error("boom"),
+      message: "",
+    } as unknown as Event)
+    vi.advanceTimersByTime(5000)
+
+    const body = beacons().find((b) => b.errors.length > 0)
+    expect(body?.errors[0].tab_id).toBe(body?.visits[0].tab_id)
+    expect(body?.errors[0].tab_id).toMatch(/^[0-9a-f]{16}$/)
   })
 
   it("tags only visits to the page's own origin", async () => {

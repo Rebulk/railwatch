@@ -207,12 +207,12 @@ module Railwatch
       Context.current_tenant || (hint.is_a?(String) ? safe_string(hint, 255).presence : nil)
     end
 
-    # The tab's session id, so a browser error can be lined up with the
-    # session it crashed. Shaped like every other read off this payload:
-    # anything but a hash carrying an id yields no id at all.
+    # The browser session's id, so a browser error can be lined up with the
+    # session it crashed. Anything but a hash carrying an id shaped like one
+    # the client mints yields no id at all.
     def session_id_from(session)
       session = object(session)
-      session ? safe_string(session["id"], 64) : ""
+      Sessions.browser_id(session["id"]) if session
     end
 
     # The session and tab each visit says it happened in, which can differ
@@ -243,7 +243,8 @@ module Railwatch
           url: safe_string(error["url"], 2048).presence,
           component: safe_string(error["component"], 255).presence,
           visit: safe_string(error["visit"], 2048).presence,
-          session: session_id.presence,
+          session: session_id,
+          tab: Sessions.browser_id(error["tab_id"]),
           user_agent: safe_string(request.user_agent, 256).presence,
           breadcrumbs: breadcrumbs(error["breadcrumbs"]).presence
         }.compact)),
