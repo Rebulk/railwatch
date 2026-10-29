@@ -74,7 +74,7 @@ whether child records ship, not whether an error is visible.
 Built by the outermost Rack middleware in
 `lib/railwatch/middleware/request.rb`. A file `ActionDispatch::Static`
 served from `public/` (a GET or HEAD no route matched, answered 2xx or
-304, whose path names a file there) is not recorded. An unmatched request
+304, whose path names a file there or its precompressed `.br`/`.gz`) is not recorded. An unmatched request
 for anything else, a 404 included, is. That middleware also owns the
 `middleware_before`/`action`/`render`/`middleware_after` stage
 boundaries. The `action`/`render` boundaries come from
@@ -402,7 +402,8 @@ normalized message. So browser errors group, split, merge, resolve, and
 regress through the same Issue machinery. One difference: when the top
 frame's file name carries a bundler's content hash (`dist-DedfDSJv.js`,
 `main.3f2a1b9c.js`, `app-5XDGVJ2T.mjs`; eight or more characters with a
-digit or mixed case), the fingerprint uses the name without the hash
+digit, or mixed case that does not read as camelCase words, so
+`checkout-PaymentForm.js` keeps its name), the fingerprint uses the name without the hash
 (`dist.js`) and no line. Both change on every deploy of a minified
 bundle, so keeping them would open a new issue each release. The frame
 itself keeps the real file and line.

@@ -177,8 +177,10 @@ module Railwatch
       # Static's 304 is a bare [304, {}, []], so the response cannot say a
       # file answered it. The path can: it names a file under public/,
       # looked up the way Static looks (unescaped, cleaned, then with
-      # ".html" or "/index.html"). Every check before that one is an env or
-      # integer read, so a routed request never touches the filesystem.
+      # ".html" or "/index.html", or only its precompressed ".br" or ".gz",
+      # which Static serves in its place). Every check before that one is an
+      # env or integer read, so a routed request never touches the
+      # filesystem.
       def static_file?(env, status)
         return false if env["railwatch.route"] || env["action_dispatch.route"]
         return false unless status && (status.to_i.between?(200, 299) || status.to_i == 304)
@@ -188,7 +190,8 @@ module Railwatch
         return false unless Rack::Utils.valid_path?(path)
 
         file = File.join(Rails.public_path.to_s, Rack::Utils.clean_path_info(path))
-        [ file, "#{file}.html", File.join(file, "index.html") ].any? { |candidate| File.file?(candidate) }
+        [ file, "#{file}.html", File.join(file, "index.html"), "#{file}.br", "#{file}.gz" ]
+          .any? { |candidate| File.file?(candidate) }
       rescue StandardError
         false
       end

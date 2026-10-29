@@ -132,10 +132,17 @@ module Railwatch
       [ "#{match[:name]}#{match[:ext]}", nil ]
     end
 
-    # A word is not a hash: one has a digit or mixes cases, so the
-    # "timeline" in "order-timeline.js" stays part of the name.
+    # A word is not a hash: one has a digit, or mixes cases in a way no
+    # camelCase or PascalCase name does ("DedfDSJv"). So the "timeline" in
+    # "order-timeline.js" and the "PaymentForm" in "checkout-PaymentForm.js"
+    # stay part of the name. A hash that happens to read like words (about
+    # 1 in 100 of eight letters with no digit) is kept too, which costs that
+    # deploy a split issue, never a wrong merge.
+    CAMEL_WORDS = /\A[A-Za-z][a-z]+(?:[A-Z][a-z]{2,})+\z/
+
     def content_hash?(segment)
-      segment.match?(/\d/) || (segment.match?(/[a-z]/) && segment.match?(/[A-Z]/))
+      segment.match?(/\d/) ||
+        (segment.match?(/[a-z]/) && segment.match?(/[A-Z]/) && !segment.match?(CAMEL_WORDS))
     end
 
     # A browser stack, exactly as the engine wrote it, in the same frame

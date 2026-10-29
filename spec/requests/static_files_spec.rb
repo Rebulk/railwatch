@@ -24,6 +24,16 @@ RSpec.describe "static files", type: :request do
     expect(railwatch_records(:request)).to be_empty
   end
 
+  # Vite's compression plugin can leave only app.js.br; Static serves it
+  # for GET /app.js to a client that accepts Brotli.
+  it "does not record a bundle Static serves from its precompressed copy alone" do
+    get "/vite/assets/precompressed-Cq9mR2xT.js", headers: { "Accept-Encoding" => "br" }
+
+    expect(response).to have_http_status(:ok)
+    expect(response.headers["Content-Encoding"]).to eq("br")
+    expect(railwatch_records(:request)).to be_empty
+  end
+
   it "still records an unmatched path that is not a file, so a probe stays visible" do
     get "/vite/assets/.env"
 

@@ -111,6 +111,8 @@ RSpec.describe Railwatch::Backtrace do
     it "keeps the file and line of a file whose name carries no hash" do
       expect(location("vite/assets/yard-canvas.js", 7)).to eq([ "vite/assets/yard-canvas.js", 7 ])
       expect(location("assets/order-timeline.js", 7)).to eq([ "assets/order-timeline.js", 7 ])
+      expect(location("assets/checkout-PaymentForm.js", 7)).to eq([ "assets/checkout-PaymentForm.js", 7 ])
+      expect(location("assets/checkout-orderSummary.js", 7)).to eq([ "assets/checkout-orderSummary.js", 7 ])
       expect(location("app/frontend/entrypoints/app.tsx", 7)).to eq([ "app/frontend/entrypoints/app.tsx", 7 ])
     end
 
