@@ -154,6 +154,19 @@ RSpec.describe Railwatch::Sessions, type: :request do
       expect(sessions[id]).to include(requests: 2, user: "41")
     end
 
+    it "marks the cookie Secure over HTTPS, including behind a TLS proxy, and not over plain HTTP" do
+      # Each request is a new browser: the integration session keeps cookies.
+      cookie_for = lambda do |*args, **opts|
+        reset!
+        get(*args, **opts)
+        response.headers["Set-Cookie"][/railwatch_session=[^\n]*/]
+      end
+
+      expect(cookie_for.("/page")).not_to match(/secure/i)
+      expect(cookie_for.("/page", headers: { "X-Forwarded-Proto" => "https" })).to match(/; secure/i)
+      expect(cookie_for.("https://www.example.com/page")).to match(/; secure/i)
+    end
+
     it "opens no server session for an anonymous first load, though its record carries the id" do
       get "/page"
 

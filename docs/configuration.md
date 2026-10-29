@@ -552,7 +552,8 @@ carries no cookie. With `browser_client` on, the request middleware gives
 it one: a successful `GET` whose response is an HTML document, that is not
 an Inertia visit and carries no `X-Railwatch-Session` or cookie, gets
 `Set-Cookie: railwatch_session=<new id>; path=/; max-age=1800;
-samesite=lax`. That request's record carries the id, and so does its
+samesite=lax` (plus `secure` over HTTPS, including behind a proxy that
+sets `X-Forwarded-Proto`). That request's record carries the id, and so does its
 server session when it resolved a user (an anonymous one opened no server
 session before and still opens none; its browser opens the session with
 the client's first beat).

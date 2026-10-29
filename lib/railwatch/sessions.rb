@@ -133,8 +133,10 @@ module Railwatch
       return if SHARED_CACHE.match?(headers[Rack::CACHE_CONTROL].to_s)
 
       id = env[MINTED] = SecureRandom.hex(8)
+      # Secure over HTTPS (behind a TLS proxy too: ssl? reads
+      # X-Forwarded-Proto), so the id never rides a plain-HTTP request.
       Rack::Utils.set_cookie_header!(headers, "railwatch_session",
-        { value: id, path: "/", max_age: COOKIE_MAX_AGE, same_site: :lax })
+        { value: id, path: "/", max_age: COOKIE_MAX_AGE, same_site: :lax, secure: Rack::Request.new(env).ssl? })
     rescue StandardError => e
       # A frozen header hash: the client mints the id once the page runs.
       env.delete(MINTED)
