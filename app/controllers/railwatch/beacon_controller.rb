@@ -194,7 +194,7 @@ module Railwatch
         next unless error
         name = safe_string(error["name"], 255)
         next if name.empty?
-        record_error(error, name, origin, session_id, user_id, tenant)
+        record_error(error, name, origin, Sessions.browser_id(error["session_id"]) || session_id, user_id, tenant)
       end
     end
 
@@ -207,9 +207,9 @@ module Railwatch
       Context.current_tenant || (hint.is_a?(String) ? safe_string(hint, 255).presence : nil)
     end
 
-    # The browser session's id, so a browser error can be lined up with the
-    # session it crashed. Anything but a hash carrying an id shaped like one
-    # the client mints yields no id at all.
+    # The flush's session id, for an error that does not name its own (a
+    # client copied before errors carried one). Anything but a hash carrying
+    # an id shaped like one the client mints yields no id at all.
     def session_id_from(session)
       session = object(session)
       Sessions.browser_id(session["id"]) if session

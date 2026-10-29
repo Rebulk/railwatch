@@ -348,6 +348,7 @@ describe("startRailwatch error capture", () => {
         message: "kaboom",
         stack: error.stack,
         url: "/",
+        session_id: expect.stringMatching(/^[0-9a-f]{16}$/),
         tab_id: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
     ])
@@ -1256,6 +1257,26 @@ describe("startRailwatch session across tabs", () => {
     visitIn(tab)
 
     expect(sentVisits().at(-1)?.session_id).toBe(first.id)
+  })
+
+  it("sends an error with the session it was thrown in, even if another tab moves on before the flush", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    vi.advanceTimersByTime(29 * MINUTE)
+    tab.listeners.error({
+      error: new Error("boom"),
+      message: "",
+    } as unknown as Event)
+    // Still queued when the session times out and another tab of the
+    // browser starts the next one: the clock moves on without the 5 s
+    // flush getting to run.
+    vi.setSystemTime(Date.now() + 2 * MINUTE)
+    await openTab()
+    tab.listeners.pagehide(new Event("pagehide"))
+
+    const body = beacons().find((b) => b.errors.length > 0)
+    expect(body?.errors[0].session_id).toBe(first.id)
+    expect(body?.session?.id).not.toBe(first.id)
   })
 
   it("sends each error with the tab it was thrown in", async () => {

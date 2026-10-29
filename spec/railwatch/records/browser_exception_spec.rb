@@ -108,6 +108,15 @@ RSpec.describe "browser exception record", type: :request do
     expect(context).not_to have_key("tab")
   end
 
+  it "files the error under the session it was thrown in, not the one the flush beats" do
+    post_beacon(session: { id: "newsession", started_at: Time.now.to_f * 1000 },
+                errors: [ { name: "TypeError", message: "boom", stack: STACK, session_id: "oldsession" },
+                          { name: "TypeError", message: "other", stack: STACK, session_id: "not an id" } ])
+
+    sessions = railwatch_records(:exception).map { |ex| JSON.parse(ex[:context]).dig("browser", "session") }
+    expect(sessions).to eq(%w[oldsession newsession])
+  end
+
   it "keeps a 64-character session id whole" do
     post_beacon(session: { id: "a" * 64, started_at: Time.now.to_f * 1000 },
                 errors: [ { name: "TypeError", message: "boom", stack: STACK } ])

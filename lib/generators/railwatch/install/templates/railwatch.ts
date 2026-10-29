@@ -53,7 +53,9 @@ interface JsError {
   component?: string
   url: string
   visit?: string
-  // The tab it was thrown in. The flush's beat says which session.
+  // The session and tab it was thrown in, taken when it was: another tab
+  // may move the session on before this one flushes.
+  session_id?: string
   tab_id?: string
   breadcrumbs?: Crumb[]
   context?: Record<string, unknown>
@@ -531,6 +533,7 @@ function capture(
     component,
     url: location.pathname + location.search,
     visit: current?.url,
+    session_id: liveSession(),
     tab_id: tab,
     breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs : undefined,
     context,
