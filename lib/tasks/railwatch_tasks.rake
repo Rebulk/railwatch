@@ -144,21 +144,22 @@ namespace :railwatch do
     check.call(hook.exist? && hook.read.include?("railwatch"), "kamal post-deploy hook",
                hook.exist? ? hook.to_s : "not found (only needed when deploying with Kamal)")
 
-    client = Rails.root.join("app/frontend/lib/railwatch.ts")
+    frontend = Railwatch.frontend_dir(Rails.root) || "app/frontend"
+    client = Rails.root.join(frontend, "lib/railwatch.ts")
     check.call(client.exist?, "browser client",
                client.exist? ? "#{client} (call startRailwatch() from your Inertia entrypoint)" : "not found (only needed for Inertia visit timing)")
 
     # The client file existing is not the same as it running: startRailwatch()
     # has to be called from an entrypoint or no visit is ever timed.
-    entrypoints = Dir[Rails.root.join("app/frontend/entrypoints/*")].select { |f| File.file?(f) }
+    entrypoints = Dir[Rails.root.join(frontend, "entrypoints/*")].select { |f| File.file?(f) }
     started = entrypoints.select { |f| File.read(f).include?("startRailwatch") }
     check.call(started.any?, "browser client imported",
                if started.any?
                  started.map { |f| Pathname.new(f).relative_path_from(Rails.root).to_s }.join(", ")
                elsif entrypoints.any?
-                 "no entrypoint in app/frontend/entrypoints calls startRailwatch()"
+                 "no entrypoint in #{frontend}/entrypoints calls startRailwatch()"
                else
-                 "no app/frontend/entrypoints (only needed for Inertia visit timing)"
+                 "no #{frontend}/entrypoints (only needed for Inertia visit timing)"
                end)
 
     backend = Railwatch::Profiler.backend

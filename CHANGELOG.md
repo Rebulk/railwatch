@@ -23,7 +23,13 @@
   longer opens a second `user:<id>` session in release health. A closing
   tab no longer marks the session `ended`: the browser's other tabs may
   still be in it. Apps that copied the client
-  (`app/frontend/lib/railwatch.ts`) need the same change in their copy.
+  (`app/frontend/lib/railwatch.ts`) need the same change in their copy:
+  `bin/rails generate railwatch:install --force --no-doctor` updates it.
+- `railwatch:install`, `railwatch:doctor` and the `browser_client`
+  detection find the app's frontend sources in ViteRuby's `sourceCodeDir`,
+  else in `app/frontend` or `app/javascript`. They only looked in
+  `app/frontend` before, so an `app/javascript` app got no client and no
+  entrypoint wiring.
 
 ## 1.4.0 (2026-10-26)
 

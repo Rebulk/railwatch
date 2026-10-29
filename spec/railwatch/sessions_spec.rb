@@ -213,19 +213,55 @@ RSpec.describe Railwatch::Sessions, type: :request do
       expect(flushed).to include(id: "user:41")
     end
 
-    it "looks for the client where railwatch:install puts it when not told" do
-      Railwatch.config.browser_client = nil
-      root = Pathname(Dir.mktmpdir("railwatch-root", ENV.fetch("TMPDIR", Dir.tmpdir)))
-      allow(Rails).to receive(:root).and_return(root)
-      expect(Railwatch.config.browser_client?).to be(false)
+    describe "finding the client when not told" do
+      let(:root) { Pathname(Dir.mktmpdir("railwatch-root", ENV.fetch("TMPDIR", Dir.tmpdir))) }
 
-      Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
-      FileUtils.mkdir_p(root.join("app/frontend/lib"))
-      FileUtils.touch(root.join("app/frontend/lib/railwatch.ts"))
-      expect(Railwatch.config.browser_client?).to be(true)
-    ensure
-      Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
-      FileUtils.rm_rf(root) if root
+      before do
+        Railwatch.config.browser_client = nil
+        allow(Rails).to receive(:root).and_return(root)
+      end
+
+      after do
+        Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
+        FileUtils.rm_rf(root)
+      end
+
+      def detected
+        Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
+        Railwatch.config.browser_client?
+      end
+
+      def install_client(dir)
+        FileUtils.mkdir_p(root.join(dir, "lib"))
+        FileUtils.touch(root.join(dir, "lib/railwatch.ts"))
+      end
+
+      it "finds none in an app without one" do
+        FileUtils.mkdir_p(root.join("app/frontend"))
+
+        expect(detected).to be(false)
+      end
+
+      it "finds it under app/frontend, vite_ruby's default" do
+        install_client("app/frontend")
+
+        expect(detected).to be(true)
+      end
+
+      it "finds it under app/javascript, where rails_vite and jsbundling apps keep their sources" do
+        install_client("app/javascript")
+
+        expect(detected).to be(true)
+      end
+
+      it "looks in ViteRuby's configured sourceCodeDir when ViteRuby is loaded" do
+        install_client("client/src")
+        FileUtils.mkdir_p(root.join("app/frontend"))
+        stub_const("ViteRuby", Class.new { def self.config = Struct.new(:source_code_dir).new("client/src") })
+
+        expect(Railwatch.frontend_dir(root)).to eq("client/src")
+        expect(detected).to be(true)
+      end
     end
   end
 

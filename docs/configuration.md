@@ -523,7 +523,7 @@ crash-free session and crash-free user rates are computed from. The
 | `track_sessions` | `RAILWATCH_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
 | `session_flush_interval` | `RAILWATCH_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
 | `session_timeout` | `RAILWATCH_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
-| `browser_client` | `RAILWATCH_BROWSER_CLIENT` | whether `app/frontend/lib/railwatch.ts` exists | Whether the app's pages run the browser client. When they do, a browser's first page load gets its session id from the server (below). Set it when the client lives somewhere else, or `false` to never set the cookie. |
+| `browser_client` | `RAILWATCH_BROWSER_CLIENT` | whether `lib/railwatch.ts` exists in the app's frontend source directory (ViteRuby's `sourceCodeDir`, else `app/frontend` or `app/javascript`) | Whether the app's pages run the browser client. When they do, a browser's first page load gets its session id from the server (below). Set it when the client lives somewhere else, or `false` to never set the cookie. |
 
 There are two sources, and they meet on the same id:
 
@@ -744,7 +744,9 @@ credential, so it is throttled per client IP by `beacon_rate_limit`,
 default 120 a minute, `0` to disable. A client past the limit gets a 429
 with `Retry-After` and nothing from that POST is recorded. Client setup:
 call `startRailwatch()` from your Inertia entrypoint. It is generated at
-`app/frontend/lib/railwatch.ts`.
+`lib/railwatch.ts` in the app's frontend source directory, usually
+`app/frontend/lib/railwatch.ts` (see Getting started for how the directory
+is chosen and how to update the copy).
 
 `startRailwatch` takes three optional settings, none of which has a
 server-side equivalent. They are decisions about the browser the code is

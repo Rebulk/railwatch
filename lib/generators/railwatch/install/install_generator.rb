@@ -23,11 +23,12 @@ module Railwatch
       class_option :doctor, type: :boolean, default: true,
                             desc: "Run railwatch:doctor when the install finishes."
 
-      # Whichever of these exists is where `startRailwatch()` is added.
+      # Whichever of these exists, under the app's frontend source directory
+      # (Railwatch.frontend_dir), is where `startRailwatch()` is added.
       INERTIA_ENTRYPOINTS = %w[
-        app/frontend/entrypoints/inertia.tsx
-        app/frontend/entrypoints/inertia.ts
-        app/frontend/entrypoints/inertia.jsx
+        entrypoints/inertia.tsx
+        entrypoints/inertia.ts
+        entrypoints/inertia.jsx
       ].freeze
 
       IMPORT_LINE = 'import { startRailwatch } from "@/lib/railwatch"'
@@ -68,19 +69,22 @@ module Railwatch
 
       # The one browser client (Railwatch.browser_client_path). Copied rather
       # than templated: there is nothing to interpolate, and a copy means the
-      # host sees exactly what the gem tests.
+      # host sees exactly what the gem tests. Re-running the generator after
+      # a gem upgrade is how an app picks up a new client: Thor asks before
+      # overwriting a copy that differs (--force overwrites, --skip keeps it).
       def create_browser_client
-        return unless File.directory?("app/frontend")
-        copy_file Railwatch.browser_client_path.to_s, "app/frontend/lib/railwatch.ts"
+        return unless frontend_dir
+        copy_file Railwatch.browser_client_path.to_s, "#{frontend_dir}/lib/railwatch.ts"
       end
 
       # Adds the import and the call to the Inertia entrypoint, so page-visit
       # timing and Core Web Vitals report with no further editing.
       def start_browser_client
-        return unless File.directory?("app/frontend")
+        return unless frontend_dir
 
-        path = INERTIA_ENTRYPOINTS.find { |candidate| File.exist?(candidate) }
-        return say(browser_client_instructions(INERTIA_ENTRYPOINTS.first), :yellow) unless path
+        candidates = INERTIA_ENTRYPOINTS.map { |entrypoint| "#{frontend_dir}/#{entrypoint}" }
+        path = candidates.find { |candidate| File.exist?(candidate) }
+        return say(browser_client_instructions(candidates.first), :yellow) unless path
 
         contents = File.read(path)
         return say_status(:identical, path, :blue) if contents.include?(START_CALL)
@@ -277,6 +281,10 @@ module Railwatch
         end
         "Set these where this app reads its environment (.kamal/secrets, credentials, or your PaaS config). " \
           "The token value is never printed:\n#{lines.join("\n")}"
+      end
+
+      def frontend_dir
+        @frontend_dir ||= Railwatch.frontend_dir(destination_root)
       end
 
       def browser_client_instructions(path)

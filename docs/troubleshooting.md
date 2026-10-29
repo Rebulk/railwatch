@@ -26,7 +26,7 @@ the install is broken.
 | `ignored record types` | Never fails; it prints what `c.ignore` is dropping. |
 | `interactive sessions` | Never fails; it prints whether consoles are captured and the runner scratch paths. |
 | `kamal post-deploy hook` | `.kamal/hooks/post-deploy` is missing or doesn't mention Railwatch. Only matters if you deploy with Kamal. |
-| `browser client` | `app/frontend/lib/railwatch.ts` isn't there. Only matters for Inertia visit timing. |
+| `browser client` | `lib/railwatch.ts` isn't in the app's frontend source directory (ViteRuby's `sourceCodeDir`, else `app/frontend` or `app/javascript`). Only matters for Inertia visit timing. |
 | `browser client imported` | The client exists but nothing calls `startRailwatch()` — no `startRailwatch` found in `app/frontend/entrypoints`. Visits won't report. |
 | `profiler backend` | Neither `vernier` nor `stackprof` is installed, so `Railwatch::Profiler.available?` is false and the profiling settings are inert. |
 | `test matchers` | Neither `spec/rails_helper.rb` requires `railwatch/rspec` nor `test/test_helper.rb` requires `railwatch/minitest`. |

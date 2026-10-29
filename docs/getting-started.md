@@ -57,9 +57,25 @@ bin/rails generate railwatch:install \
   beacon endpoint the browser client posts to (`POST /railwatch/beacon`).
 - `.kamal/hooks/post-deploy` — only if `config/deploy.yml` already
   exists.
-- `app/frontend/lib/railwatch.ts` plus the `startRailwatch()` call in your
-  Inertia entrypoint — only if `app/frontend/` exists. If it can't find
-  an entrypoint it prints the two lines to add.
+- `lib/railwatch.ts` in the app's frontend source directory, plus the
+  `startRailwatch()` call in its Inertia entrypoint
+  (`entrypoints/inertia.tsx`, `.ts` or `.jsx`). The directory is ViteRuby's
+  `sourceCodeDir` when the app uses vite_ruby, else the first of
+  `app/frontend` and `app/javascript` that exists; with neither, nothing
+  is copied. If it can't find an entrypoint it prints the two lines to add.
+
+The browser client is copied into the app, so upgrading the gem does not
+update it. After an upgrade whose CHANGELOG mentions the client, run
+`bin/rails generate railwatch:install --force --no-doctor`, or copy the
+file by hand:
+
+```sh
+cp "$(bundle exec ruby -e 'require "railwatch"; print Railwatch.browser_client_path')" app/frontend/lib/railwatch.ts  # or app/javascript/lib/...
+```
+
+Without `--force` the generator asks before overwriting a copy that
+differs. Either way, review the diff if you have edited your copy. The
+generator's other steps leave what they already wrote alone.
 - `require "railwatch/rspec"` in `spec/rails_helper.rb`, or
   `require "railwatch/minitest"` in `test/test_helper.rb`.
 

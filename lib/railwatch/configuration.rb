@@ -247,8 +247,8 @@ module Railwatch
       @timing_headers = env_bool("RAILWATCH_TIMING_HEADERS", nil)
       # Whether the app's pages run the browser client, which is what makes
       # it safe to hand a first page load a session cookie (#browser_client?).
-      # nil: whether app/frontend/lib/railwatch.ts, where railwatch:install
-      # puts it, exists.
+      # nil: whether lib/railwatch.ts exists in the app's frontend source
+      # directory (Railwatch.frontend_dir), where railwatch:install puts it.
       @browser_client = env_bool("RAILWATCH_BROWSER_CLIENT", nil)
       @user_resolver = nil
       @beacon_user_resolver = nil
@@ -393,7 +393,8 @@ module Railwatch
     def browser_client_installed?
       return false unless defined?(Rails) && Rails.root
 
-      Rails.root.join("app/frontend/lib/railwatch.ts").exist?
+      dir = Railwatch.frontend_dir(Rails.root)
+      dir ? Rails.root.join(dir, "lib/railwatch.ts").exist? : false
     end
 
     # Matches Railwatch.reject_cache_keys entries and DEFAULT_VENDOR_CACHE_KEYS

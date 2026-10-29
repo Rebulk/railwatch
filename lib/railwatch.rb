@@ -607,11 +607,26 @@ require "railwatch/subscribers"
 
 module Railwatch
   # The Inertia browser client, relative to the gem root. The install
-  # generator copies it into a host's app/frontend/lib.
+  # generator copies it into a host's frontend source directory, at lib/.
   BROWSER_CLIENT = "lib/generators/railwatch/install/templates/railwatch.ts"
+  # Where a Rails app keeps its Vite sources when ViteRuby does not say:
+  # vite_ruby's default, then the jsbundling/rails_vite one.
+  FRONTEND_DIRS = %w[app/frontend app/javascript].freeze
 
   def self.browser_client_path
     File.expand_path("../#{BROWSER_CLIENT}", __dir__)
+  end
+
+  # The app's frontend source directory, relative to `root`: ViteRuby's
+  # configured sourceCodeDir when ViteRuby is loaded, else the first of
+  # FRONTEND_DIRS that exists, else nil. The install generator copies the
+  # client into it, and Configuration#browser_client? looks for it there.
+  def self.frontend_dir(root)
+    root = Pathname(root)
+    configured = defined?(ViteRuby) && (ViteRuby.config.source_code_dir rescue nil)
+    return configured.to_s if configured.present? && root.join(configured.to_s).directory?
+
+    FRONTEND_DIRS.find { |dir| root.join(dir).directory? }
   end
 
   # One realistic wire record per record type, exactly as the gem's own
