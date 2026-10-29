@@ -24,5 +24,6 @@ Rails.application.routes.draw do
   get "unpermitted", to: "widgets#unpermitted"
   get "rate_limited", to: "widgets#rate_limited"
   post "upload", to: "widgets#upload"
+  get "page", to: "widgets#page"
   get "ssr_widgets", to: "ssr_widgets#index"
 end

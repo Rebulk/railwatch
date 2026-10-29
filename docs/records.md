@@ -104,7 +104,7 @@ boundaries. The `action`/`render` boundaries come from
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
 | `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). A non-multipart request body is never parsed to fill this in. |
-| `session_id` | The browser client's session id, from `X-Railwatch-Session` or else the `railwatch_session` cookie, so a full page load carries it too. Never the `"user:<id>"` key the server session falls back to. At most 64 of `[A-Za-z0-9_-]`; absent when missing or not that shape. |
+| `session_id` | The browser client's session id, from `X-Railwatch-Session` or else the `railwatch_session` cookie, so a full page load carries it too. On a browser's first page load, the id the middleware set in that cookie on this response (see Release health in configuration.md). Never the `"user:<id>"` key the server session falls back to. At most 64 of `[A-Za-z0-9_-]`; absent when missing or not that shape. |
 | `tab_id` | The browser client's tab id, from `X-Railwatch-Tab`, which it sends only on Inertia visits: a full page load has none. Same validation, absent otherwise. |
 | `profiled` | `true` when a `profile` record shipped for this request; absent otherwise. |
 
@@ -812,11 +812,13 @@ the same record:
   Activity is a page load, an Inertia visit the user waits on, and a tab
   coming back into view. After 30 minutes with no activity in any tab, or
   24 hours after it started, the next activity mints a new id. When
-  `localStorage` throws the session lives in `sessionStorage` (one per
-  tab), and when that throws too, in memory (one per page). The client
-  mirrors the id into a `railwatch_session` cookie that lapses after 30
-  minutes, renewed on every activity, and sends it with every beacon
-  flush. `Railwatch::BeaconController` writes at most one `session` record
+  `localStorage` throws the session lives in `sessionStorage`, and when
+  that throws too, in memory; a new tab still joins the session through
+  the cookie. A browser's first page load gets its id from the server, in
+  that cookie, and the client adopts it when no live session is stored.
+  The client mirrors the id into a `railwatch_session` cookie that lapses
+  after 30 minutes, renewed on every activity, and sends it with every
+  beacon flush. `Railwatch::BeaconController` writes at most one `session` record
   per flush. The first, with no `duration_ms` yet, opens the session.
   Later ones beat it along. Closing a tab does not end the session, since
   other tabs may still be in it; a tab that sees the session time out

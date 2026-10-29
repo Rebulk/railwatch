@@ -113,6 +113,12 @@ class WidgetsController < ApplicationController
     render plain: "ok"
   end
 
+  # A page, as a browser's first load gets one; ?public=1 lets every cache keep it.
+  def page
+    expires_in 5.minutes, public: true if params[:public]
+    render html: "<p>page</p>".html_safe
+  end
+
   private
 
   # Rendering here (not throw(:abort)) is what halts the process_action

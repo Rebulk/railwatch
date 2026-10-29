@@ -1293,6 +1293,49 @@ describe("startRailwatch session across tabs", () => {
     expect(body?.errors[0].tab_id).toMatch(/^[0-9a-f]{16}$/)
   })
 
+  it("adopts the id the server set on the first page load, so that load is in the session", async () => {
+    document.cookie = "railwatch_session=c0ffee00c0ffee00; path=/"
+    const tab = await openTab()
+    const visit = visitIn(tab)
+
+    expect(beats()[0]).toEqual({
+      id: "c0ffee00c0ffee00",
+      started_at: Date.now(),
+    })
+    expect(localStorage.getItem("railwatch.session")).toBe("c0ffee00c0ffee00")
+    expect(visit.headers?.["X-Railwatch-Session"]).toBe("c0ffee00c0ffee00")
+  })
+
+  it("keeps the browser's live session over a cookie naming another", async () => {
+    const first = await openTab()
+    const live = beats()[0].id
+    document.cookie = "railwatch_session=c0ffee00c0ffee00; path=/"
+    visitIn(await openTab())
+    visitIn(first)
+
+    expect(sentVisits().every((v) => v.session_id === live)).toBe(true)
+    expect(document.cookie).toContain(`railwatch_session=${live}`)
+  })
+
+  it("does not adopt the session that just expired from a cookie still naming it", async () => {
+    await openTab()
+    const old = beats()[0].id
+    vi.advanceTimersByTime(31 * MINUTE)
+    // A cookie set without max-age outlives the session it names; a tab
+    // opened now has no session of its own to tell the two apart.
+    document.cookie = `railwatch_session=${old}; path=/`
+    visitIn(await openTab())
+
+    expect(sentVisits().at(-1)?.session_id).not.toBe(old)
+  })
+
+  it("ignores a cookie value that is not shaped like an id", async () => {
+    document.cookie = "railwatch_session=not%20an%20id; path=/"
+    await openTab()
+
+    expect(beats()[0].id).toMatch(/^[0-9a-f]{16}$/)
+  })
+
   it("tags only visits to the page's own origin", async () => {
     const tab = await openTab()
     const own = visitIn(tab, `${location.origin}/orders`)
@@ -1315,17 +1358,22 @@ describe("startRailwatch session across tabs", () => {
     expect(appHeaders).toEqual({ "X-App": "1" })
   })
 
-  it("keeps the session per tab when localStorage refuses writes", async () => {
+  it("keeps the session in the tab, and shares it through the cookie, when localStorage refuses writes", async () => {
     vi.stubGlobal("localStorage", refusing)
     const storage = new TabStorage()
     visitIn(await openTab(storage))
     visitIn(await openTab(storage))
     visitIn(await openTab())
+    document.cookie = "railwatch_session=; path=/; max-age=0"
+    visitIn(await openTab())
 
-    const [first, reloaded, otherTab] = sentVisits().filter((v) => v.url !== undefined)
+    const [first, reloaded, otherTab, cookieless] = sentVisits().filter(
+      (v) => v.url !== undefined,
+    )
     expect(first.session_id).toMatch(/^[0-9a-f]{16}$/)
     expect(reloaded.session_id).toBe(first.session_id)
-    expect(otherTab.session_id).not.toBe(first.session_id)
+    expect(otherTab.session_id).toBe(first.session_id)
+    expect(cookieless.session_id).not.toBe(first.session_id)
   })
 
   it("keeps the session it is in when storage starts throwing after startup", async () => {

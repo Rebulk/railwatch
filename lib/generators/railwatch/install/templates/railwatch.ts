@@ -327,11 +327,27 @@ function touch(active: boolean) {
   const live = id !== null && !expired(startedAt, seen, now)
   if (live && id === session?.id) session.seen = Math.max(session.seen, seen)
   else if (live) begin(id, startedAt, seen, false)
-  else if (active) begin(randomId(), now, now, true)
+  else if (active) begin(minted(id) ?? randomId(), now, now, true)
   if (!active || !session) return
   session.seen = now
   save(sessions, SESSION_SEEN_KEY, String(now))
   remember(session.id)
+}
+
+// The id the server put in the cookie for this browser's first page load
+// (Railwatch::Sessions.mint), so the session starts with that request rather
+// than after it. Not the session that just expired, whose id the cookie
+// can still hold.
+function minted(expiredId: string | null): string | undefined {
+  try {
+    const id = /(?:^|;\s*)railwatch_session=([A-Za-z0-9_-]{1,64})(?:;|$)/.exec(
+      document.cookie,
+    )?.[1]
+    return id && id !== expiredId && id !== session?.id ? id : undefined
+  } catch {
+    // A sandboxed frame has no cookies.
+    return undefined
+  }
 }
 
 function expired(startedAt: number, seen: number, now: number) {

@@ -15,9 +15,14 @@
   `X-Railwatch-Tab`, which the client now sends on same-origin Inertia
   visits. A browser error's `context.browser` carries the `session` and
   `tab` it was thrown in, stamped when it fired, and both are dropped
-  rather than cut when they are not shaped like an id. A closing tab no longer marks the
-  session `ended`: the browser's other tabs may still be in it. Apps that
-  copied the client
+  rather than cut when they are not shaped like an id. A browser's first
+  page load, which arrives before the client has set its cookie, is handed
+  one by the request middleware (successful HTML `GET`s only, never a
+  publicly cacheable one, and only when the browser client is installed:
+  `browser_client`), so that page is in the session's journey and no
+  longer opens a second `user:<id>` session in release health. A closing
+  tab no longer marks the session `ended`: the browser's other tabs may
+  still be in it. Apps that copied the client
   (`app/frontend/lib/railwatch.ts`) need the same change in their copy.
 
 ## 1.4.0 (2026-10-26)

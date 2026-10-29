@@ -86,7 +86,7 @@ module Railwatch
                   :capture_job_arguments, :capture_job_retry_errors, :capture_response_body_on_error, :max_attachment_bytes,
                   :track_sessions, :session_flush_interval, :session_timeout,
                   :capture_console, :interactive_runner_paths, :ignored_request_paths,
-                  :capture_llm_content, :timing_headers
+                  :capture_llm_content, :timing_headers, :browser_client
 
     attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
                 :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
@@ -245,6 +245,11 @@ module Railwatch
       # (#timing_headers?), since elsewhere they tell every visitor how the
       # app spends its time.
       @timing_headers = env_bool("RAILWATCH_TIMING_HEADERS", nil)
+      # Whether the app's pages run the browser client, which is what makes
+      # it safe to hand a first page load a session cookie (#browser_client?).
+      # nil: whether app/frontend/lib/railwatch.ts, where railwatch:install
+      # puts it, exists.
+      @browser_client = env_bool("RAILWATCH_BROWSER_CLIENT", nil)
       @user_resolver = nil
       @beacon_user_resolver = nil
       @fingerprint_resolver = nil
@@ -374,6 +379,21 @@ module Railwatch
     # Whether the request middleware adds its timing headers (#timing_headers).
     def timing_headers?
       @timing_headers.nil? ? defined?(Rails) && Rails.env.development? : @timing_headers
+    end
+
+    # Whether the browser client is installed (#browser_client). Looked for
+    # once, on the first request that asks, when Rails.root is known.
+    def browser_client?
+      return @browser_client unless @browser_client.nil?
+
+      @browser_client_installed = browser_client_installed? if @browser_client_installed.nil?
+      @browser_client_installed
+    end
+
+    def browser_client_installed?
+      return false unless defined?(Rails) && Rails.root
+
+      Rails.root.join("app/frontend/lib/railwatch.ts").exist?
     end
 
     # Matches Railwatch.reject_cache_keys entries and DEFAULT_VENDOR_CACHE_KEYS

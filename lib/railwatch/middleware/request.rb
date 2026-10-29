@@ -64,6 +64,7 @@ module Railwatch
         begin
           status, headers, body = @app.call(env)
           server_timing(env, exe, headers) if timing && headers
+          Sessions.mint(env, status, headers) if headers
         rescue Exception => e # rubocop:disable Lint/RescueException
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "railwatch.middleware")
           raise

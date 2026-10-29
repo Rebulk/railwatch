@@ -523,6 +523,7 @@ crash-free session and crash-free user rates are computed from. The
 | `track_sessions` | `RAILWATCH_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
 | `session_flush_interval` | `RAILWATCH_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
 | `session_timeout` | `RAILWATCH_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
+| `browser_client` | `RAILWATCH_BROWSER_CLIENT` | whether `app/frontend/lib/railwatch.ts` exists | Whether the app's pages run the browser client. When they do, a browser's first page load gets its session id from the server (below). Set it when the client lives somewhere else, or `false` to never set the cookie. |
 
 There are two sources, and they meet on the same id:
 
@@ -545,6 +546,21 @@ There are two sources, and they meet on the same id:
 
 When a browser session's requests carry the cookie both sources produce
 records under the same id and the platform dedupes them.
+
+A browser's first page load arrives before the client has run, so it
+carries no cookie. With `browser_client` on, the request middleware gives
+it one: a successful `GET` whose response is an HTML document, that is not
+an Inertia visit and carries no `X-Railwatch-Session` or cookie, gets
+`Set-Cookie: railwatch_session=<new id>; path=/; max-age=1800;
+samesite=lax`, and that request's record and server session use the id.
+The client adopts it when the browser has no live session of its own, so
+that first page is the first entry of the session's journey and the
+session is not counted twice (once under the id, once as `user:<id>`). It
+is never set on a response whose `Cache-Control` says `public` or
+`s-maxage`, since a shared cache would hand one visitor's cookie to every
+visitor; on such a page the session starts with the client, as before.
+Requests with neither cookie nor header, from an API client or an app
+without the browser client, still key on `user:<id>`.
 
 ## Vendor noise defaults
 

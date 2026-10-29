@@ -29,6 +29,15 @@ module Railwatch
     # What the browser client mints for a session or a tab id. Anything else
     # in a header, cookie, or beacon is not one, and is not recorded as one.
     BROWSER_ID = /\A[A-Za-z0-9_-]{1,64}\z/
+    # The id Sessions.mint handed this request, read by key_for and
+    # browser_fields as if the browser had sent it.
+    MINTED = "railwatch.session_id"
+    # The client's idle timeout, which the cookie lapses with (railwatch.ts).
+    COOKIE_MAX_AGE = 30 * 60
+    HTML = "text/html"
+    # A response a shared cache may store and serve to anyone. One visitor's
+    # cookie on it would be every visitor's.
+    SHARED_CACHE = /\b(?:public|s-maxage)\b/i
 
     @mutex = Mutex.new
     @wakeup = ConditionVariable.new
@@ -83,7 +92,7 @@ module Railwatch
     # The browser client's id when the request carries one -- so the two
     # halves of the same session share a key -- else the resolved user.
     def key_for(exe, env)
-      id = env["HTTP_X_RAILWATCH_SESSION"] || COOKIE.match(env["HTTP_COOKIE"])&.[](1)
+      id = sent_id(env) || env[MINTED]
       return id[0, KEY_LIMIT] unless id.nil? || id.empty?
 
       user = exe.user_id
@@ -94,9 +103,37 @@ module Railwatch
     # record: only what the browser client sent, never the user fallback
     # above, which names a person rather than a session.
     def browser_fields(env)
-      session = browser_id(env["HTTP_X_RAILWATCH_SESSION"] || COOKIE.match(env["HTTP_COOKIE"])&.[](1))
+      session = browser_id(sent_id(env) || env[MINTED])
       tab = browser_id(env["HTTP_X_RAILWATCH_TAB"])
       { session_id: session, tab_id: tab }.compact
+    end
+
+    def sent_id(env)
+      env["HTTP_X_RAILWATCH_SESSION"] || COOKIE.match(env["HTTP_COOKIE"])&.[](1)
+    end
+
+    # A browser's first page load carries no session cookie: the client sets
+    # it once the page runs, after this request is over. Without one the
+    # request would key on the user, a session no browser ever beats, and
+    # the journey would start a page late. So a page the client will run on
+    # -- a successful GET of an HTML document, not an Inertia visit, from an
+    # app with the client installed -- that arrives with no id gets one here,
+    # in the cookie the client reads and adopts. Never on a response a
+    # shared cache may keep (Cache-Control public or s-maxage).
+    def mint(env, status, headers)
+      return unless Railwatch.config.browser_client?
+      return unless env["REQUEST_METHOD"] == "GET" && status.to_i == 200
+      return if env["HTTP_X_INERTIA"] || sent_id(env)
+      return unless headers[Rack::CONTENT_TYPE].to_s.start_with?(HTML)
+      return if SHARED_CACHE.match?(headers[Rack::CACHE_CONTROL].to_s)
+
+      id = env[MINTED] = SecureRandom.hex(8)
+      Rack::Utils.set_cookie_header!(headers, "railwatch_session",
+        { value: id, path: "/", max_age: COOKIE_MAX_AGE, same_site: :lax })
+    rescue StandardError => e
+      # A frozen header hash: the client mints the id once the page runs.
+      env.delete(MINTED)
+      Railwatch.debug { "session cookie skipped: #{e.class}: #{e.message}" }
     end
 
     def browser_id(value)
