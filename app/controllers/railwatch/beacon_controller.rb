@@ -226,8 +226,9 @@ module Railwatch
       message = safe_string(error["message"], MAX_ERROR_MESSAGE)
       frames = Backtrace.js_frames(safe_string(error["stack"], MAX_ERROR_STACK), origin: origin)
       top = Subscribers::Exceptions.top_frame(frames)
+      file, line = Backtrace.js_fingerprint_location(top)
       parts = Subscribers::Exceptions.cap_fingerprint(
-        [ name, top[:file], top[:line], Subscribers::Exceptions.normalize_message(message) ])
+        [ name, file, line, Subscribers::Exceptions.normalize_message(message) ])
       Railwatch.record(:exception,
         group: Record.group_hash(*parts),
         timestamp: safe_float(error["at"]).positive? ? safe_float(error["at"]) / 1000.0 : nil,

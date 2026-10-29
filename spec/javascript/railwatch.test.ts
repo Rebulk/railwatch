@@ -586,6 +586,24 @@ describe("startRailwatch noise filtering", () => {
     expect(sendBeacon).not.toHaveBeenCalled()
   })
 
+  it("drops the opaque \"Script error.\" a browser reports for a cross-origin script", () => {
+    // What the browser actually dispatches: no error object, only this.
+    throwUncaught(null, "Script error.")
+    throwUncaught(new Error("Script error"))
+    vi.advanceTimersByTime(5000)
+
+    expect(sendBeacon).not.toHaveBeenCalled()
+  })
+
+  it("keeps an error that only mentions a script error", () => {
+    throwUncaught(new Error("Script error. Retrying the payment form"))
+    vi.advanceTimersByTime(5000)
+
+    expect(lastFlush().errors.map((e) => e.message)).toEqual([
+      "Script error. Retrying the payment form",
+    ])
+  })
+
   it("drops an error thrown by a browser extension", () => {
     const error = new Error("boom")
     error.stack = ownStack("chrome-extension://abcdefg/inject.js")
@@ -623,10 +641,12 @@ describe("startRailwatch noise filtering", () => {
   })
 
   it("keeps an error the browser gave no usable stack for", () => {
-    throwUncaught(null, "Script error.")
+    throwUncaught(null, "Uncaught TypeError: total is undefined")
     vi.advanceTimersByTime(5000)
 
-    expect(lastFlush().errors[0].message).toBe("Script error.")
+    expect(lastFlush().errors[0].message).toBe(
+      "Uncaught TypeError: total is undefined",
+    )
   })
 
   it("adds an app's own ignoreErrors to the defaults rather than replacing them", () => {

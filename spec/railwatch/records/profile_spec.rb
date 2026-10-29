@@ -134,4 +134,16 @@ RSpec.describe "profile record", type: :request do
 
     expect(railwatch_records(:profile).sole[:execution_id]).to eq(outer.id)
   end
+
+  # A static file's request is discarded, not finished. A profile it started
+  # would otherwise keep running into the next request, which could then
+  # never start one of its own.
+  it "stops the profile of a static file's request and ships none of it" do
+    Railwatch.config.profile_sample = 1.0
+    get "/vite/assets/dist-DedfDSJv.js"
+    get "/widgets"
+
+    expect(railwatch_records(:request).map { |r| r[:path] }).to eq([ "/widgets" ])
+    expect(railwatch_records(:profile).sole[:execution_id]).to eq(railwatch_records(:request).sole[:execution_id])
+  end
 end

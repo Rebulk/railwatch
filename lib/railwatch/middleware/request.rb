@@ -145,6 +145,8 @@ module Railwatch
       end
 
       def finish(env, exe, status, headers)
+        return Railwatch.discard_execution if static_file?(env, status)
+
         exe.finish_stages
         # Resolved here, once, for both the request record and the session
         # key below (the start_processing subscriber ran before the app's
@@ -163,6 +165,35 @@ module Railwatch
         Railwatch.debug { "request finish failed: #{e.class}: #{e.message}" }
         Railwatch.finish_execution
         nil
+      end
+
+      # A file ActionDispatch::Static served from public/: a bundle, a
+      # stylesheet, a favicon. This middleware sits in front of Static, so
+      # without this every one of them is a "GET unmatched" request record
+      # -- about 23 per page load, a tenth of rebulk-system's requests --
+      # and a row in the session's journey. Only a success or a 304 is
+      # skipped: an unmatched 404 is a probe the security tools read.
+      #
+      # Static's 304 is a bare [304, {}, []], so the response cannot say a
+      # file answered it. The path can: it names a file under public/,
+      # looked up the way Static looks (unescaped, cleaned, then with
+      # ".html" or "/index.html", or only its precompressed ".br" or ".gz",
+      # which Static serves in its place). Every check before that one is an
+      # env or integer read, so a routed request never touches the
+      # filesystem.
+      def static_file?(env, status)
+        return false if env["railwatch.route"] || env["action_dispatch.route"]
+        return false unless status && (status.to_i.between?(200, 299) || status.to_i == 304)
+        return false unless env["REQUEST_METHOD"] == "GET" || env["REQUEST_METHOD"] == "HEAD"
+
+        path = Rack::Utils.unescape_path(env["PATH_INFO"].to_s.chomp("/"))
+        return false unless Rack::Utils.valid_path?(path)
+
+        file = File.join(Rails.public_path.to_s, Rack::Utils.clean_path_info(path))
+        [ file, "#{file}.html", File.join(file, "index.html"), "#{file}.br", "#{file}.gz" ]
+          .any? { |candidate| File.file?(candidate) }
+      rescue StandardError
+        false
       end
 
       def parent_fields(env, exe, status, headers)

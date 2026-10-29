@@ -110,6 +110,41 @@ module Railwatch
 
     MAX_JS_FRAMES = 50
 
+    # A bundler's content hash in a built file's name: Vite and Rollup's
+    # "dist-DedfDSJv.js" (base64url, so it can hold a "-" of its own:
+    # "dist-CMHaG-3i.js"), esbuild's "app-5XDGVJ2T.js", webpack's
+    # "main.3f2a1b9c.js". The name is greedy, so in "yard-canvas-BwMeIV6a.js"
+    # only the last segment that can be a hash is one.
+    JS_CONTENT_HASH = /\A(?<name>.+)[-.](?<hash>[A-Za-z0-9_-]{8,64})(?<ext>\.[mc]?js)\z/
+
+    # Where a browser error is filed for grouping. A content hash changes
+    # every deploy the bundle changes, so it is taken out of the file name,
+    # and so is the line: in a minified bundle the line is wherever the
+    # minifier wrapped (Vite writes the whole app on a line or two) and
+    # shifts with any change before it, which is why Sentry leaves the line
+    # out of a minified frame it has no source map for. The stored frames
+    # keep the real file and line; this is for the fingerprint alone.
+    def js_fingerprint_location(frame)
+      file = frame[:file]
+      match = file && JS_CONTENT_HASH.match(file)
+      return [ file, frame[:line] ] unless match && content_hash?(match[:hash])
+
+      [ "#{match[:name]}#{match[:ext]}", nil ]
+    end
+
+    # A word is not a hash: one has a digit, or mixes cases in a way no
+    # camelCase or PascalCase name does ("DedfDSJv"). So the "timeline" in
+    # "order-timeline.js" and the "PaymentForm" in "checkout-PaymentForm.js"
+    # stay part of the name. A hash that happens to read like words (about
+    # 1 in 100 of eight letters with no digit) is kept too, which costs that
+    # deploy a split issue, never a wrong merge.
+    CAMEL_WORDS = /\A[A-Za-z][a-z]+(?:[A-Z][a-z]{2,})+\z/
+
+    def content_hash?(segment)
+      segment.match?(/\d/) ||
+        (segment.match?(/[a-z]/) && segment.match?(/[A-Z]/) && !segment.match?(CAMEL_WORDS))
+    end
+
     # A browser stack, exactly as the engine wrote it, in the same frame
     # shape as a Ruby backtrace. `origin` is the app's own scheme and host: a
     # script served from it is the app's own, so its file is stored relative
