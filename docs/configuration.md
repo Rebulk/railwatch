@@ -523,15 +523,21 @@ crash-free session and crash-free user rates are computed from. The
 | `track_sessions` | `RAILWATCH_TRACK_SESSIONS` | `true` | Master switch for both session sources. Off means the request middleware does nothing extra and no flusher thread is started. |
 | `session_flush_interval` | `RAILWATCH_SESSION_FLUSH_INTERVAL` | `60.0` | Seconds between server-session flushes. One background thread per web process, re-armed after `fork` exactly like the health sampler, and flushed once more on shutdown. |
 | `session_timeout` | `RAILWATCH_SESSION_TIMEOUT` | `1800.0` | Seconds a server session may sit idle before it ships with `ended` and is forgotten. |
+| `browser_client` | `RAILWATCH_BROWSER_CLIENT` | whether `lib/railwatch.ts` exists in the app's frontend source directory (ViteRuby's `sourceCodeDir`, else `app/frontend` or `app/javascript`) | Whether the app's pages run the browser client. When they do, a browser's first page load gets its session id from the server (below). Set it when the client lives somewhere else, or `false` to never set the cookie. |
 
 There are two sources, and they meet on the same id:
 
 - **The browser client** is `app/frontend/lib/railwatch.ts`, installed by
-  `railwatch:install`. It mints one id per tab in `sessionStorage` and
-  mirrors it into a `railwatch_session` cookie. It rides along on the
-  beacon flushes the client already sends for visits, so this costs no
-  extra requests. This is the primary source for a web app, and it is
-  what makes session duration mean "how long the tab was open".
+  `railwatch:install`. It keeps one id per browser in `localStorage`,
+  shared by every tab and replaced after 30 minutes with no activity in
+  any tab or 24 hours after it started, and mirrors it into a
+  `railwatch_session` cookie. It also sends the id, with the tab's own
+  id, as `X-Railwatch-Session` and `X-Railwatch-Tab` on every Inertia
+  visit to the page's own origin. It rides along on the beacon flushes
+  the client already sends for visits, so this costs no extra requests.
+  This is the primary source for a web app, and it is what makes session
+  duration mean "how long the user was active". The client's 30 minutes
+  is fixed; it matches this setting's default.
 - **The request middleware** aggregates, in memory, every request that
   either resolves a user or carries that cookie or an
   `X-Railwatch-Session` header. It is the only source for an API-only
@@ -540,6 +546,25 @@ There are two sources, and they meet on the same id:
 
 When a browser session's requests carry the cookie both sources produce
 records under the same id and the platform dedupes them.
+
+A browser's first page load arrives before the client has run, so it
+carries no cookie. With `browser_client` on, the request middleware gives
+it one: a successful `GET` whose response is an HTML document, that is not
+an Inertia visit and carries no `X-Railwatch-Session` or cookie, gets
+`Set-Cookie: railwatch_session=<new id>; path=/; max-age=1800;
+samesite=lax` (plus `secure` over HTTPS, including behind a proxy that
+sets `X-Forwarded-Proto`). That request's record carries the id, and so does its
+server session when it resolved a user (an anonymous one opened no server
+session before and still opens none; its browser opens the session with
+the client's first beat).
+The client adopts it when the browser has no live session of its own, so
+that first page is the first entry of the session's journey and the
+session is not counted twice (once under the id, once as `user:<id>`). It
+is never set on a response whose `Cache-Control` says `public` or
+`s-maxage`, since a shared cache would hand one visitor's cookie to every
+visitor; on such a page the session starts with the client, as before.
+Requests with neither cookie nor header, from an API client or an app
+without the browser client, still key on `user:<id>`.
 
 ## Vendor noise defaults
 
@@ -719,7 +744,9 @@ credential, so it is throttled per client IP by `beacon_rate_limit`,
 default 120 a minute, `0` to disable. A client past the limit gets a 429
 with `Retry-After` and nothing from that POST is recorded. Client setup:
 call `startRailwatch()` from your Inertia entrypoint. It is generated at
-`app/frontend/lib/railwatch.ts`.
+`lib/railwatch.ts` in the app's frontend source directory, usually
+`app/frontend/lib/railwatch.ts` (see Getting started for how the directory
+is chosen and how to update the copy).
 
 `startRailwatch` takes three optional settings, none of which has a
 server-side equivalent. They are decisions about the browser the code is

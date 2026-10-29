@@ -95,6 +95,26 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     expect(File).to exist(File.join(destination_root, "app/frontend/lib/railwatch.ts"))
   end
 
+  it "copies the client into app/javascript, and wires its entrypoint, when that is where the app keeps its sources" do
+    FileUtils.mkdir_p(File.join(destination_root, "app/javascript/entrypoints"))
+    File.write(File.join(destination_root, "app/javascript/entrypoints/inertia.tsx"), %(import { createInertiaApp } from "@inertiajs/react"\n))
+
+    Dir.chdir(destination_root) { run_generator }
+
+    expect(File).to exist(File.join(destination_root, "app/javascript/lib/railwatch.ts"))
+    expect(File).not_to exist(File.join(destination_root, "app/frontend"))
+    expect(File.read(File.join(destination_root, "app/javascript/entrypoints/inertia.tsx"))).to include("startRailwatch()")
+  end
+
+  it "updates an older copy of the client with --force, which is how an app takes a new one" do
+    FileUtils.mkdir_p(File.join(destination_root, "app/javascript/lib"))
+    File.write(File.join(destination_root, "app/javascript/lib/railwatch.ts"), "// an older client\n")
+
+    Dir.chdir(destination_root) { run_generator %w[--force --no-doctor] }
+
+    expect(File.read(File.join(destination_root, "app/javascript/lib/railwatch.ts"))).to eq(File.read(Railwatch.browser_client_path))
+  end
+
   describe "wiring the Inertia entrypoint" do
     def write_entrypoint(name, contents)
       FileUtils.mkdir_p(File.join(destination_root, "app/frontend/entrypoints"))

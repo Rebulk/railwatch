@@ -64,6 +64,7 @@ module Railwatch
         begin
           status, headers, body = @app.call(env)
           server_timing(env, exe, headers) if timing && headers
+          Sessions.mint(env, status, headers) if headers
         rescue Exception => e # rubocop:disable Lint/RescueException
           Subscribers::Exceptions.capture(e, handled: false, severity: :error, source: "railwatch.middleware")
           raise
@@ -202,7 +203,8 @@ module Railwatch
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
-          files: env["railwatch.files"] || uploaded_files_fallback(req, env)
+          files: env["railwatch.files"] || uploaded_files_fallback(req, env),
+          **Sessions.browser_fields(env)
         }
       end
 

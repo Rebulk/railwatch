@@ -6,6 +6,31 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The browser session is one per browser, shared by every tab, as in GA4
+  and Amplitude: kept in `localStorage`, it ends after 30 minutes with no
+  activity in any tab or 24 hours after it started. Each tab also has its
+  own id. Every visit record carries `session_id` and `tab_id`, and every
+  request record carries the `session_id` from the `X-Railwatch-Session`
+  header or `railwatch_session` cookie and the `tab_id` from
+  `X-Railwatch-Tab`, which the client now sends on same-origin Inertia
+  visits. A browser error's `context.browser` carries the `session` and
+  `tab` it was thrown in, stamped when it fired, and both are dropped
+  rather than cut when they are not shaped like an id. A browser's first
+  page load, which arrives before the client has set its cookie, is handed
+  one by the request middleware (successful HTML `GET`s only, never a
+  publicly cacheable one, and only when the browser client is installed:
+  `browser_client`), so that page is in the session's journey and no
+  longer opens a second `user:<id>` session in release health. A closing
+  tab no longer marks the session `ended`: the browser's other tabs may
+  still be in it. Apps that copied the client
+  (`app/frontend/lib/railwatch.ts`) need the same change in their copy:
+  `bin/rails generate railwatch:install --force --no-doctor` updates it.
+- `railwatch:install`, `railwatch:doctor` and the `browser_client`
+  detection find the app's frontend sources in ViteRuby's `sourceCodeDir`,
+  else in `app/frontend` or `app/javascript`. They only looked in
+  `app/frontend` before, so an `app/javascript` app got no client and no
+  entrypoint wiring.
+
 ## 1.4.0 (2026-10-26)
 
 - In development each recorded request's response carries

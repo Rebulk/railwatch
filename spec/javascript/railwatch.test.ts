@@ -348,6 +348,8 @@ describe("startRailwatch error capture", () => {
         message: "kaboom",
         stack: error.stack,
         url: "/",
+        session_id: expect.stringMatching(/^[0-9a-f]{16}$/),
+        tab_id: expect.stringMatching(/^[0-9a-f]{16}$/),
       },
     ])
   })
@@ -1012,5 +1014,406 @@ describe("railwatchRootOptions", () => {
     vi.advanceTimersByTime(5000)
 
     expect(sendBeacon).not.toHaveBeenCalled()
+  })
+})
+
+// Last in the file: these clear the storage every earlier test shares (they
+// rely on the session one of them opened), and open several module
+// instances, one per simulated tab. Every tab of a browser shares
+// localStorage and the cookie jar; each has its own sessionStorage.
+describe("startRailwatch session across tabs", () => {
+  interface Tab {
+    handlers: Record<string, Handler[]>
+    documentListeners: Record<string, EventListener>
+    listeners: Record<string, EventListener>
+  }
+  interface Beat {
+    id: string
+    started_at: number
+    duration_ms?: number
+    ended?: boolean
+  }
+
+  const MINUTE = 60 * 1000
+
+  // A tab's own sessionStorage. Passing one tab's to openTab again is that
+  // tab reloading.
+  class TabStorage {
+    values = new Map<string, string>()
+    getItem(key: string) {
+      return this.values.get(key) ?? null
+    }
+    setItem(key: string, value: string) {
+      this.values.set(key, String(value))
+    }
+    removeItem(key: string) {
+      this.values.delete(key)
+    }
+  }
+
+  // Storage that is there but refuses every write, as when storage is
+  // disabled or the quota is gone.
+  const refusing = {
+    getItem: () => null,
+    setItem: () => {
+      throw new DOMException("denied", "SecurityError")
+    },
+    removeItem: () => undefined,
+  }
+
+  // The suite's own beforeEach has already started a client; its timer
+  // would flush, and join sessions, alongside the tabs here. Only the tabs
+  // each test opens run.
+  beforeEach(() => {
+    vi.clearAllTimers()
+    sendBeacon.mockClear()
+    localStorage.clear()
+    document.cookie = "railwatch_session=; path=/; max-age=0"
+  })
+
+  async function openTab(storage: unknown = new TabStorage()): Promise<Tab> {
+    vi.resetModules()
+    vi.stubGlobal("sessionStorage", storage)
+    handlers = {}
+    listeners = {}
+    documentListeners = {}
+    const module = await import("@/lib/railwatch")
+    module.startRailwatch()
+    return { handlers, documentListeners, listeners }
+  }
+
+  function fireIn(tab: Tab, event: string, detail: EventDetail) {
+    for (const handler of tab.handlers[event] ?? [])
+      handler({ detail, defaultPrevented: false } as never)
+  }
+
+  // A visit in one tab, returned as Inertia would send it once `before` ran.
+  function visitIn(tab: Tab, url = "/dashboard", showProgress = true) {
+    const visit: EventDetail["visit"] & { headers?: Record<string, string> } =
+      { url, method: "get", showProgress }
+    fireIn(tab, "before", { visit })
+    fireIn(tab, "start", { visit })
+    fireIn(tab, "success", { page: { component: "Dashboard", props: {} } })
+    fireIn(tab, "finish", { visit })
+    return visit
+  }
+
+  function beacons() {
+    return sendBeacon.mock.calls.map(
+      ([, blob]) => blobBody(blob) as Body & { session?: Beat },
+    )
+  }
+
+  function sentVisits() {
+    vi.advanceTimersByTime(5000)
+    return beacons().flatMap((body) => body.visits)
+  }
+
+  function beats() {
+    return beacons().flatMap((body) => (body.session ? [body.session] : []))
+  }
+
+  it("puts two tabs in one session, each under its own tab id, and opens it once", async () => {
+    const first = await openTab()
+    const second = await openTab()
+    const a = visitIn(first, "/a")
+    const b = visitIn(second, "/b")
+
+    const [visitA, visitB] = sentVisits().filter((v) => v.url !== undefined)
+    expect(visitA.session_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(visitB.session_id).toBe(visitA.session_id)
+    expect(visitA.tab_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(visitB.tab_id).not.toBe(visitA.tab_id)
+    expect(beats().filter((s) => s.duration_ms === undefined)).toHaveLength(1)
+
+    expect(a.headers?.["X-Railwatch-Session"]).toBe(visitA.session_id)
+    expect(b.headers?.["X-Railwatch-Session"]).toBe(visitA.session_id)
+    expect(a.headers?.["X-Railwatch-Tab"]).toBe(visitA.tab_id)
+    expect(b.headers?.["X-Railwatch-Tab"]).toBe(visitB.tab_id)
+    expect(document.cookie).toContain(`railwatch_session=${visitA.session_id}`)
+  })
+
+  it("keeps the tab id and the session across a reload of the same tab", async () => {
+    const storage = new TabStorage()
+    visitIn(await openTab(storage))
+    visitIn(await openTab(storage))
+
+    const [before, after] = sentVisits().filter((v) => v.url !== undefined)
+    expect(after.tab_id).toBe(before.tab_id)
+    expect(after.session_id).toBe(before.session_id)
+  })
+
+  it("keeps the session alive while any tab is active, and only then", async () => {
+    const first = await openTab()
+    const second = await openTab()
+    vi.advanceTimersByTime(20 * MINUTE)
+    visitIn(second)
+    // 40 idle minutes in the first tab, 20 in the browser.
+    vi.advanceTimersByTime(20 * MINUTE)
+    visitIn(first)
+
+    const [inSecond, inFirst] = sentVisits().filter((v) => v.url !== undefined)
+    expect(inFirst.session_id).toBe(inSecond.session_id)
+  })
+
+  it("starts a new session after 30 minutes with no activity in any tab, ending the old one at its last activity", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    vi.advanceTimersByTime(31 * MINUTE)
+    const minted = Date.now()
+    const visit = visitIn(tab)
+
+    const next = sentVisits().filter((v) => v.url !== undefined)[0]
+    expect(next.session_id).not.toBe(first.id)
+    expect(visit.headers?.["X-Railwatch-Session"]).toBe(next.session_id)
+    expect(beats()).toContainEqual({
+      id: first.id,
+      started_at: first.started_at,
+      duration_ms: 0,
+      ended: true,
+    })
+    expect(beats()).toContainEqual({
+      id: next.session_id,
+      started_at: minted,
+    })
+    expect(document.cookie).toContain(`railwatch_session=${next.session_id}`)
+  })
+
+  it("does not let a background poll keep an idle session alive", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    vi.advanceTimersByTime(29 * MINUTE)
+    visitIn(tab, "/poll", false)
+    vi.advanceTimersByTime(2 * MINUTE)
+    const poll = visitIn(tab, "/poll", false)
+    visitIn(tab, "/dashboard")
+
+    const visits = sentVisits().filter((v) => v.url !== undefined)
+    expect(visits[0].session_id).toBe(first.id)
+    // The poll after the timeout belongs to no session, and is not tagged.
+    expect(visits[1]).not.toHaveProperty("session_id")
+    expect(poll.headers).toBeUndefined()
+    expect(visits[2].session_id).not.toBe(first.id)
+  })
+
+  it("starts a new session 24 hours in, however active the user stays", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    for (let step = 1; step < 72; step++) {
+      vi.advanceTimersByTime(20 * MINUTE)
+      visitIn(tab)
+    }
+    // 23 h 40 min in: still the first session.
+    expect(sentVisits().at(-1)?.session_id).toBe(first.id)
+
+    vi.advanceTimersByTime(20 * MINUTE)
+    visitIn(tab)
+    expect(sentVisits().at(-1)?.session_id).not.toBe(first.id)
+    expect(beats()).toContainEqual(
+      expect.objectContaining({ id: first.id, ended: true }),
+    )
+  })
+
+  it("does not end the session when one of two tabs closes", async () => {
+    const closing = await openTab()
+    const staying = await openTab()
+    closing.listeners.pagehide(new Event("pagehide"))
+    vi.advanceTimersByTime(5 * MINUTE)
+    visitIn(staying)
+
+    expect(beats().some((s) => s.ended)).toBe(false)
+    const [visit] = sentVisits().filter((v) => v.url !== undefined)
+    expect(visit.session_id).toBe(beats()[0].id)
+  })
+
+  it("rejoins the browser's newer session when a tab comes back into view", async () => {
+    const away = await openTab()
+    vi.advanceTimersByTime(31 * MINUTE)
+    const back = await openTab()
+    const current = beats().filter((s) => s.duration_ms === undefined)[1]
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    })
+    away.documentListeners.visibilitychange(new Event("visibilitychange"))
+    visitIn(away)
+    visitIn(back)
+
+    const [inAway, inBack] = sentVisits().filter((v) => v.url !== undefined)
+    expect(inAway.session_id).toBe(current.id)
+    expect(inBack.session_id).toBe(current.id)
+  })
+
+  it("counts the tab coming back into view as activity", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    })
+    vi.advanceTimersByTime(25 * MINUTE)
+    tab.documentListeners.visibilitychange(new Event("visibilitychange"))
+    vi.advanceTimersByTime(25 * MINUTE)
+    visitIn(tab)
+
+    expect(sentVisits().at(-1)?.session_id).toBe(first.id)
+  })
+
+  it("sends an error with the session it was thrown in, even if another tab moves on before the flush", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    vi.advanceTimersByTime(29 * MINUTE)
+    tab.listeners.error({
+      error: new Error("boom"),
+      message: "",
+    } as unknown as Event)
+    // Still queued when the session times out and another tab of the
+    // browser starts the next one: the clock moves on without the 5 s
+    // flush getting to run.
+    vi.setSystemTime(Date.now() + 2 * MINUTE)
+    await openTab()
+    tab.listeners.pagehide(new Event("pagehide"))
+
+    const body = beacons().find((b) => b.errors.length > 0)
+    expect(body?.errors[0].session_id).toBe(first.id)
+    expect(body?.session?.id).not.toBe(first.id)
+  })
+
+  it("sends each error with the tab it was thrown in", async () => {
+    const tab = await openTab()
+    visitIn(tab)
+    tab.listeners.error({
+      error: new Error("boom"),
+      message: "",
+    } as unknown as Event)
+    vi.advanceTimersByTime(5000)
+
+    const body = beacons().find((b) => b.errors.length > 0)
+    expect(body?.errors[0].tab_id).toBe(body?.visits[0].tab_id)
+    expect(body?.errors[0].tab_id).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it("adopts the id the server set on the first page load, so that load is in the session", async () => {
+    document.cookie = "railwatch_session=c0ffee00c0ffee00; path=/"
+    const tab = await openTab()
+    const visit = visitIn(tab)
+
+    expect(beats()[0]).toEqual({
+      id: "c0ffee00c0ffee00",
+      started_at: Date.now(),
+    })
+    expect(localStorage.getItem("railwatch.session")).toBe("c0ffee00c0ffee00")
+    expect(visit.headers?.["X-Railwatch-Session"]).toBe("c0ffee00c0ffee00")
+  })
+
+  it("keeps the browser's live session over a cookie naming another", async () => {
+    const first = await openTab()
+    const live = beats()[0].id
+    document.cookie = "railwatch_session=c0ffee00c0ffee00; path=/"
+    visitIn(await openTab())
+    visitIn(first)
+
+    expect(sentVisits().every((v) => v.session_id === live)).toBe(true)
+    expect(document.cookie).toContain(`railwatch_session=${live}`)
+  })
+
+  it("does not adopt the session that just expired from a cookie still naming it", async () => {
+    await openTab()
+    const old = beats()[0].id
+    vi.advanceTimersByTime(31 * MINUTE)
+    // A cookie set without max-age outlives the session it names; a tab
+    // opened now has no session of its own to tell the two apart.
+    document.cookie = `railwatch_session=${old}; path=/`
+    visitIn(await openTab())
+
+    expect(sentVisits().at(-1)?.session_id).not.toBe(old)
+  })
+
+  it("ignores a cookie value that is not shaped like an id", async () => {
+    document.cookie = "railwatch_session=not%20an%20id; path=/"
+    await openTab()
+
+    expect(beats()[0].id).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it("tags only visits to the page's own origin", async () => {
+    const tab = await openTab()
+    const own = visitIn(tab, `${location.origin}/orders`)
+    const relative = visitIn(tab, "/orders?page=2")
+    const other = visitIn(tab, "https://api.example.test/orders")
+
+    expect(own.headers).toHaveProperty("X-Railwatch-Session")
+    expect(relative.headers).toHaveProperty("X-Railwatch-Tab")
+    expect(other.headers).toBeUndefined()
+  })
+
+  it("adds its headers next to the app's own without changing the app's object", async () => {
+    const tab = await openTab()
+    const appHeaders = { "X-App": "1" }
+    const visit = { url: "/orders", method: "get", showProgress: true, headers: appHeaders }
+    fireIn(tab, "before", { visit })
+
+    expect(visit.headers).toMatchObject({ "X-App": "1" })
+    expect(visit.headers).toHaveProperty("X-Railwatch-Session")
+    expect(appHeaders).toEqual({ "X-App": "1" })
+  })
+
+  it("keeps the session in the tab, and shares it through the cookie, when localStorage refuses writes", async () => {
+    vi.stubGlobal("localStorage", refusing)
+    const storage = new TabStorage()
+    visitIn(await openTab(storage))
+    visitIn(await openTab(storage))
+    visitIn(await openTab())
+    document.cookie = "railwatch_session=; path=/; max-age=0"
+    visitIn(await openTab())
+
+    const [first, reloaded, otherTab, cookieless] = sentVisits().filter(
+      (v) => v.url !== undefined,
+    )
+    expect(first.session_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(reloaded.session_id).toBe(first.session_id)
+    expect(otherTab.session_id).toBe(first.session_id)
+    expect(cookieless.session_id).not.toBe(first.session_id)
+  })
+
+  it("keeps the session it is in when storage starts throwing after startup", async () => {
+    const tab = await openTab()
+    const first = beats()[0]
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError")
+      })
+    visitIn(tab)
+    visitIn(tab)
+    getItem.mockRestore()
+
+    const visits = sentVisits().filter((v) => v.url !== undefined)
+    expect(visits.map((v) => v.session_id)).toEqual([first.id, first.id])
+    expect(beats().some((s) => s.ended)).toBe(false)
+  })
+
+  it("starts when storage reads throw, with a session and a tab of its own", async () => {
+    const getItem = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError")
+      })
+    const tab = await openTab(window.sessionStorage)
+    visitIn(tab)
+    getItem.mockRestore()
+
+    const [visit] = sentVisits().filter((v) => v.url !== undefined)
+    expect(visit.session_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(visit.tab_id).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it("still reports a session and a tab when no storage works at all", async () => {
+    vi.stubGlobal("localStorage", refusing)
+    visitIn(await openTab(refusing))
+
+    const [visit] = sentVisits().filter((v) => v.url !== undefined)
+    expect(visit.session_id).toMatch(/^[0-9a-f]{16}$/)
+    expect(visit.tab_id).toMatch(/^[0-9a-f]{16}$/)
   })
 })

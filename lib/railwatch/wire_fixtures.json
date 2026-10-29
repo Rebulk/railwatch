@@ -57,12 +57,16 @@
     "headers": {
       "Host": "www.example.com",
       "Accept": "text/xml,application/xml,application/xhtml+xml,text/html;q=0.9,text/plain;q=0.8,image/png,*/*;q=0.5",
+      "X-Railwatch-Session": "3f2a9c1e7b4d6a08",
+      "X-Railwatch-Tab": "9e8d7c6b5a4f3e21",
       "Cookie": "[FILTERED]"
     },
     "payload": null,
     "queue_time": null,
     "user_agent": "",
-    "files": []
+    "files": [],
+    "session_id": "3f2a9c1e7b4d6a08",
+    "tab_id": "9e8d7c6b5a4f3e21"
   },
   "job_attempt": {
     "v": 1,
@@ -609,6 +613,8 @@
     "redirect_count": null,
     "connect_ms": null,
     "server_ms": null,
+    "session_id": "3f2a9c1e7b4d6a08",
+    "tab_id": "9e8d7c6b5a4f3e21",
     "user": null,
     "tenant": null,
     "user_agent": ""

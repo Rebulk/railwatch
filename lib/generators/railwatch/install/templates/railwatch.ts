@@ -29,10 +29,13 @@ interface Visit {
   redirect_count?: number
   connect_ms?: number
   server_ms?: number
+  // The browser session and the tab the visit happened in, for the journey.
+  session_id?: string
+  tab_id?: string
 }
 
-// The tab's session, for release health. sessionStorage scopes it to the
-// tab and it dies with the tab, which is what a browser session is.
+// The browser's session, for release health and the session journey, on the
+// wire. `ended` only when this tab has seen it time out (see `begin`).
 interface Session {
   id: string
   started_at: number
@@ -50,6 +53,10 @@ interface JsError {
   component?: string
   url: string
   visit?: string
+  // The session and tab it was thrown in, taken when it was: another tab
+  // may move the session on before this one flushes.
+  session_id?: string
+  tab_id?: string
   breadcrumbs?: Crumb[]
   context?: Record<string, unknown>
 }
@@ -90,14 +97,26 @@ const DEFAULT_DENY_URLS = [
 ]
 
 const SESSION_ID_KEY = "railwatch.session"
+const SESSION_SEEN_KEY = "railwatch.session.seen"
 const SESSION_STARTED_KEY = "railwatch.session.at"
+const TAB_KEY = "railwatch.tab"
+// The GA4/Amplitude rules: a session is over after 30 minutes with no
+// activity in any tab (config.session_timeout's default, which the server
+// half times out on too), and after 24 hours whatever happens.
+const SESSION_TIMEOUT_MS = 30 * 60 * 1000
+const SESSION_CAP_MS = 24 * 60 * 60 * 1000
+// Railwatch::Sessions reads these, ahead of the cookie.
+const SESSION_HEADER = "X-Railwatch-Session"
+const TAB_HEADER = "X-Railwatch-Tab"
 
 const queue: Visit[] = []
 const errors: JsError[] = []
 const crumbs: Crumb[] = []
 let current: Visit | null = null
 let initial: Visit | null = null
-let session: Session | null = null
+// `seen` is the session's last activity in any tab, as far as this one knows.
+let session: { id: string; started_at: number; seen: number } | null = null
+let tab = ""
 // The Inertia page component the user is on, so an error that fires between
 // visits still says which screen it broke.
 let component: string | undefined
@@ -170,12 +189,13 @@ function post(payload: {
   }).catch(() => undefined)
 }
 
-function flush(ended = false) {
-  if (queue.length === 0 && errors.length === 0 && !ended) return
+function flush(force = false) {
+  if (queue.length === 0 && errors.length === 0 && !force) return
+  touch(false)
   post({
     visits: queue.splice(0, queue.length),
     errors: errors.splice(0, errors.length),
-    session: beat(ended),
+    session: beat(),
     tenant: tenant(),
   })
 }
@@ -199,40 +219,220 @@ function randomId() {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
 }
 
-// Mints the tab's session on its first load, or picks up the one an earlier
-// page in this tab minted, and mirrors the id into a cookie so every request
-// the tab makes carries it -- that is what lets the server side of the
-// session (Railwatch::Sessions) join the browser side under one id.
-function startSession() {
+interface Store {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+// Where the session lives: localStorage, so every tab of the browser shares
+// one; sessionStorage when localStorage throws (storage disabled, a
+// sandboxed frame), which narrows the session to the tab; memory when both
+// throw, which narrows it to the page. The tab id lives in sessionStorage,
+// which survives a reload of the tab and nothing else, or in memory.
+let sessions: Store = memoryStore()
+let tabs: Store = memoryStore()
+
+function storage(kind: "localStorage" | "sessionStorage"): Store | undefined {
   try {
-    const existing = sessionStorage.getItem(SESSION_ID_KEY)
-    const id = existing ?? randomId()
-    const startedAt =
-      Number(sessionStorage.getItem(SESSION_STARTED_KEY)) || Date.now()
-    if (!existing) {
-      sessionStorage.setItem(SESSION_ID_KEY, id)
-      sessionStorage.setItem(SESSION_STARTED_KEY, String(startedAt))
-    }
-    // Railwatch::Sessions::COOKIE reads this name to stitch server requests to the browser session.
-    document.cookie = `railwatch_session=${id}; path=/; SameSite=Lax`
-    session = { id, started_at: startedAt }
-    // No duration on the first beat: that is what opens the session.
-    if (!existing)
-      post({
-        visits: [],
-        errors: [],
-        session: { ...session },
-        tenant: tenant(),
-      })
+    const store = window[kind]
+    store.setItem("railwatch.probe", "1")
+    store.removeItem("railwatch.probe")
+    return store
   } catch {
-    // sessionStorage is unavailable (private mode, storage disabled).
-    // Everything else still reports; this tab just has no session.
+    // Disabled, or denied to this frame. The caller tries the next one.
+    return undefined
   }
 }
 
-function beat(ended: boolean): Session | undefined {
+function memoryStore(): Store {
+  const values = new Map<string, string>()
+  return {
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => void values.set(key, value),
+  }
+}
+
+// A full store throws on write. The session then lasts as long as this
+// page's memory of it, which is all a write could have bought.
+function save(store: Store, key: string, value: string) {
+  try {
+    store.setItem(key, value)
+  } catch {
+    // Quota exceeded.
+  }
+}
+
+// Mirrors the id into a cookie so every request the browser makes carries
+// it, full page loads included -- that is what lets the server side of the
+// session (Railwatch::Sessions) join the browser side under one id. It
+// lapses with the session's idle timeout, so the first page load after one
+// does not carry the dead id; every activity in any tab renews it.
+function remember(id: string) {
+  try {
+    // Railwatch::Sessions::COOKIE reads this name to stitch server requests to the browser session.
+    document.cookie = `railwatch_session=${id}; path=/; max-age=${SESSION_TIMEOUT_MS / 1000}; SameSite=Lax`
+  } catch {
+    // A sandboxed frame has no cookies. Visits still carry the headers.
+  }
+}
+
+// A store that passed the probe can still throw later: the user turns
+// storage off, or the browser revokes it. From then on the page keeps its
+// own copy, seeded with the session it is in, so losing storage neither
+// stops the client nor ends the session.
+function read(key: string): string | null {
+  try {
+    return sessions.getItem(key)
+  } catch {
+    sessions = memoryStore()
+    if (session) {
+      sessions.setItem(SESSION_ID_KEY, session.id)
+      sessions.setItem(SESSION_STARTED_KEY, String(session.started_at))
+      sessions.setItem(SESSION_SEEN_KEY, String(session.seen))
+    }
+    return sessions.getItem(key)
+  }
+}
+
+function readTab(): string | null {
+  try {
+    return tabs.getItem(TAB_KEY)
+  } catch {
+    tabs = memoryStore()
+    return null
+  }
+}
+
+function startSession() {
+  sessions =
+    storage("localStorage") ?? storage("sessionStorage") ?? memoryStore()
+  tabs = storage("sessionStorage") ?? memoryStore()
+  tab = readTab() ?? randomId()
+  save(tabs, TAB_KEY, tab)
+  touch(true)
+}
+
+// Brings this tab's session up to date with the browser's, joining the one
+// another tab opened meanwhile. `active` is the user doing something -- the
+// page loading, a visit they wait on, the tab coming back into view -- which
+// keeps the session alive, or opens a new one when the last went 30 minutes
+// without activity in any tab or is 24 hours old. Anything else (a
+// background poll, a prefetch, a flush) only joins a live session, so a tab
+// left polling cannot hold its session open until the cap.
+function touch(active: boolean) {
+  const now = Date.now()
+  const id = read(SESSION_ID_KEY)
+  const seen = Number(read(SESSION_SEEN_KEY)) || 0
+  const startedAt = Number(read(SESSION_STARTED_KEY)) || 0
+  const live = id !== null && !expired(startedAt, seen, now)
+  if (live && id === session?.id) session.seen = Math.max(session.seen, seen)
+  else if (live) begin(id, startedAt, seen, false)
+  else if (active) begin(minted(id) ?? randomId(), now, now, true)
+  if (!active || !session) return
+  session.seen = now
+  save(sessions, SESSION_SEEN_KEY, String(now))
+  remember(session.id)
+}
+
+// The id the server put in the cookie for this browser's first page load
+// (Railwatch::Sessions.mint), so the session starts with that request rather
+// than after it. Not the session that just expired, whose id the cookie
+// can still hold.
+function minted(expiredId: string | null): string | undefined {
+  try {
+    const id = /(?:^|;\s*)railwatch_session=([A-Za-z0-9_-]{1,64})(?:;|$)/.exec(
+      document.cookie,
+    )?.[1]
+    return id && id !== expiredId && id !== session?.id ? id : undefined
+  } catch {
+    // A sandboxed frame has no cookies.
+    return undefined
+  }
+}
+
+function expired(startedAt: number, seen: number, now: number) {
+  return now - seen >= SESSION_TIMEOUT_MS || now - startedAt >= SESSION_CAP_MS
+}
+
+// The session this tab is in, while it is live. A background visit after it
+// timed out belongs to no session: it is neither tagged nor recorded as one.
+function liveSession(): string | undefined {
+  if (!session || expired(session.started_at, session.seen, Date.now()))
+    return undefined
+  return session.id
+}
+
+// Moves this tab into a session. The one it was in is over -- a session is
+// only replaced once it has timed out or reached the cap -- so this tab
+// says so with a last, `ended` beat. Closing a tab sends no such thing: the
+// browser's other tabs may still be in the session, and nothing a closing
+// tab knows says otherwise. A session no tab comes back to ends where the
+// server half's does, on its own timeout.
+function begin(id: string, startedAt: number, seen: number, minted: boolean) {
+  if (session)
+    post({
+      visits: [],
+      errors: [],
+      session: {
+        id: session.id,
+        started_at: session.started_at,
+        duration_ms: session.seen - session.started_at,
+        ended: true,
+      },
+      tenant: tenant(),
+    })
+  session = { id, started_at: startedAt, seen }
+  if (!minted) return
+  save(sessions, SESSION_ID_KEY, id)
+  save(sessions, SESSION_STARTED_KEY, String(startedAt))
+  save(sessions, SESSION_SEEN_KEY, String(seen))
+  // No duration on the first beat: that is what opens the session.
+  post({
+    visits: [],
+    errors: [],
+    session: { id, started_at: startedAt },
+    tenant: tenant(),
+  })
+}
+
+// While the session is live it runs to now, whichever tab is beating it. One
+// this tab has watched time out ran to its last activity, and is `ended`.
+function beat(): Session | undefined {
   if (!session) return undefined
-  return { ...session, duration_ms: Date.now() - session.started_at, ended }
+  const now = Date.now()
+  const ended = expired(session.started_at, session.seen, now)
+  return {
+    id: session.id,
+    started_at: session.started_at,
+    duration_ms: (ended ? session.seen : now) - session.started_at,
+    ended,
+  }
+}
+
+// Inertia sends a visit with whatever headers the visit object holds once
+// `before` has fired, so setting them here tags every visit, prefetch, poll
+// and partial reload with the session and the tab -- which is how a request
+// record joins its journey under the tab it came from. Only for the page's
+// own origin: a custom header makes a cross-origin request preflight, and
+// another origin is not this app's server anyway. The headers object is
+// replaced, not written into, because it may be the app's own options. The
+// prefetch cache compares headers; a prefetch and the click it serves are
+// tagged alike, so the prefetch still serves.
+function tag(visit: { url: unknown; headers?: Record<string, string> }) {
+  const id = liveSession()
+  if (!id) return
+  try {
+    if (new URL(String(visit.url), location.href).origin !== location.origin)
+      return
+  } catch {
+    // Not a URL Inertia could visit either.
+    return
+  }
+  visit.headers = {
+    ...visit.headers,
+    [SESSION_HEADER]: id,
+    [TAB_HEADER]: tab,
+  }
 }
 
 // --- Breadcrumbs -------------------------------------------------------
@@ -349,6 +549,8 @@ function capture(
     component,
     url: location.pathname + location.search,
     visit: current?.url,
+    session_id: liveSession(),
+    tab_id: tab,
     breadcrumbs: breadcrumbs.length > 0 ? breadcrumbs : undefined,
     context,
   }
@@ -755,6 +957,8 @@ function initialVisit(): Visit | null {
     duration_ms: duration,
     status: "success",
     ...ttfbPhases(nav),
+    session_id: liveSession(),
+    tab_id: tab,
   }
 }
 
@@ -774,7 +978,7 @@ function finalize() {
   }
   // Still flushes on every later hide: a tab can be backgrounded, brought
   // back, navigated some more, and then closed. Each of those carries a
-  // final session beat, which the platform dedupes by session id.
+  // session beat, which the platform dedupes by session id.
   flush(true)
 }
 
@@ -798,7 +1002,10 @@ export function startRailwatch(options: RailwatchOptions = {}) {
   // final there.
   router.on("before", (event) => {
     const v = event.detail.visit
-    if (!waiting(v) || event.defaultPrevented) return
+    if (event.defaultPrevented) return
+    touch(waiting(v))
+    tag(v)
+    if (!waiting(v)) return
     const request = (foregroundRequest = { id: idOf(v, "id") })
     queueMicrotask(() => {
       if (event.defaultPrevented && foregroundRequest === request)
@@ -817,6 +1024,8 @@ export function startRailwatch(options: RailwatchOptions = {}) {
       method: v.method,
       partial: Boolean(v.only?.length || v.except?.length),
       only: v.only,
+      session_id: liveSession(),
+      tab_id: tab,
     }
     crumb("navigate", `${v.method.toUpperCase()} ${current.url}`)
   })
@@ -847,6 +1056,7 @@ export function startRailwatch(options: RailwatchOptions = {}) {
   timer ??= window.setInterval(flush, 5000)
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") finalize()
+    else touch(true)
   })
   window.addEventListener("pagehide", finalize)
 }

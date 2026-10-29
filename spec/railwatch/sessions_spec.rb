@@ -124,6 +124,147 @@ RSpec.describe Railwatch::Sessions, type: :request do
     expect { described_class.flush }.not_to raise_error
   end
 
+  describe "the first page load" do
+    before { Railwatch.config.browser_client = true }
+    after { Railwatch.config.browser_client = nil }
+
+    def minted_cookie
+      response.headers["Set-Cookie"].to_s[/railwatch_session=([^;]+)/, 1]
+    end
+
+    it "hands a page with no session a cookie, and records the request under that id" do
+      allow(Railwatch::Subscribers::Users).to receive(:resolve_id).and_return("41")
+
+      get "/page"
+
+      expect(minted_cookie).to match(/\A[0-9a-f]{16}\z/)
+      expect(response.headers["Set-Cookie"]).to match(%r{path=/}).and(match(/max-age=1800/)).and(match(/samesite=lax/i))
+      expect(railwatch_records(:request).sole[:session_id]).to eq(minted_cookie)
+      expect(flushed).to include(id: minted_cookie, user: "41", requests: 1)
+    end
+
+    it "opens no user: session for a browser running the client" do
+      allow(Railwatch::Subscribers::Users).to receive(:resolve_id).and_return("41")
+
+      get "/page"
+      id = minted_cookie
+      get "/widgets", headers: { "X-Railwatch-Session" => id, "X-Inertia" => "true" }
+
+      expect(sessions.keys).to eq([ id ])
+      expect(sessions[id]).to include(requests: 2, user: "41")
+    end
+
+    it "marks the cookie Secure over HTTPS, including behind a TLS proxy, and not over plain HTTP" do
+      # Each request is a new browser: the integration session keeps cookies.
+      cookie_for = lambda do |*args, **opts|
+        reset!
+        get(*args, **opts)
+        response.headers["Set-Cookie"][/railwatch_session=[^\n]*/]
+      end
+
+      expect(cookie_for.("/page")).not_to match(/secure/i)
+      expect(cookie_for.("/page", headers: { "X-Forwarded-Proto" => "https" })).to match(/; secure/i)
+      expect(cookie_for.("https://www.example.com/page")).to match(/; secure/i)
+    end
+
+    it "opens no server session for an anonymous first load, though its record carries the id" do
+      get "/page"
+
+      expect(minted_cookie).to be_present
+      expect(railwatch_records(:request).sole[:session_id]).to eq(minted_cookie)
+      expect(sessions).to be_empty
+    end
+
+    it "leaves a page that already carries a session alone" do
+      get "/page", headers: cookie
+
+      expect(minted_cookie).to be_nil
+      expect(railwatch_records(:request).sole[:session_id]).to eq("s1")
+    end
+
+    it "sets no cookie on an Inertia visit, a JSON or plain-text response, or a redirect" do
+      get "/inertia", headers: { "X-Inertia" => "true" }
+      expect(minted_cookie).to be_nil
+      get "/page", headers: { "X-Inertia" => "true" }
+      expect(minted_cookie).to be_nil
+      get "/inertia"
+      expect(minted_cookie).to be_nil
+      get "/widgets"
+      expect(minted_cookie).to be_nil
+      get "/redirected"
+      expect(minted_cookie).to be_nil
+    end
+
+    it "sets no cookie on a page a shared cache may keep" do
+      get "/page", params: { public: 1 }
+
+      expect(response.headers["Cache-Control"]).to include("public")
+      expect(minted_cookie).to be_nil
+      expect(railwatch_records(:request).sole).not_to have_key(:session_id)
+    end
+
+    it "sets no cookie when the app has no browser client, and keys the user as before" do
+      Railwatch.config.browser_client = false
+      allow(Railwatch::Subscribers::Users).to receive(:resolve_id).and_return("41")
+
+      get "/page"
+
+      expect(minted_cookie).to be_nil
+      expect(flushed).to include(id: "user:41")
+    end
+
+    describe "finding the client when not told" do
+      let(:root) { Pathname(Dir.mktmpdir("railwatch-root", ENV.fetch("TMPDIR", Dir.tmpdir))) }
+
+      before do
+        Railwatch.config.browser_client = nil
+        allow(Rails).to receive(:root).and_return(root)
+      end
+
+      after do
+        Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
+        FileUtils.rm_rf(root)
+      end
+
+      def detected
+        Railwatch.config.instance_variable_set(:@browser_client_installed, nil)
+        Railwatch.config.browser_client?
+      end
+
+      def install_client(dir)
+        FileUtils.mkdir_p(root.join(dir, "lib"))
+        FileUtils.touch(root.join(dir, "lib/railwatch.ts"))
+      end
+
+      it "finds none in an app without one" do
+        FileUtils.mkdir_p(root.join("app/frontend"))
+
+        expect(detected).to be(false)
+      end
+
+      it "finds it under app/frontend, vite_ruby's default" do
+        install_client("app/frontend")
+
+        expect(detected).to be(true)
+      end
+
+      it "finds it under app/javascript, where rails_vite and jsbundling apps keep their sources" do
+        install_client("app/javascript")
+
+        expect(detected).to be(true)
+      end
+
+      it "looks in ViteRuby's configured sourceCodeDir when ViteRuby is loaded" do
+        install_client("client/src")
+        FileUtils.mkdir_p(root.join("app/frontend"))
+        stub_const("ViteRuby", Class.new { def self.config = Struct.new(:source_code_dir).new("client/src") })
+
+        expect(Railwatch.frontend_dir(root)).to eq("client/src")
+        expect(detected).to be(true)
+      end
+    end
+  end
+
   describe ".start!" do
     it "does not start a thread in the test environment" do
       described_class.start!

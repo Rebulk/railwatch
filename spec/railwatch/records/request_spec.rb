@@ -117,6 +117,59 @@ RSpec.describe "request record", type: :request do
     expect(req[:payload]).to be_nil
   end
 
+  describe "session_id and tab_id" do
+    def request_with(headers)
+      get "/widgets", headers: headers
+      railwatch_records(:request).sole
+    end
+
+    it "carries the browser session and tab the client tagged the request with" do
+      req = request_with("X-Railwatch-Session" => "3f2a9c1e7b4d6a08", "X-Railwatch-Tab" => "9e8d7c6b5a4f3e21")
+
+      expect(req).to include(session_id: "3f2a9c1e7b4d6a08", tab_id: "9e8d7c6b5a4f3e21")
+    end
+
+    it "takes the session from the cookie on a full page load, which carries no tab" do
+      req = request_with("Cookie" => "other=1; railwatch_session=3f2a9c1e7b4d6a08")
+
+      expect(req[:session_id]).to eq("3f2a9c1e7b4d6a08")
+      expect(req).not_to have_key(:tab_id)
+    end
+
+    it "prefers the header to the cookie, as the session key does" do
+      req = request_with("X-Railwatch-Session" => "fromheader", "Cookie" => "railwatch_session=fromcookie")
+
+      expect(req[:session_id]).to eq("fromheader")
+    end
+
+    it "leaves both keys off a request from no browser session" do
+      req = request_with({})
+
+      expect(req).not_to have_key(:session_id)
+      expect(req).not_to have_key(:tab_id)
+    end
+
+    it "drops an id longer than 64 characters or outside [A-Za-z0-9_-] rather than recording it" do
+      expect(request_with("X-Railwatch-Session" => "a" * 65, "X-Railwatch-Tab" => "t1")).not_to have_key(:session_id)
+      railwatch_transport.batches.clear
+      expect(request_with("X-Railwatch-Session" => "s1", "X-Railwatch-Tab" => "tab id<script>")).to include(session_id: "s1").and(satisfy { |r| !r.key?(:tab_id) })
+      railwatch_transport.batches.clear
+      expect(request_with("X-Railwatch-Session" => "a" * 64)[:session_id]).to eq("a" * 64)
+    end
+
+    # The session key falls back to "user:<id>" for release health, but
+    # that names a person, not a browser session: a journey keyed on it
+    # would merge every device the user has.
+    it "never carries the user fallback the session key uses" do
+      allow(Railwatch::Subscribers::Users).to receive(:resolve_id).and_return("7")
+
+      req = request_with({})
+
+      expect(req[:user]).to eq("7")
+      expect(req).not_to have_key(:session_id)
+    end
+  end
+
   describe "queue_time" do
     # 50ms of proxy queueing (50_000 microseconds once recorded), expressed
     # in each format a proxy might stamp it. The upper bound catches a
