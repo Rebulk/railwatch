@@ -154,6 +154,14 @@ RSpec.describe Railwatch::Sessions, type: :request do
       expect(sessions[id]).to include(requests: 2, user: "41")
     end
 
+    it "opens no server session for an anonymous first load, though its record carries the id" do
+      get "/page"
+
+      expect(minted_cookie).to be_present
+      expect(railwatch_records(:request).sole[:session_id]).to eq(minted_cookie)
+      expect(sessions).to be_empty
+    end
+
     it "leaves a page that already carries a session alone" do
       get "/page", headers: cookie
 

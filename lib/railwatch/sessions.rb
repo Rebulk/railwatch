@@ -90,13 +90,18 @@ module Railwatch
     end
 
     # The browser client's id when the request carries one -- so the two
-    # halves of the same session share a key -- else the resolved user.
+    # halves of the same session share a key -- else the resolved user. A
+    # first page load the middleware minted an id for keys on that id, but
+    # only where it would have keyed on the user: an anonymous request with
+    # no cookie (a crawler, curl) opened no session before and opens none
+    # now. Its browser, if it runs the client, opens it with the first beat.
     def key_for(exe, env)
-      id = sent_id(env) || env[MINTED]
+      id = sent_id(env)
       return id[0, KEY_LIMIT] unless id.nil? || id.empty?
 
       user = exe.user_id
-      user && "user:#{user}"[0, KEY_LIMIT]
+      return nil unless user
+      env[MINTED] || "user:#{user}"[0, KEY_LIMIT]
     end
 
     # The browser session and tab a request came from, for the request
