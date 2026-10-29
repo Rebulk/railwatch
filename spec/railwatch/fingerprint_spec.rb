@@ -50,6 +50,29 @@ RSpec.describe "exception fingerprinting" do
       expect(normalize("connection refused from 10.0.12.4")).to eq("connection refused from ?")
     end
 
+    # Each of these opened its own issue in production next to the IPv4 one.
+    it "groups an IPv6 address, full, compressed, or ending in ::, with the IPv4 one" do
+      ipv4 = normalize("scrape trap followed from 40.77.167.14")
+
+      expect(normalize("scrape trap followed from 2607:fb90:2e06:cf8a:7c6b:8822:4f44:74c7")).to eq(ipv4)
+      expect(normalize("scrape trap followed from 2600:3c15::2000:22ff:febb:8bb9")).to eq(ipv4)
+      expect(normalize("scrape trap followed from 2a03:2880:f802:c::")).to eq(ipv4)
+      expect(normalize("scrape trap followed from ::1")).to eq(ipv4)
+    end
+
+    it "masks an IPv6 address whole rather than group by group" do
+      expect(normalize("blocked [2001:db8::1]:8080")).to eq("blocked [?]:?")
+    end
+
+    it "does not take a clock time for an IPv6 address" do
+      expect(normalize("window closes at 12:30:45")).to eq("window closes at ?:?:?")
+    end
+
+    it "does not take a constant path for an IPv6 address" do
+      expect(normalize("uninitialized constant Foo::Bar")).to eq("uninitialized constant Foo::Bar")
+      expect(normalize("uninitialized constant Abc1::Def")).to eq("uninitialized constant Abc1::Def")
+    end
+
     it "replaces an ISO timestamp" do
       expect(normalize("expired at 2026-09-03T11:22:33Z")).to eq("expired at ?")
     end

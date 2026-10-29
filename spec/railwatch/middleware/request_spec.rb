@@ -136,6 +136,31 @@ RSpec.describe Railwatch::Middleware::Request do
     expect(railwatch_records(:request).map { |request| request[:files] }).to eq([ [], [] ])
   end
 
+  # The request specs drive ActionDispatch::Static itself; these pin the
+  # two conditions besides "no route" that a static file needs.
+  describe "a request for a file in public/ that no route matched" do
+    let(:asset) { "http://customer.test/vite/assets/dist-DedfDSJv.js" }
+
+    it "is still recorded when it is not a GET or HEAD, which Static never serves" do
+      middleware.call(env_for(asset, method: "POST"))
+
+      expect(railwatch_records(:request).sole).to include(method: "POST", path: "/vite/assets/dist-DedfDSJv.js")
+    end
+
+    it "is still recorded when the path names no file, whatever the status" do
+      middleware.call(env_for("http://customer.test/vite/assets/dist-B0Lc4rzm.js"))
+
+      expect(railwatch_records(:request).sole).to include(path: "/vite/assets/dist-B0Lc4rzm.js", status_code: 204)
+    end
+
+    it "is skipped when it is a GET or HEAD for a file that is there" do
+      middleware.call(env_for(asset))
+      middleware.call(env_for(asset, method: "HEAD"))
+
+      expect(railwatch_records(:request)).to be_empty
+    end
+  end
+
   describe "timing headers" do
     before { Railwatch.config.timing_headers = true }
     after { Railwatch.config.timing_headers = nil }

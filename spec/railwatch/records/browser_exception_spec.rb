@@ -71,6 +71,21 @@ RSpec.describe "browser exception record", type: :request do
     expect(ex[:_group]).to eq(Railwatch::Record.group_hash(*ex[:fingerprint]))
   end
 
+  # rebulk-system's HttpNetworkError opened a new issue each release:
+  # dist-CMHaG-3i.js, then dist-B0Lc4rzm.js, then dist-DedfDSJv.js.
+  it "groups the same error from two deploys' hashed bundles together, keeping the real frame" do
+    post_beacon(errors: [
+      { name: "HttpNetworkError", message: "Network error", stack: "at send (/vite/assets/dist-B0Lc4rzm.js:2:41877)" },
+      { name: "HttpNetworkError", message: "Network error", stack: "at send (/vite/assets/dist-DedfDSJv.js:3:120)" }
+    ])
+    before, after = railwatch_records(:exception)
+
+    expect(after[:_group]).to eq(before[:_group])
+    expect(after[:fingerprint]).to eq([ "HttpNetworkError", "vite/assets/dist.js", "", "Network error" ])
+    expect(after).to include(file: "vite/assets/dist-DedfDSJv.js", line: 3)
+    expect(after[:frames].sole).to include(file: "vite/assets/dist-DedfDSJv.js", line: 3, column: 120)
+  end
+
   it "groups two occurrences whose messages differ only in their variable data together" do
     post_beacon(errors: [ { name: "TypeError", message: "Order 1 is not payable", stack: STACK },
                           { name: "TypeError", message: "Order 22 is not payable", stack: STACK } ])

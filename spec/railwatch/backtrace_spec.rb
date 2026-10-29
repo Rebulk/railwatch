@@ -88,4 +88,38 @@ RSpec.describe Railwatch::Backtrace do
       expect(described_class.source_snippet(file, 1)).to be_nil
     end
   end
+
+  describe ".js_fingerprint_location" do
+    def location(file, line = 2) = described_class.js_fingerprint_location({ file: file, line: line })
+
+    # The same error from two deploys of rebulk-system's bundle.
+    it "files a Vite bundle under its name without the content hash, so a deploy does not split the issue" do
+      expect(location("vite/assets/dist-DedfDSJv.js")).to eq(location("vite/assets/dist-B0Lc4rzm.js"))
+      expect(location("vite/assets/dist-CMHaG-3i.js")).to eq([ "vite/assets/dist.js", nil ])
+    end
+
+    it "takes the hash out of a dotted, .mjs, or .cjs name too" do
+      expect(location("assets/main.3f2a1b9c.js")).to eq([ "assets/main.js", nil ])
+      expect(location("assets/app-5XDGVJ2T.mjs")).to eq([ "assets/app.mjs", nil ])
+      expect(location("assets/worker-a1b2c3d4.cjs")).to eq([ "assets/worker.cjs", nil ])
+    end
+
+    it "keeps a hyphenated name and strips only the hash after it" do
+      expect(location("vite/assets/yard-canvas-BwMeIV6a.js")).to eq([ "vite/assets/yard-canvas.js", nil ])
+    end
+
+    it "keeps the file and line of a file whose name carries no hash" do
+      expect(location("vite/assets/yard-canvas.js", 7)).to eq([ "vite/assets/yard-canvas.js", 7 ])
+      expect(location("assets/order-timeline.js", 7)).to eq([ "assets/order-timeline.js", 7 ])
+      expect(location("app/frontend/entrypoints/app.tsx", 7)).to eq([ "app/frontend/entrypoints/app.tsx", 7 ])
+    end
+
+    it "leaves a hash shorter than eight characters alone" do
+      expect(location("assets/index-Bq1x9K.js", 7)).to eq([ "assets/index-Bq1x9K.js", 7 ])
+    end
+
+    it "has nothing to file a frameless error under" do
+      expect(described_class.js_fingerprint_location({})).to eq([ nil, nil ])
+    end
+  end
 end

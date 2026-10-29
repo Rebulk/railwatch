@@ -248,15 +248,33 @@ module Railwatch
         error.class.ancestors.any? { |ancestor| (name = ancestor.name) && ignored.include?(name) }
       end
 
+      # An IPv6 address, full ("2607:fb90:...:74c7") or compressed around
+      # "::" ("2600:3c15::2000:22ff:febb:8bb9", "2a03:2880:f802:c::"). It
+      # has to carry a digit and stand alone, and it is lower case, as
+      # RFC 5952 and IPAddr write it: so a constant path like Foo::Bar or
+      # Abc1::Def stays, and a clock time like 12:30:45 has neither eight
+      # groups nor a "::".
+      IPV6 = /
+        (?<![\w:])
+        (?=[0-9a-f:]*\d)
+        (?:
+          [0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7}
+          | (?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?::(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6})?
+        )
+        (?![\w:])
+      /x
+
       # Variable data that would otherwise split one issue into thousands of
       # them. Applied in this order: a URL before the numbers inside it, a
-      # quoted string before the id it quotes, hex before plain digits.
+      # quoted string before the id it quotes, an IPv6 address and hex before
+      # plain digits.
       MESSAGE_NOISE = [
         %r{\bhttps?://\S+},                                  # URLs
         /\b[^\s@]+@[^\s@]+\.[^\s@]+\b/,                      # email addresses
         /\h{8}-\h{4}-\h{4}-\h{4}-\h{12}/,                    # UUIDs
         /\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*/,         # ISO timestamps
         /\b\d{1,3}(?:\.\d{1,3}){3}\b/,                       # IPv4 addresses
+        IPV6,                                                # IPv6, before hex and digits
         /(?<!\w)'[^']*'|"[^"]*"/,                             # quoted strings ("won't" is not one)
         /\b(?:0x)?\h{6,}\b/,                                 # hex: digests, object addresses
         /\b\d+\b/                                            # plain integers

@@ -72,7 +72,10 @@ whether child records ship, not whether an error is visible.
 ### `request`
 
 Built by the outermost Rack middleware in
-`lib/railwatch/middleware/request.rb`. That middleware also owns the
+`lib/railwatch/middleware/request.rb`. A file `ActionDispatch::Static`
+served from `public/` (a GET or HEAD no route matched, answered 2xx or
+304, whose path names a file there) is not recorded. An unmatched request
+for anything else, a 404 included, is. That middleware also owns the
 `middleware_before`/`action`/`render`/`middleware_after` stage
 boundaries. The `action`/`render` boundaries come from
 `start_processing.action_controller` and `render_template.action_view` in
@@ -334,8 +337,9 @@ its own `exceptions` sample rate rolled once per execution. See
 
 The default fingerprint normalizes the message before hashing it, so one
 issue doesn't shatter into thousands. URLs, email addresses, UUIDs, ISO
-timestamps, IPv4 addresses, quoted strings, hex runs of six characters or
-more, and plain integers all become `?`. Whitespace collapses, and the
+timestamps, IPv4 and IPv6 addresses (lower-case hex, full or compressed
+with `::`), quoted strings, hex runs of six characters or more, and plain
+integers all become `?`. Whitespace collapses, and the
 result is cut at 200 chars. For classes whose message is mostly the data
 that varied, only the message *prefix* is kept. The prefix runs up to the
 first `:` for `ActiveRecord::RecordNotFound`, `ActiveRecord::RecordInvalid`,
@@ -393,9 +397,15 @@ line with no location on it is dropped:
 | `in_app` | True when the script came from the app's own origin and is not under `node_modules/` or `vendor/`. |
 
 No source snippets: the file is on the client, not on the server. Frames
-are fingerprinted exactly like Ruby ones: class, top in-app frame, and
-the normalized message. So browser errors group, split, merge, resolve,
-and regress through the same Issue machinery.
+are fingerprinted like Ruby ones: class, top in-app frame, and the
+normalized message. So browser errors group, split, merge, resolve, and
+regress through the same Issue machinery. One difference: when the top
+frame's file name carries a bundler's content hash (`dist-DedfDSJv.js`,
+`main.3f2a1b9c.js`, `app-5XDGVJ2T.mjs`; eight or more characters with a
+digit or mixed case), the fingerprint uses the name without the hash
+(`dist.js`) and no line. Both change on every deploy of a minified
+bundle, so keeping them would open a new issue each release. The frame
+itself keeps the real file and line.
 
 `context` carries a `browser` key with the page `url`, the Inertia
 `component`, the `visit` the error happened in if any, the browser

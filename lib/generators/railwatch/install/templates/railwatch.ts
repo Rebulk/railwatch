@@ -84,11 +84,14 @@ export interface RailwatchOptions {
 }
 
 // Browser noise that is never actionable: ResizeObserver fires from benign
-// layout thrash and the spec says to ignore it, and the extension URLs are
-// third-party code running in someone's browser that this app cannot fix.
-const DEFAULT_IGNORE_ERRORS = [
+// layout thrash and the spec says to ignore it, "Script error." is all a
+// browser says about an error in a cross-origin script (no stack, no file,
+// no line), and the extension URLs are third-party code running in
+// someone's browser that this app cannot fix.
+const DEFAULT_IGNORE_ERRORS: (string | RegExp)[] = [
   "ResizeObserver loop limit exceeded",
   "ResizeObserver loop completed with undelivered notifications",
+  /^Script error\.?$/,
 ]
 const DEFAULT_DENY_URLS = [
   /extensions\//i,
@@ -982,7 +985,12 @@ function finalize() {
   flush(true)
 }
 
+// A no-op under server-side rendering: the Inertia SSR server runs the same
+// entrypoint, with no window to measure and nothing to send a beacon from.
+// Nothing above touches the DOM until this is called, so importing the
+// module is safe there too.
 export function startRailwatch(options: RailwatchOptions = {}) {
+  if (typeof window === "undefined") return
   ignoreErrors = [...DEFAULT_IGNORE_ERRORS, ...(options.ignoreErrors ?? [])]
   denyUrls = [...DEFAULT_DENY_URLS, ...(options.denyUrls ?? [])]
   tenantOf = options.tenant

@@ -199,6 +199,18 @@ module Railwatch
       Current.execution = exe&.parent_execution
     end
 
+    # Ends the execution and ships nothing of it, for one that turned out
+    # not to be worth a record at all (the request middleware's static
+    # files). A profile it started is stopped and thrown away.
+    def discard_execution
+      exe = Current.execution
+      return unless exe
+
+      Profiler.stop if exe.profiler_handle
+      Current.execution = exe.parent_execution
+      nil
+    end
+
     # --- record writing --------------------------------------------------------
 
     # Records that make sense without a parent execution (console, boot).

@@ -6,6 +6,28 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- An IPv6 address in an exception message is masked like an IPv4 one, so
+  "scrape trap followed from 2607:fb90:..." groups with "...from
+  40.77.167.14" instead of opening an issue per address. Full and
+  `::`-compressed forms are both covered. A clock time (`12:30:45`) and a
+  constant path (`Foo::Bar`) are left alone.
+- A browser error in a content-hashed bundle (`vite/assets/dist-DedfDSJv.js`)
+  is fingerprinted on the name without the hash (`vite/assets/dist.js`)
+  and without the line, so the same error no longer opens a new issue
+  every deploy. In a minified bundle the line moves with any change
+  before it. The stored frames keep the real file and line.
+- The browser client ignores "Script error." by default. It is all a
+  browser reports for an error in a cross-origin script, with no stack.
+- A file `ActionDispatch::Static` serves from `public/` (a 2xx or 304 for
+  a GET or HEAD no route matched) is no longer recorded as a `GET
+  unmatched` request, nor counted in its session. In rebulk-system that
+  was 3,168 of 36,131 requests a day and about 23 journey rows per page
+  load. Unmatched 404s are still recorded. Routed requests never touch
+  the filesystem for this.
+- `startRailwatch()` does nothing when there is no `window`, so an
+  Inertia SSR entrypoint that calls it at its top level no longer crashes
+  with "document is not defined".
+
 ## 1.5.0 (2026-10-28)
 
 - The browser session is one per browser, shared by every tab, as in GA4

@@ -755,7 +755,8 @@ running in:
 ```ts
 startRailwatch({
   // Messages never worth an issue, added to the defaults (both
-  // "ResizeObserver loop ..." messages). Strings match anywhere in the
+  // "ResizeObserver loop ..." messages, and the bare "Script error." a
+  // browser gives for a cross-origin script). Strings match anywhere in the
   // message; regexes are tested against it.
   ignoreErrors: [/Failed to fetch dynamically imported module/],
   // Scripts whose failures are not this app's, matched against the top
@@ -780,6 +781,10 @@ app caught itself, and is how a React 18 boundary's `componentDidCatch`
 does the same thing. See
 [`docs/replacing-sentry.md`](replacing-sentry.md) for what is and is not
 captured versus `@sentry/react`.
+
+The client is safe to import from an SSR bundle: nothing in it touches
+the DOM at import time, and `startRailwatch()` returns without doing
+anything when there is no `window`.
 
 SSR timing needs no configuration. `Railwatch::Patches::Inertia` prepends
 `InertiaRails::Renderer#ssr_render` whenever `inertia_rails` SSR is
