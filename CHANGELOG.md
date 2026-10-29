@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.0 (2026-10-29)
+
 - An IPv6 address in an exception message is masked like an IPv4 one, so
   "scrape trap followed from 2607:fb90:..." groups with "...from
   40.77.167.14" instead of opening an issue per address. Full and
