@@ -149,6 +149,19 @@ let tenantOf: (() => string | undefined) | undefined
 // particular background refresh reported passes `showProgress: true`.
 let foregroundVisits = 0
 let foregroundRequest: { id?: string } | null = null
+// Until when a dropped request is the page going away, not a failure. A
+// visit answered with 409 + X-Inertia-Location (a deploy changed the asset
+// version, or the server asked for a full load) makes Inertia replace the
+// document. The old page stays on screen until the new one arrives, and a
+// click there starts a request the browser then cuts off as the document
+// goes: WebKit reports that as a network error, not an abort. `pagehide`
+// comes too late to tell (it fires after the cut), so the window opens at
+// Inertia's `location` event. It is bounded rather than held until the page
+// ends because a `location` does not always navigate: Inertia skips the load
+// for a background visit that finds a new version, and a listener may
+// cancel it.
+let leavingUntil = 0
+const LEAVING_MS = 10_000
 // Errors Inertia has already delivered through its own failure event. It
 // re-rejects the same object afterwards and nothing awaits it, so the error
 // arrives a second time as an unhandled rejection; that copy is dropped
@@ -676,6 +689,17 @@ function startErrorCapture() {
   })
   onInertia("exception", (detail) => captureRequestFailure(detail.exception))
   onInertia("networkError", (detail) => captureRequestFailure(detail.error))
+  // Inertia 3 only; Inertia 2 fires no event before a full load. Only a load
+  // the user was waiting on opens the window: a background visit that finds
+  // a new version is the case Inertia does not navigate for.
+  document.addEventListener("inertia:location", (event) => {
+    if (foregroundVisits === 0 && !foregroundRequest) return
+    // A later listener may still cancel it; the answer is final once the
+    // dispatch is over.
+    queueMicrotask(() => {
+      if (!event.defaultPrevented) leavingUntil = Date.now() + LEAVING_MS
+    })
+  })
   onInertia("invalid", (detail) => captureInvalidResponse(detail.response))
   onInertia("httpException", (detail) =>
     captureInvalidResponse(detail.response),
@@ -722,6 +746,7 @@ function captureRequestFailure(error: unknown) {
   if (typeof error === "object" && error !== null) requestFailures.add(error)
   if (foregroundVisits === 0 && !foregroundRequest) return
   foregroundRequest = null
+  if (Date.now() < leavingUntil) return
   captureValue(error, "InertiaException")
 }
 
