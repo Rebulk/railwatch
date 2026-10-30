@@ -6,6 +6,15 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- The browser client no longer reports a request the browser cut off
+  because the page was being replaced. When a visit the user is waiting on
+  is answered with a full page load (Inertia 3's `location` event: a 409
+  after a deploy changed the asset version), a click on the old page before
+  the new one arrives is aborted, and WebKit reports that as a network
+  error. Drops in the next 10 seconds are not reported. A `location` that a
+  listener cancels, or that a background visit fires (Inertia does not
+  navigate for those), changes nothing.
+
 ## 1.6.0 (2026-10-29)
 
 - An IPv6 address in an exception message is masked like an IPv4 one, so

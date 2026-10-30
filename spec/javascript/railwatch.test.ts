@@ -441,6 +441,70 @@ describe("startRailwatch error capture", () => {
     expect(allErrors()).toEqual([])
   })
 
+  // A click answered with 409 + X-Inertia-Location: Inertia fires `location`
+  // and replaces the document, and the next click on the old page is cut off
+  // by the browser as the document goes (rebulk-system, 2026-10-30: a tap
+  // 200 ms into the reload after a deploy, reported as a network error).
+  async function fireLocation({ cancelled = false } = {}) {
+    const listener = documentListeners["inertia:location"]
+    if (!listener) throw new Error("no inertia:location listener registered")
+    const event = {
+      detail: { url: "/issues", versionChange: true },
+      defaultPrevented: false,
+    }
+    listener(event as unknown as Event)
+    // A listener registered after the client's cancels it during the same
+    // dispatch, before the client reads the answer.
+    event.defaultPrevented = cancelled
+    await Promise.resolve()
+  }
+
+  async function leaveForFullLoad({ cancelled = false } = {}) {
+    const visit = { url: "/issues?view=day", method: "get", showProgress: true }
+    fire("start", { visit })
+    await fireLocation({ cancelled })
+    fire("finish", { visit })
+  }
+
+  it("does not report a request cut off while the page is replaced by a full load", async () => {
+    await leaveForFullLoad()
+    startWaitingVisit("/issues?view=all")
+    fireDocument("networkError", { error: new Error("Network error") })
+    vi.advanceTimersByTime(5000)
+
+    expect(allErrors()).toEqual([])
+  })
+
+  it("reports a dropped request again once a full load that never came is long past", async () => {
+    await leaveForFullLoad()
+    vi.advanceTimersByTime(10_000)
+    startWaitingVisit("/issues?view=all")
+    fireDocument("networkError", { error: new Error("Network error") })
+    vi.advanceTimersByTime(5000)
+
+    expect(allErrors()).toHaveLength(1)
+  })
+
+  it("still reports a dropped request when a listener cancelled the full load", async () => {
+    await leaveForFullLoad({ cancelled: true })
+    startWaitingVisit("/issues?view=all")
+    fireDocument("networkError", { error: new Error("Network error") })
+    vi.advanceTimersByTime(5000)
+
+    expect(allErrors()).toHaveLength(1)
+  })
+
+  // Inertia does not navigate when a background visit finds a new version,
+  // so the page stays and a later drop is still the user's problem.
+  it("still reports a dropped request after a background visit's location event", async () => {
+    await fireLocation()
+    startWaitingVisit("/issues?view=all")
+    fireDocument("networkError", { error: new Error("Network error") })
+    vi.advanceTimersByTime(5000)
+
+    expect(allErrors()).toHaveLength(1)
+  })
+
   it("reports a response that was not an Inertia response, with the status it came back with", () => {
     fireDocument("invalid", { response: { status: 403 } })
     vi.advanceTimersByTime(5000)
