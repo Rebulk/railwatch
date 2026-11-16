@@ -420,6 +420,32 @@ module Railwatch
       end
     end
 
+    # Settings of 0.x embedded mode, which 1.0 removed: the dashboard and its
+    # storage are railwatch-server (or a railwatch-rs server) now. Assigning
+    # one raises with the migration instead of a bare NoMethodError.
+    EMBEDDED_MODE_SETTINGS = %i[
+      transport issue_prefix repository_url retention_days dashboard_user dashboard_open
+      writer_socket migration_busy_timeout
+    ].freeze
+
+    EMBEDDED_MODE_MIGRATION = "Railwatch 1.0 removed embedded mode: this gem is the agent only, and the " \
+      "dashboard runs in railwatch-server (gem \"railwatch-server\" plus `plugin :railwatch_server` in " \
+      "config/puma.rb) or a railwatch-rs server. See " \
+      "https://github.com/Rebulk/railwatch/blob/main/docs/getting-started.md#coming-from-0x-embedded-mode"
+
+    class RemovedSetting < NoMethodError; end
+
+    EMBEDDED_MODE_SETTINGS.each do |name|
+      define_method(:"#{name}=") do |_value|
+        raise RemovedSetting.new("[railwatch] `#{name}` was removed. #{EMBEDDED_MODE_MIGRATION}", :"#{name}=")
+      end
+    end
+
+    # The environment variable that turned embedded mode on, if it is still set.
+    def embedded_mode_env
+      "RAILWATCH_TRANSPORT" if ENV["RAILWATCH_TRANSPORT"].to_s.strip != ""
+    end
+
     private
 
     def detect_release

@@ -166,12 +166,17 @@ the [railwatch-server README](https://github.com/Rebulk/railwatch-server#readme)
 
 Railwatch 0.x could keep telemetry in two SQLite databases of the app's
 own, written by a Puma writer process, with the dashboard served from the
-gem. 1.0 removes that mode. To move:
+gem. 1.0 removes that mode, and that Ruby dashboard is not coming back:
+there is one Railwatch engine, railwatch-rs, whether it runs next to
+Puma (railwatch-server), on its own box, or as Railwatch Cloud. If you
+upgrade without these steps, the app stops at boot with
+`Railwatch::Configuration::RemovedSetting` or a `plugin :railwatch` error
+that links back here. To move:
 
 1. Remove `c.transport = :local` (or `RAILWATCH_TRANSPORT=local`) from
    the initializer and environment.
 2. Remove `plugin :railwatch` from `config/puma.rb`. Puma refuses to boot
-   with a plugin it cannot find.
+   with it.
 3. Remove the `railwatch` and `railwatch_telemetry` entries from
    `config/database.yml`.
 4. Add `railwatch-server` as above, or point the app at Railwatch Cloud

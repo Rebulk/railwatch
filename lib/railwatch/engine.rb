@@ -39,6 +39,9 @@ module Railwatch
         next unless Railwatch.enabled?
 
         Rails.logger.warn("[railwatch] #{Railwatch::JsonCompat.advice}") if Railwatch::JsonCompat.broken?
+        if (name = Railwatch.config.embedded_mode_env)
+          Rails.logger.warn("[railwatch] #{name} is ignored. #{Railwatch::Configuration::EMBEDDED_MODE_MIGRATION}")
+        end
       end
     end
 
