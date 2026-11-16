@@ -169,9 +169,13 @@ own, written by a Puma writer process, with the dashboard served from the
 gem. 1.0 removes that mode, and that Ruby dashboard is not coming back:
 there is one Railwatch engine, railwatch-rs, whether it runs next to
 Puma (railwatch-server), on its own box, or as Railwatch Cloud. If you
-upgrade without these steps, the app stops at boot with
-`Railwatch::Configuration::RemovedSetting` or a `plugin :railwatch` error
-that links back here. To move:
+upgrade without these steps, a removed setting in the initializer stops
+boot with `Railwatch::Configuration::RemovedSetting`, and `plugin
+:railwatch` stops Puma, both linking back here. A leftover
+`RAILWATCH_TRANSPORT=local` does not stop boot: it is ignored with one
+warning in the log, and the agent sends to its `ingest_url`, which is
+Railwatch Cloud unless you set one. Your telemetry would then leave the
+box, so do step 1 before deploying. To move:
 
 1. Remove `c.transport = :local` (or `RAILWATCH_TRANSPORT=local`) from
    the initializer and environment.
