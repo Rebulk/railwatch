@@ -6,6 +6,21 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- An app upgrading from 0.x embedded mode is told how to move instead of
+  failing obscurely. The Ruby dashboard and its storage stay retired: the
+  dashboard is railwatch-server (the railwatch-rs engine next to Puma) or
+  a railwatch-rs server, the one Railwatch engine.
+  - Assigning a removed setting (`transport`, `issue_prefix`,
+    `repository_url`, `retention_days`, `dashboard_user`,
+    `dashboard_open`, `writer_socket`, `migration_busy_timeout`) raises
+    `Railwatch::Configuration::RemovedSetting` (a `NoMethodError`) that
+    names the setting and links the migration. Before, this was a bare
+    `undefined method 'transport='`.
+  - `plugin :railwatch` in `config/puma.rb` stops boot with the same
+    migration instead of Puma's `Unable to find plugin: railwatch`.
+  - A leftover `RAILWATCH_TRANSPORT` logs one warning at boot that it is
+    ignored.
+
 ## 1.6.0 (2026-10-29)
 
 - An IPv6 address in an exception message is masked like an IPv4 one, so
