@@ -11,9 +11,9 @@ install, configuration, backups and upgrades are documented in its
 The gem doesn't care which server it talks to — point it at yours and
 everything works the same.
 
-For a single app, the [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+For a single app, the [`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar)
 gem runs that same server next to Puma and wires this gem to it, with no
-host to set up; see [Getting started](getting-started.md#embedded-railwatch-server).
+host to set up; see [Getting started](getting-started.md#embedded-railwatch-sidecar).
 The rest of this page is for a server on its own host.
 
 ## Point the gem at your server
@@ -26,7 +26,7 @@ Railwatch.configure do |c|
 end
 ```
 
-`ingest_url` defaults to `https://railwatch.rebulk.com`, so this is the one
+`ingest_url` defaults to `https://app.railwatch.dev`, so this is the one
 setting a self-hosted install always needs; everything the gem sends —
 records, ping, deploys — hangs off that host. Pass `--url=` to the
 installer to have it written for you:

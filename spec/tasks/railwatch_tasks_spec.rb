@@ -385,16 +385,18 @@ RSpec.describe "railwatch rake tasks" do
       expect(output).to include("RAILWATCH_INGEST_URL=http://railwatch.test")
     end
 
-    it "omits RAILWATCH_INGEST_URL when the app ships to the hosted platform" do
-      old = Railwatch.config.ingest_url
-      Railwatch.config.ingest_url = "https://railwatch.rebulk.com"
+    [ "https://app.railwatch.dev", "https://railwatch.rebulk.com" ].each do |hosted|
+      it "omits RAILWATCH_INGEST_URL when the app ships to the hosted platform (#{hosted})" do
+        old = Railwatch.config.ingest_url
+        Railwatch.config.ingest_url = hosted
 
-      output = capture_task("railwatch:token")
+        output = capture_task("railwatch:token")
 
-      expect(output).to include("Railwatch platform: https://railwatch.rebulk.com")
-      expect(output).not_to include("RAILWATCH_INGEST_URL")
-    ensure
-      Railwatch.config.ingest_url = old
+        expect(output).to include("Railwatch platform: #{hosted}")
+        expect(output).not_to include("RAILWATCH_INGEST_URL")
+      ensure
+        Railwatch.config.ingest_url = old
+      end
     end
   end
 

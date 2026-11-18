@@ -539,7 +539,7 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
 
       initializer = read("config/initializers/railwatch.rb")
       expect(initializer).to include(%(# c.token = ENV["RAILWATCH_TOKEN"]))
-      expect(initializer).to include(%(# c.ingest_url = "https://railwatch.rebulk.com"))
+      expect(initializer).to include(%(# c.ingest_url = "https://app.railwatch.dev"))
       expect(initializer).not_to include("transport")
     end
 
@@ -556,10 +556,10 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
       expect(Dir.glob(File.join(destination_root, "db/**/*"))).to be_empty
     end
 
-    it "points at railwatch-server for a dashboard inside the app" do
+    it "points at railwatch-sidecar for a dashboard inside the app" do
       output = Dir.chdir(destination_root) { run_generator %w[--no-doctor] }
 
-      expect(output).to include(%(gem "railwatch-server"), "plugin :railwatch_server")
+      expect(output).to include(%(gem "railwatch-sidecar"), "plugin :railwatch_sidecar")
     end
 
     it "no longer takes --cloud: sending to a server is the only mode" do

@@ -5,9 +5,9 @@ this into that application's repository. Index of everything else:
 [`llms.txt`](llms.txt).
 
 Railwatch instruments a Rails app end to end and sends linked telemetry over
-HTTPS to a Railwatch server: Railwatch Cloud (`https://railwatch.rebulk.com`,
+HTTPS to a Railwatch server: Railwatch Cloud (`https://app.railwatch.dev`,
 the default), a self-hosted [railwatch-rs](https://github.com/Rebulk/railwatch-rs),
-or the one the [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+or the one the [`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar)
 gem runs next to Puma. Every request, job attempt, scheduled task run, and command is
 an **execution**; every query, cache read, log line, outgoing HTTP call, LLM
 call, view render, exception, and span is a child of one, linked by
@@ -32,7 +32,7 @@ inert. Configuration lives only in that initializer; every option also has a
 `RAILWATCH_*` environment variable.
 
 Embedded (the dashboard inside the app, no token to manage): add
-`gem "railwatch-server"` to the Gemfile and `plugin :railwatch_server` to
+`gem "railwatch-sidecar"` to the Gemfile and `plugin :railwatch_sidecar` to
 `config/puma.rb`. It provisions `storage/railwatch/<env>` on first boot and
 points this agent at it. Its dashboard at `/railwatch` is gated by this gem's
 `http_basic_auth_*` settings (open in development, 401 elsewhere until
@@ -41,14 +41,14 @@ password) or, with Basic off, by `c.base_controller_class`.
 
 Railwatch 0.x's in-gem embedded mode (`c.transport = :local`, `plugin :railwatch`,
 the `railwatch`/`railwatch_telemetry` databases) is gone in 1.0; remove all three
-and add railwatch-server. Its old SQLite files are not migrated.
+and add railwatch-sidecar. Its old SQLite files are not migrated.
 
 ## Rake tasks
 
 | Task | Does |
 |---|---|
 | `bin/rails railwatch:doctor` | ✓/✗ per check: token, token storage, ingest URL, reachability, middleware, engine mount, deploy, sample rates, ignored types, Kamal hook, browser client and whether an entrypoint calls it, profiler backend, test matchers. Exits non-zero on a missing or tracked token, or an unreachable host. **Run this first when telemetry is missing.** |
-| `bin/rails railwatch:authentication:configure` | Sets the HTTP Basic credentials that gate railwatch-server's dashboard, for the current `RAILS_ENV`. |
+| `bin/rails railwatch:authentication:configure` | Sets the HTTP Basic credentials that gate railwatch-sidecar's dashboard, for the current `RAILS_ENV`. |
 | `bin/rails railwatch:token` | Where to create an ingest token for this app on the server `ingest_url` points at. |
 | `bin/rails railwatch:mcp` | Paste-ready MCP client configuration for that server. |
 | `bin/rails railwatch:deploy[ref,name,url]` | Records a deploy marker on the server. Use as a release step when not deploying with Kamal. |
@@ -93,7 +93,7 @@ Per action, in a controller class body: `railwatch_sample 0.01, only: :index`,
 
 `require "railwatch/rspec"` in `spec/rails_helper.rb` (or `"railwatch/minitest"` in
 `test/test_helper.rb`). Railwatch must be enabled in the test env, which
-needs any non-blank `RAILWATCH_TOKEN` there (railwatch-server is off in test
+needs any non-blank `RAILWATCH_TOKEN` there (railwatch-sidecar is off in test
 and does not set one). Records
 go to an in-memory transport, never over the wire. All matchers are block
 matchers.
@@ -121,15 +121,15 @@ melt in production.
 ## MCP
 
 Railwatch Cloud and railwatch-rs are MCP servers at `<ingest host>/mcp`
-(with railwatch-server: the app's host plus `/railwatch/mcp`).
+(with railwatch-sidecar: the app's host plus `/railwatch/mcp`).
 Generate a personal token at Settings → Profile → "API & MCP token", then:
 
 ```sh
-claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
+claude mcp add railwatch --transport http https://app.railwatch.dev/mcp \
   --header "Authorization: Bearer rwp_your_token_here"
 ```
 
-In development with railwatch-server no token is needed from the same
+In development with railwatch-sidecar no token is needed from the same
 machine: `claude mcp add --transport http railwatch http://localhost:3000/railwatch/mcp`,
 or `bin/rails generate railwatch:agents` to write `.mcp.json`, a marked
 block in `AGENTS.md`/`CLAUDE.md` and a Claude Code skill. Development

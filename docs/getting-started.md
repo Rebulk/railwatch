@@ -7,13 +7,13 @@ nothing else has to be wired by hand.
 The `railwatch` gem is the agent: it instruments the app and sends what
 it records over HTTPS to a Railwatch server. The server is one of:
 
-- **Railwatch Cloud** at <https://railwatch.rebulk.com>, the default.
+- **Railwatch Cloud** at <https://app.railwatch.dev>, the default.
 - **Your own [railwatch-rs](https://github.com/Rebulk/railwatch-rs)**,
   one static binary that serves many apps
   ([Self-hosting](self-hosting.md)).
-- **The [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+- **The [`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar)
   gem**, which runs railwatch-rs next to Puma for this one app and serves
-  the dashboard at `/railwatch` ([below](#embedded-railwatch-server)).
+  the dashboard at `/railwatch` ([below](#embedded-railwatch-sidecar)).
 
 ## Install
 
@@ -31,7 +31,7 @@ secret in shell history or process arguments:
 ```sh
 bin/rails generate railwatch:install \
   --prompt-token \
-  --url=https://railwatch.rebulk.com \
+  --url=https://app.railwatch.dev \
   --kamal-secrets
 ```
 
@@ -42,7 +42,7 @@ bin/rails generate railwatch:install \
   deployment secret manager, or add `.env` to `.gitignore` first. Token values
   are never printed by the generator.
 - `--url=` sets `RAILWATCH_INGEST_URL`, for a self-hosted server. Leave
-  it off to use the default, `https://railwatch.rebulk.com`.
+  it off to use the default, `https://app.railwatch.dev`.
 - `--kamal-secrets` appends `RAILWATCH_TOKEN=$RAILWATCH_TOKEN` to
   `.kamal/secrets` and adds `RAILWATCH_TOKEN` under `env: secret:` in
   `config/deploy.yml`, which is the pair of edits Kamal needs to pass a
@@ -108,9 +108,9 @@ bin/rails railwatch:doctor
 ```
 ✓ token: rw_9Qv... (43 chars)
 ✓ token storage: no tracked plaintext Railwatch token found
-✓ ingest url: https://railwatch.rebulk.com
+✓ ingest url: https://app.railwatch.dev
 ✓ ingest transport security: HTTPS with certificate verification
-✓ ingest reachable: GET https://railwatch.rebulk.com/ingest/ping
+✓ ingest reachable: GET https://app.railwatch.dev/ingest/ping
 ✓ request middleware: Railwatch::Middleware::Request at position 0
 ✓ engine mounted: POST /railwatch/beacon -> railwatch/beacon#create
 ✓ deploy: 8f31c0a42e91 (from GIT_REV)
@@ -128,22 +128,22 @@ to do about a `✗` is in [`troubleshooting.md`](troubleshooting.md).
 `bin/rails railwatch:status` is the one-line version: it pings
 `{ingest_url}/ingest/ping` and prints the ingest URL, deploy, and server.
 
-## Embedded: railwatch-server
+## Embedded: railwatch-sidecar
 
 To keep telemetry inside the app instead, add the
-[`railwatch-server`](https://github.com/Rebulk/railwatch-server) gem
+[`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar) gem
 next to this one. It bundles the railwatch-rs binary for your platform,
 runs it as its own process beside Puma, and points this agent at it:
 
 ```ruby
 # Gemfile
 gem "railwatch"
-gem "railwatch-server"
+gem "railwatch-sidecar"
 ```
 
 ```ruby
 # config/puma.rb
-plugin :railwatch_server
+plugin :railwatch_sidecar
 ```
 
 On first boot it provisions `storage/railwatch/<env>` and sets the
@@ -158,9 +158,9 @@ RAILS_ENV=production bin/rails railwatch:authentication:configure
 ```
 
 To use your own admin authentication instead, turn Basic off and name a
-base controller ([Configuration](configuration.md#dashboard-gate-railwatch-server)).
+base controller ([Configuration](configuration.md#dashboard-gate-railwatch-sidecar)).
 Everything else about it (ports, data directory, email, backups) is in
-the [railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
+the [railwatch-sidecar README](https://github.com/Rebulk/railwatch-sidecar#readme).
 
 ### Coming from 0.x embedded mode
 
@@ -168,7 +168,7 @@ Railwatch 0.x could keep telemetry in two SQLite databases of the app's
 own, written by a Puma writer process, with the dashboard served from the
 gem. 1.0 removes that mode, and that Ruby dashboard is not coming back:
 there is one Railwatch engine, railwatch-rs, whether it runs next to
-Puma (railwatch-server), on its own box, or as Railwatch Cloud. If you
+Puma (railwatch-sidecar), on its own box, or as Railwatch Cloud. If you
 upgrade without these steps, a removed setting in the initializer stops
 boot with `Railwatch::Configuration::RemovedSetting`, and `plugin
 :railwatch` stops Puma, both linking back here. A leftover
@@ -183,7 +183,7 @@ box, so do step 1 before deploying. To move:
    with it.
 3. Remove the `railwatch` and `railwatch_telemetry` entries from
    `config/database.yml`.
-4. Add `railwatch-server` as above, or point the app at Railwatch Cloud
+4. Add `railwatch-sidecar` as above, or point the app at Railwatch Cloud
    or a self-hosted railwatch-rs.
 
 The old files (`storage/<env>_railwatch.sqlite3`,
@@ -203,7 +203,7 @@ Records are batched in-process and flushed every `flush_interval`
 (2 seconds by default) or every 500 records, whichever comes first, so
 the request shows up on the **Requests** page (the environment in
 Railwatch Cloud or your own server, or `/railwatch` with
-railwatch-server) a couple of seconds after you make it —
+railwatch-sidecar) a couple of seconds after you make it —
 with its queries, cache reads, view renders, and log lines already
 attached to it.
 
@@ -285,7 +285,7 @@ up, on the account.
 
 ## Deploying
 
-With railwatch-server, the server's data lives under
+With railwatch-sidecar, the server's data lives under
 `storage/railwatch/<env>`, which has to be on a volume that survives
 deploys (the Rails 8 Kamal template mounts `storage/`); its README covers
 deploys and two containers sharing a volume. The token steps below are
@@ -330,7 +330,7 @@ Environment variables only:
 
 ```sh
 RAILWATCH_TOKEN=rw_...
-RAILWATCH_INGEST_URL=https://railwatch.rebulk.com   # only when self-hosting
+RAILWATCH_INGEST_URL=https://app.railwatch.dev   # only when self-hosting
 RAILWATCH_DEPLOY=<release identifier>
 ```
 

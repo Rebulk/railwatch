@@ -10,14 +10,14 @@ module Railwatch
 
       desc "Creates config/initializers/railwatch.rb, a Kamal post-deploy hook, the browser client, and wires the test helpers. " \
            "Telemetry goes to Railwatch Cloud, or to a self-hosted Railwatch server with --url. " \
-           "To run the server inside this app instead, add the railwatch-server gem."
+           "To run the server inside this app instead, add the railwatch-sidecar gem."
 
       class_option :prompt_token, type: :boolean, default: false,
                                   desc: "Prompt for the ingest token without echoing it."
       class_option :token_stdin, type: :boolean, default: false,
                                  desc: "Read the ingest token from one line on standard input."
       class_option :url, type: :string,
-                         desc: "Ingest URL, for a self-hosted Railwatch server. Defaults to https://railwatch.rebulk.com."
+                         desc: "Ingest URL, for a self-hosted Railwatch server. Defaults to https://app.railwatch.dev."
       class_option :kamal_secrets, type: :boolean, default: false,
                                    desc: "Wire RAILWATCH_TOKEN through .kamal/secrets and config/deploy.yml's `env: secret:` list."
       class_option :doctor, type: :boolean, default: true,
@@ -179,9 +179,9 @@ module Railwatch
             4. Gate performance in CI: see docs/testing.md.
 
           Want the dashboard inside this app instead, with no token? Add the
-          railwatch-server gem (gem "railwatch-server", then
-          `plugin :railwatch_server` in config/puma.rb):
-          https://github.com/Rebulk/railwatch-server
+          railwatch-sidecar gem (gem "railwatch-sidecar", then
+          `plugin :railwatch_sidecar` in config/puma.rb):
+          https://github.com/Rebulk/railwatch-sidecar
         STEPS
       end
 

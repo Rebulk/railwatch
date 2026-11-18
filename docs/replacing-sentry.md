@@ -9,7 +9,7 @@ depends on a conditional row.
 Install Railwatch first ([`getting-started.md`](getting-started.md)); you
 can run both for a day if you want to compare, since neither knows about
 the other. The token steps below apply to Railwatch Cloud and to a
-self-hosted railwatch-rs; with the `railwatch-server` gem the token is
+self-hosted railwatch-rs; with the `railwatch-sidecar` gem the token is
 set for you.
 
 ## Decide whether Railwatch covers your workload
@@ -564,7 +564,7 @@ hook matching `rails runner …` previews, or `sentry_runner_noise.rb` under
 | Inertia visit timing | Real browser page-visit duration, prop byte size, partial reloads, SSR time, and Core Web Vitals, from a client the generator installs. |
 | Spec matchers as a CI gate | `have_railwatch_queries`, `have_railwatch_n_plus_one`, `have_railwatch_outgoing_requests` fail the pull request that regresses a hot path. |
 | Zero app-DB writes | The gem holds records in memory and ships them from a background thread; a bench gate asserts no `INSERT`/`UPDATE`/`DELETE` ever originates in `lib/railwatch`. This is why it is safe on single-writer SQLite. |
-| A dashboard inside the app | The `railwatch-server` gem runs the server next to Puma and serves the whole dashboard at `/railwatch`, with no hosted service at all ([Getting started](getting-started.md#embedded-railwatch-server)). |
+| A dashboard inside the app | The `railwatch-sidecar` gem runs the server next to Puma and serves the whole dashboard at `/railwatch`, with no hosted service at all ([Getting started](getting-started.md#embedded-railwatch-sidecar)). |
 | One SQLite database per environment | Railwatch Cloud stores each monitored environment's telemetry in its own database file, which makes retention pruning, backup, and restore per-environment operations. |
 | LLM calls | RubyLLM calls are recorded with tokens, cost, finish reason, tool calls and workflows, in the request or job that made them ([`records.md`](records.md#llm_call)). |
 | An MCP server | AI assistants can ask what broke after the last deploy, list slow routes, read an execution's timeline, and search logs ([`ai-and-mcp.md`](ai-and-mcp.md)). |

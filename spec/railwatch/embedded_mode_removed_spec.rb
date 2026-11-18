@@ -9,7 +9,7 @@ RSpec.describe "Embedded mode settings removed in 1.0" do
     it "explains the migration when #{name} is assigned" do
       config = Railwatch::Configuration.new
       expect { config.public_send(:"#{name}=", :local) }
-        .to raise_error(Railwatch::Configuration::RemovedSetting, /`#{name}` was removed.*railwatch-server.*coming-from-0x-embedded-mode/)
+        .to raise_error(Railwatch::Configuration::RemovedSetting, /`#{name}` was removed.*railwatch-sidecar.*coming-from-0x-embedded-mode/)
     end
   end
 
@@ -29,6 +29,6 @@ RSpec.describe "Embedded mode settings removed in 1.0" do
 
   it "refuses `plugin :railwatch` with the migration" do
     expect { load File.expand_path("../../lib/puma/plugin/railwatch.rb", __dir__) }
-      .to raise_error(RuntimeError, /plugin :railwatch` was removed.*railwatch_server/)
+      .to raise_error(RuntimeError, /plugin :railwatch` was removed.*railwatch_sidecar/)
   end
 end

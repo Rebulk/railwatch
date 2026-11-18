@@ -3,17 +3,17 @@
 This review covers the open-source gem that runs in a customer's Rails
 application. Railwatch Cloud is a separate service and is outside this review.
 
-## Dashboard gate (railwatch-server)
+## Dashboard gate (railwatch-sidecar)
 
-The gem serves no dashboard. With the separate `railwatch-server` gem
+The gem serves no dashboard. With the separate `railwatch-sidecar` gem
 installed, a dashboard showing every query, log line and exception the app
 recorded is proxied at `/railwatch`, and its gate is this gem's settings.
 HTTP Basic authentication is on by default. With no credentials configured,
 every dashboard request is 401 in every environment except development,
 where it is open. Credentials, once set, apply in development too. An app
 that turns Basic off gates the dashboard with its own `base_controller_class`,
-which railwatch-server's proxy controller inherits from. See
-[Configuration](configuration.md#dashboard-gate-railwatch-server).
+which railwatch-sidecar's proxy controller inherits from. See
+[Configuration](configuration.md#dashboard-gate-railwatch-sidecar).
 
 ## Transport
 
@@ -101,8 +101,8 @@ application/deployment secret and must not be committed.
   application-specific credentials and personal data.
 - Keep secrets out of exception messages, log text, source files, tenant ids,
   user resolvers, and custom context.
-- With railwatch-server, set dashboard credentials (or your own gate) before
-  deploying; see [Configuration](configuration.md#dashboard-gate-railwatch-server).
+- With railwatch-sidecar, set dashboard credentials (or your own gate) before
+  deploying; see [Configuration](configuration.md#dashboard-gate-railwatch-sidecar).
 - Use HTTPS in production and keep TLS verification enabled.
 - Put a request-body limit at the reverse proxy when the public beacon is
   enabled, and choose a shared cache if rate limits must span processes.

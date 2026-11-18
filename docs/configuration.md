@@ -12,8 +12,8 @@ values set in the initializer always win over the env var.
 | Attribute | Env var | Default | Meaning |
 |---|---|---|---|
 | `enabled` | `RAILWATCH_ENABLED` | `true` | Master switch. `Railwatch.enabled?` is also `false` whenever `token` is blank, so setting only `RAILWATCH_TOKEN` is enough to turn an install on. |
-| `token` | `RAILWATCH_TOKEN` | nil | Bearer token for `/ingest`. Required; with railwatch-server installed it is set for you. |
-| `ingest_url` | `RAILWATCH_INGEST_URL` | `https://railwatch.rebulk.com` | Server base URL. Point at a self-hosted railwatch-rs to override. |
+| `token` | `RAILWATCH_TOKEN` | nil | Bearer token for `/ingest`. Required; with railwatch-sidecar installed it is set for you. |
+| `ingest_url` | `RAILWATCH_INGEST_URL` | `https://app.railwatch.dev` | Server base URL. Point at a self-hosted railwatch-rs to override. |
 | `allow_http` | `RAILWATCH_ALLOW_HTTP` | `false` | Permit a non-loopback plain HTTP ingest URL. HTTPS is required by default; `localhost`, `127.0.0.1`, and `::1` remain available for local self-hosted development. |
 | `deploy` | `RAILWATCH_DEPLOY` | auto-detected (order below), then nil | Version tag stamped on every record and used by `railwatch:deploy`. Full 40-character SHAs are shortened to 12 characters. |
 | `detect_deploy` | `RAILWATCH_DETECT_DEPLOY` | `true` | Detect deploys beyond `RAILWATCH_DEPLOY` and `KAMAL_VERSION`. Set false when the app deliberately reports no inferred deploy. |
@@ -933,10 +933,10 @@ in `lib/railwatch.rb`, unless noted:
 `instrument_outgoing`, `flush`, `debug { }`. `pause`/`resume` are the
 ignore block's building blocks, and are nestable.
 
-## Dashboard gate (railwatch-server)
+## Dashboard gate (railwatch-sidecar)
 
 These settings do nothing on their own. They gate the dashboard that the
-[`railwatch-server`](https://github.com/Rebulk/railwatch-server) gem
+[`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar) gem
 serves at `/railwatch` inside the app, so one setting covers it whichever
 way it is installed.
 
@@ -954,7 +954,7 @@ In development with no credentials configured, it is open. An initializer
 or env var that sets them wins over credentials.
 
 An app with its own admin authentication turns Basic off and names a
-base controller. railwatch-server's proxy controller inherits from
+base controller. railwatch-sidecar's proxy controller inherits from
 `base_controller_class`, so the app's own `before_action`s (require an
 admin, redirect to sign-in) run in front of every dashboard request.
 
@@ -986,7 +986,7 @@ Ship with the gem via Rails::Engine's default `lib/tasks` convention, in
   is empty inside an app container, which has no `.git`. That is why the
   hook below posts from the deployer instead.
 - **`railwatch:authentication:configure`** writes the
-  [dashboard gate](#dashboard-gate-railwatch-server)'s HTTP Basic
+  [dashboard gate](#dashboard-gate-railwatch-sidecar)'s HTTP Basic
   credentials to the current environment's Rails credentials.
 - **`railwatch:token`** and **`railwatch:mcp`** print where to create an
   ingest token and paste-ready MCP client configuration for the server

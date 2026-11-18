@@ -7,7 +7,7 @@ require "rails/generators"
 module Railwatch
   module Generators
     # Points the coding agents working on this app at its development
-    # Railwatch: the MCP server the railwatch-server gem serves at
+    # Railwatch: the MCP server the railwatch-sidecar gem serves at
     # <mount>/mcp (no token needed from this machine in development), and a
     # short note on the dev loop. Every file it touches is either its own or
     # changed only between its markers, so it can be re-run after an upgrade.
@@ -72,7 +72,7 @@ module Railwatch
           Railwatch MCP for this app (development): #{mcp_url}
             Claude Code reads .mcp.json and asks once before it uses a project server.
             Other clients: add the same URL as a streamable HTTP MCP server.
-            No token is needed from this machine in development (railwatch-server).
+            No token is needed from this machine in development (railwatch-sidecar).
             Anywhere else, send one: Authorization: Bearer rwp_... (Settings -> Profile).
         STEPS
       end
@@ -121,7 +121,7 @@ module Railwatch
         dashboard_url.delete_suffix(mount_path)
       end
 
-      # The slug railwatch-server gives the app it provisions: the app's
+      # The slug railwatch-sidecar gives the app it provisions: the app's
       # module name, parameterized.
       def app_slug
         name = defined?(Rails) && Rails.application ? Rails.application.class.module_parent_name : File.basename(destination_root)
@@ -129,7 +129,8 @@ module Railwatch
       end
 
       def mount_path
-        path = defined?(Railwatch::Server) && Railwatch::Server.respond_to?(:config) ? Railwatch::Server.config.normalized_mount_path : "/railwatch"
+        server = [ "Sidecar", "Server" ].filter_map { |n| Railwatch.const_get(n) if Railwatch.const_defined?(n, false) }.find { _1.respond_to?(:config) }
+        path = server ? server.config.normalized_mount_path : "/railwatch"
         path.to_s.empty? ? "/railwatch" : path
       end
 

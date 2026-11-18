@@ -69,7 +69,7 @@ RSpec.describe Railwatch::Generators::AgentsGenerator do
     agents = read("AGENTS.md")
     expect(agents).to start_with(described_class::BEGIN_MARKER)
     expect(agents).to include(mcp_url, "X-Railwatch-Execution-Id", "get_execution", "get_route", "environment: \"development\"")
-    expect(agents).to include("application_slug: \"dummy\""), "the slug railwatch-server provisions: the app module, parameterized"
+    expect(agents).to include("application_slug: \"dummy\""), "the slug railwatch-sidecar provisions: the app module, parameterized"
     expect(exist?("CLAUDE.md")).to be(false)
   end
 

@@ -1,7 +1,7 @@
 ## Railwatch (performance and errors, in development)
 
 Every request, job and command this app runs in development is recorded by
-the `railwatch` gem into the server `railwatch-server` runs beside it: SQL
+the `railwatch` gem into the server `railwatch-sidecar` runs beside it: SQL
 (with the `file:line` that ran it), N+1s, views, logs and exceptions, all
 linked to one execution.
 

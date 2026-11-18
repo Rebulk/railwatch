@@ -6,6 +6,17 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Railwatch Cloud moved to **app.railwatch.dev**: it is the default
+  `ingest_url` now (was railwatch.rebulk.com, which still accepts
+  telemetry and redirects its pages). An app with `RAILWATCH_INGEST_URL`
+  set is unaffected. `railwatch:token` treats both names as the hosted
+  platform.
+- The gem that runs the dashboard inside an app is **railwatch-sidecar**
+  (renamed from railwatch-server; the old name still works there). Messages,
+  generators and docs say `gem "railwatch-sidecar"` and
+  `plugin :railwatch_sidecar`; the agents generator reads the mount path from
+  `Railwatch::Sidecar` or the older `Railwatch::Server`.
+
 - An app upgrading from 0.x embedded mode is told how to move instead of
   failing obscurely. The Ruby dashboard and its storage stay retired: the
   dashboard is railwatch-server (the railwatch-rs engine next to Puma) or

@@ -20,7 +20,7 @@ Include affected versions, reproduction steps, and impact when possible.
 
 The gem runs inside the customer Rails process and sends telemetry outward to
 the configured ingest URL: Railwatch Cloud, a self-hosted railwatch-rs, or the
-server the separate `railwatch-server` gem runs next to the app. It stores
+server the separate `railwatch-sidecar` gem runs next to the app. It stores
 nothing on disk, does not accept commands from the server, and never writes to
 the application's own database. Its one unauthenticated
 inbound route is the browser beacon mounted under `/railwatch/beacon`; that
