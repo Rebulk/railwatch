@@ -30,9 +30,10 @@ module Railwatch
 
   # Where this install's platform lives, derived from config.ingest_url:
   # railwatch:token and railwatch:mcp point at the same host the gem already
-  # ships to, so a self-hosted app never gets told to visit railwatch.rebulk.com.
+  # ships to, so a self-hosted app never gets told to visit app.railwatch.dev.
   class Endpoints
-    HOSTED_HOST = "railwatch.rebulk.com"
+    # Railwatch Cloud; railwatch.rebulk.com is its old name and redirects.
+    HOSTED_HOSTS = %w[app.railwatch.dev railwatch.rebulk.com].freeze
 
     def initialize(config)
       @uri = URI.parse(config.ingest_url)
@@ -48,7 +49,7 @@ module Railwatch
     end
 
     def self_hosted?
-      @uri.host != HOSTED_HOST
+      !HOSTED_HOSTS.include?(@uri.host)
     end
   end
 end
@@ -275,9 +276,9 @@ namespace :railwatch do
   # The same shape as `mission_control:jobs:authentication:configure`: asks
   # for a user and password and writes them to the current environment's
   # credentials under `railwatch:`, which the engine reads at boot and
-  # railwatch-server's dashboard proxy checks.
+  # railwatch-sidecar's dashboard proxy checks.
   #   RAILS_ENV=production bin/rails railwatch:authentication:configure
-  desc "Configure HTTP Basic authentication for railwatch-server's dashboard (writes Rails credentials)"
+  desc "Configure HTTP Basic authentication for railwatch-sidecar's dashboard (writes Rails credentials)"
   task "authentication:configure" => :environment do
     Railwatch::Authentication.configure
   end

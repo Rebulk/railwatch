@@ -45,7 +45,7 @@ the engine's `railwatch.subscribe` initializer returns early, so no
 subscribers and no patches are installed at all. Fix: set
 `RAILWATCH_TOKEN`, restart, and re-run `railwatch:doctor`. The `token`
 line prints the first 6 characters and the length, which is enough to
-spot a truncated or quoted value. With railwatch-server installed, the
+spot a truncated or quoted value. With railwatch-sidecar installed, the
 token is set when the server's data directory is provisioned; its boot
 log line says whether the agent was wired.
 

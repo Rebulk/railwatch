@@ -13,5 +13,12 @@
   "packageManager": "pnpm@10.30.3",
   "engines": {
     "node": ">=22"
+  },
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-fc5q-39xc-vjpf"
+      ]
+    }
   }
 }

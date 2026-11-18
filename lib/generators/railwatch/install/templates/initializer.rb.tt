@@ -4,7 +4,7 @@
 # set by the RAILWATCH_* env var named in the comment.
 Railwatch.configure do |c|
   # c.token = ENV["RAILWATCH_TOKEN"]                    # RAILWATCH_TOKEN (required)
-  # c.ingest_url = "https://railwatch.rebulk.com"     # RAILWATCH_INGEST_URL; your own server when self-hosting
+  # c.ingest_url = "https://app.railwatch.dev"     # RAILWATCH_INGEST_URL; your own server when self-hosting
   # c.deploy = "release-name"                       # RAILWATCH_DEPLOY; platform/Git auto-detected
   # c.detect_deploy = false                         # RAILWATCH_DETECT_DEPLOY; default true
 

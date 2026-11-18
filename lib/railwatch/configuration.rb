@@ -60,7 +60,7 @@ module Railwatch
       Rack::QueryParser::ParameterTypeError
     ].freeze
 
-    # What railwatch-server's dashboard proxy inherits from unless the host
+    # What railwatch-sidecar's dashboard proxy inherits from unless the host
     # names its own.
     DEFAULT_BASE_CONTROLLER = "ActionController::Base"
 
@@ -94,7 +94,7 @@ module Railwatch
     def initialize
       @enabled = env_bool("RAILWATCH_ENABLED", true)
       @token = ENV["RAILWATCH_TOKEN"]
-      # The gate in front of the dashboard railwatch-server serves at
+      # The gate in front of the dashboard railwatch-sidecar serves at
       # /railwatch, the way Mission Control Jobs does it: HTTP Basic
       # authentication is on and CLOSED by default. With no user and password
       # configured every dashboard request is 401, so an install that forgot
@@ -103,16 +103,16 @@ module Railwatch
       # by `bin/rails railwatch:authentication:configure`), from these env
       # vars, or by assignment here. A host with its own admin auth turns
       # Basic off and names a base controller. Nothing here reads them unless
-      # railwatch-server is installed.
+      # railwatch-sidecar is installed.
       @http_basic_auth_enabled = env_bool("RAILWATCH_HTTP_BASIC_AUTH_ENABLED", true)
       @http_basic_auth_user = ENV["RAILWATCH_HTTP_BASIC_AUTH_USER"]
       @http_basic_auth_password = ENV["RAILWATCH_HTTP_BASIC_AUTH_PASSWORD"]
-      # railwatch-server's dashboard proxy inherits from this class, so a
+      # railwatch-sidecar's dashboard proxy inherits from this class, so a
       # host's own before_actions (require an admin, redirect to sign-in) run
       # in front of every page. The default authenticates nothing itself
       # beyond HTTP Basic above.
       @base_controller_class = ENV.fetch("RAILWATCH_BASE_CONTROLLER_CLASS", DEFAULT_BASE_CONTROLLER)
-      @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://railwatch.rebulk.com")
+      @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://app.railwatch.dev")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
       @detect_deploy = env_bool("RAILWATCH_DETECT_DEPLOY", true)
@@ -313,7 +313,7 @@ module Railwatch
     # Whether the request carries the configured HTTP Basic credentials.
     # False when Basic is on and nothing is configured (closed), true when
     # Basic is off (the host's base controller is the gate then).
-    # railwatch-server's dashboard proxy calls it.
+    # railwatch-sidecar's dashboard proxy calls it.
     def http_basic_auth_ok?(request)
       return true unless http_basic_auth_enabled
       return true if http_basic_auth_waived?
@@ -421,7 +421,7 @@ module Railwatch
     end
 
     # Settings of 0.x embedded mode, which 1.0 removed: the dashboard and its
-    # storage are railwatch-server (or a railwatch-rs server) now. Assigning
+    # storage are railwatch-sidecar (or a railwatch-rs server) now. Assigning
     # one raises with the migration instead of a bare NoMethodError.
     EMBEDDED_MODE_SETTINGS = %i[
       transport issue_prefix repository_url retention_days dashboard_user dashboard_open
@@ -429,7 +429,7 @@ module Railwatch
     ].freeze
 
     EMBEDDED_MODE_MIGRATION = "Railwatch 1.0 removed embedded mode: this gem is the agent only, and the " \
-      "dashboard runs in railwatch-server (gem \"railwatch-server\" plus `plugin :railwatch_server` in " \
+      "dashboard runs in railwatch-sidecar (gem \"railwatch-sidecar\" plus `plugin :railwatch_sidecar` in " \
       "config/puma.rb) or a railwatch-rs server. See " \
       "https://github.com/Rebulk/railwatch/blob/main/docs/getting-started.md#coming-from-0x-embedded-mode"
 

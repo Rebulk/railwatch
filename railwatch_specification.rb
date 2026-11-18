@@ -16,7 +16,7 @@ module Railwatch
         spec.version     = Railwatch::VERSION
         spec.authors     = [ "Cole Robertson" ]
         spec.email       = [ "cole@rebulk.com" ]
-        spec.homepage    = "https://railwatch.rebulk.com"
+        spec.homepage    = "https://railwatch.dev"
         spec.summary     = "First-class monitoring for Rails applications."
         spec.description = "Railwatch instruments a Rails app end to end (requests, jobs, queries, exceptions, cache, mail, broadcasts, outgoing HTTP, logs) and ships linked events to Railwatch Cloud or a self-hosted Railwatch server."
         spec.license     = "MIT"

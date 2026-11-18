@@ -4,7 +4,7 @@ require "yaml"
 
 module Railwatch
   # `bin/rails railwatch:authentication:configure`: stores the HTTP Basic
-  # credentials railwatch-server's dashboard proxy checks in the current
+  # credentials railwatch-sidecar's dashboard proxy checks in the current
   # environment's Rails credentials, the same way Mission Control Jobs'
   # authentication:configure does. Asks for a user, generates the password,
   # appends a `railwatch:` entry to the credentials file the environment

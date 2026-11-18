@@ -17,7 +17,7 @@ RSpec.describe Railwatch::Configuration do
     {
       "RAILWATCH_ENABLED" => [ :enabled, "0", false, true ],
       "RAILWATCH_TOKEN" => [ :token, "abc123", "abc123", nil ],
-      "RAILWATCH_INGEST_URL" => [ :ingest_url, "https://custom.example", "https://custom.example", "https://railwatch.rebulk.com" ],
+      "RAILWATCH_INGEST_URL" => [ :ingest_url, "https://custom.example", "https://custom.example", "https://app.railwatch.dev" ],
       "RAILWATCH_ALLOW_HTTP" => [ :allow_http, "1", true, false ],
       "RAILWATCH_SERVER" => [ :server, "web-1", "web-1", ENV["KAMAL_HOST"] || Socket.gethostname ],
       "RAILWATCH_LOG_LEVEL" => [ :log_level, "debug", :debug, :info ],
@@ -175,7 +175,7 @@ RSpec.describe Railwatch::Configuration do
     end
   end
 
-  # The gate railwatch-server's dashboard proxy applies before it forwards
+  # The gate railwatch-sidecar's dashboard proxy applies before it forwards
   # /railwatch to the bundled server.
   describe "HTTP Basic gate" do
     def request(user = nil, password = nil)

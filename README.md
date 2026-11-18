@@ -10,10 +10,10 @@ The gem is the agent. It sends what it records over HTTPS to a
 Railwatch server, which stores it, groups exceptions into issues, sends
 alerts, and serves the dashboard and an MCP server:
 
-- **Railwatch Cloud** at <https://railwatch.rebulk.com>, the default.
+- **Railwatch Cloud** at <https://app.railwatch.dev>, the default.
 - **Self-hosted [railwatch-rs](https://github.com/Rebulk/railwatch-rs)**,
   one static binary for many apps ([Self-hosting](docs/self-hosting.md)).
-- **Embedded**: the [`railwatch-server`](https://github.com/Rebulk/railwatch-server)
+- **Embedded**: the [`railwatch-sidecar`](https://github.com/Rebulk/railwatch-sidecar)
   gem runs that server next to Puma for one app and serves the dashboard
   at `/railwatch`, with nothing else to run.
 
@@ -37,18 +37,18 @@ gem "railwatch", github: "Rebulk/railwatch"
 
 ### Embedded
 
-To keep everything inside the app, add `railwatch-server` next to this
+To keep everything inside the app, add `railwatch-sidecar` next to this
 gem:
 
 ```ruby
 # Gemfile
 gem "railwatch"
-gem "railwatch-server"
+gem "railwatch-sidecar"
 ```
 
 ```ruby
 # config/puma.rb
-plugin :railwatch_server
+plugin :railwatch_sidecar
 ```
 
 It provisions its data under `storage/railwatch/<env>` on first boot and
@@ -57,9 +57,9 @@ points this gem at it, so there is no token to manage. The dashboard at
 give it a password with
 `RAILS_ENV=production bin/rails railwatch:authentication:configure`, or
 put it behind your own admin authentication
-([Configuration](docs/configuration.md#dashboard-gate-railwatch-server)).
+([Configuration](docs/configuration.md#dashboard-gate-railwatch-sidecar)).
 Everything else is in the
-[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
+[railwatch-sidecar README](https://github.com/Rebulk/railwatch-sidecar#readme).
 
 Railwatch 0.x kept embedded telemetry in two SQLite databases written by
 `plugin :railwatch`. 1.0 removes that mode; see
@@ -107,7 +107,7 @@ expect { get "/widgets" }.not_to have_railwatch_n_plus_one
 ## Documentation
 
 - [Getting started](docs/getting-started.md) — the install and its token,
-  embedded with railwatch-server, moving from 0.x embedded mode, the three
+  embedded with railwatch-sidecar, moving from 0.x embedded mode, the three
   optional lines, and deploying with Kamal, Docker, Heroku, Render, or none
   of them.
 - [Configuration](docs/configuration.md) — every option and `RAILWATCH_*`

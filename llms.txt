@@ -7,7 +7,7 @@
 > every one of them into a single execution tree by `execution_id`/`trace_id`,
 > and sends them from a background thread over HTTPS to a Railwatch server:
 > Railwatch Cloud (the default), a self-hosted railwatch-rs, or the one the
-> separate `railwatch-server` gem runs next to Puma for an embedded dashboard
+> separate `railwatch-sidecar` gem runs next to Puma for an embedded dashboard
 > at `/railwatch`. It replaces a separate APM and a separate error tracker
 > with one gem and one configuration block, costs under a millisecond of CPU
 > per request, and never writes to the application's primary database.
@@ -20,9 +20,9 @@
 
 ## Docs
 
-- [README](README.md): what Railwatch is, where telemetry goes (Cloud, self-hosted, railwatch-server), the install, and where each document fits.
-- [Getting started](docs/getting-started.md): the install and where its token comes from, embedded with the `railwatch-server` gem, moving from 0.x embedded mode, the three optional lines, and deploying under Kamal, Docker/Heroku/Render, or no deploy tool at all.
-- [Configuration](docs/configuration.md): every configuration option and its `RAILWATCH_*` environment variable, plus the full public facade, redaction, rejection, transport and buffering behaviour, the dashboard gate railwatch-server uses, and the rake tasks.
+- [README](README.md): what Railwatch is, where telemetry goes (Cloud, self-hosted, railwatch-sidecar), the install, and where each document fits.
+- [Getting started](docs/getting-started.md): the install and where its token comes from, embedded with the `railwatch-sidecar` gem, moving from 0.x embedded mode, the three optional lines, and deploying under Kamal, Docker/Heroku/Render, or no deploy tool at all.
+- [Configuration](docs/configuration.md): every configuration option and its `RAILWATCH_*` environment variable, plus the full public facade, redaction, rejection, transport and buffering behaviour, the dashboard gate railwatch-sidecar uses, and the rake tasks.
 - [Record types](docs/records.md): every record type the gem ships and every attribute on it, including RubyLLM calls (tokens, cost, finish reason, tool calls, workflows), sourced from the code that builds it.
 - [Testing](docs/testing.md): the RSpec and Minitest matchers (`have_railwatch_queries`, `have_railwatch_n_plus_one`, `record_railwatch_span`, `record_railwatch_exception`, `have_railwatch_outgoing_requests`, `have_railwatch_http_in_transaction`) and a CI performance-gate recipe.
 - [Production source maps](docs/source-maps.md): hidden Vite maps, private upload before publishing assets, safe opt-in deletion, resolved browser stacks and default issue grouping.

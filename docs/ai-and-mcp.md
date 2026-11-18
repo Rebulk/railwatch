@@ -11,11 +11,11 @@ priority, leave a comment — and every write is signed with your user and the
 agent's name in the issue's activity feed.
 
 The endpoint is `<your ingest host>/mcp`. For the hosted platform that's
-`https://railwatch.rebulk.com/mcp`; if you self-host, it is your own host (see
-[`self-hosting.md`](self-hosting.md)). With the `railwatch-server` gem the
+`https://app.railwatch.dev/mcp`; if you self-host, it is your own host (see
+[`self-hosting.md`](self-hosting.md)). With the `railwatch-sidecar` gem the
 server runs under the app's dashboard path, so the endpoint is the app's own
 host plus `/railwatch/mcp`; see the
-[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme).
+[railwatch-sidecar README](https://github.com/Rebulk/railwatch-sidecar#readme).
 In development that endpoint needs no token from the same machine (see
 [In development](#in-development) below). For Railwatch Cloud and a
 self-hosted server the gem knows which one you're on:
@@ -28,7 +28,7 @@ prints every block below with your platform's host already filled in.
 
 ### In development
 
-With `railwatch-server`, the app's own `bin/dev` serves MCP at
+With `railwatch-sidecar`, the app's own `bin/dev` serves MCP at
 `http://localhost:3000/railwatch/mcp`, and the proxy signs agent requests
 for you, so no token is needed:
 
@@ -42,7 +42,7 @@ That holds only in development, for a request from the same machine to a
 `localhost`/`127.0.0.1`/`::1` host name, so anyone who can reach the dev
 server's port from this machine can read and comment on its development
 data, as they can already open its dashboard. Other environments need a
-token unless the app sets `Railwatch::Server.config.agent_access = true`.
+token unless the app sets `Railwatch::Sidecar.config.agent_access = true`.
 Each recorded development response also carries `Server-Timing` and
 `X-Railwatch-Execution-Id` (`timing_headers` in
 [`configuration.md`](configuration.md)), so an agent can `curl -i` a page and
@@ -64,13 +64,13 @@ each with a copy button — so the fastest path is: generate, copy, paste.
 
 ## 2. Connect a client
 
-Everything below uses `https://railwatch.rebulk.com/mcp`; substitute your own
+Everything below uses `https://app.railwatch.dev/mcp`; substitute your own
 host if you self-host, and `rwp_your_token_here` for the token.
 
 ### Claude Code
 
 ```sh
-claude mcp add railwatch --transport http https://railwatch.rebulk.com/mcp \
+claude mcp add railwatch --transport http https://app.railwatch.dev/mcp \
   --header "Authorization: Bearer rwp_your_token_here"
 ```
 
@@ -87,7 +87,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
       "args": [
         "-y",
         "mcp-remote",
-        "https://railwatch.rebulk.com/mcp",
+        "https://app.railwatch.dev/mcp",
         "--header",
         "Authorization: Bearer rwp_your_token_here"
       ]
@@ -104,7 +104,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 {
   "mcpServers": {
     "railwatch": {
-      "url": "https://railwatch.rebulk.com/mcp",
+      "url": "https://app.railwatch.dev/mcp",
       "headers": { "Authorization": "Bearer rwp_your_token_here" }
     }
   }
@@ -120,7 +120,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
   "servers": {
     "railwatch": {
       "type": "http",
-      "url": "https://railwatch.rebulk.com/mcp",
+      "url": "https://app.railwatch.dev/mcp",
       "headers": { "Authorization": "Bearer rwp_your_token_here" }
     }
   }
@@ -140,7 +140,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
       "args": [
         "-y",
         "mcp-remote",
-        "https://railwatch.rebulk.com/mcp",
+        "https://app.railwatch.dev/mcp",
         "--header",
         "Authorization: Bearer rwp_your_token_here"
       ]
@@ -152,7 +152,7 @@ Claude Desktop speaks stdio, so it needs the `mcp-remote` bridge. In
 ### Check it without a client
 
 ```sh
-curl -sS https://railwatch.rebulk.com/mcp \
+curl -sS https://app.railwatch.dev/mcp \
   -H "Authorization: Bearer rwp_your_token_here" \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
@@ -160,8 +160,8 @@ curl -sS https://railwatch.rebulk.com/mcp \
 
 A JSON body listing tools means the token works. A `401` means it doesn't.
 
-`GET https://railwatch.rebulk.com/mcp` and
-`GET https://railwatch.rebulk.com/.well-known/mcp.json` describe the server —
+`GET https://app.railwatch.dev/mcp` and
+`GET https://app.railwatch.dev/.well-known/mcp.json` describe the server —
 name, version, protocol version, transport, tool and prompt names, and how
 to authenticate — with no token at all, for clients that probe a host before
 they're configured.

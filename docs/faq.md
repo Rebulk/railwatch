@@ -59,17 +59,17 @@ single-writer SQLite app into a "database is locked" incident.
 ## Where does the data go, and how long is it kept?
 
 One gzip-NDJSON POST to `{ingest_url}/ingest` per batch, to Railwatch
-Cloud, a self-hosted railwatch-rs, or the server the `railwatch-server`
+Cloud, a self-hosted railwatch-rs, or the server the `railwatch-sidecar`
 gem runs next to the app. The gem keeps nothing on disk itself.
 
 Railwatch Cloud stores each monitored environment's telemetry in its
 own database, prunes raw rows on a retention window, and keeps hourly
 rollups for the charts. Retention there is set by the account's plan
 tier, not by the gem — 7, 30, or 90 days depending on the plan. For
-railwatch-rs, self-hosted or through railwatch-server, retention and
+railwatch-rs, self-hosted or through railwatch-sidecar, retention and
 backups are server settings
 ([railwatch-rs SELF-HOST.md](https://github.com/Rebulk/railwatch-rs/blob/main/docs/SELF-HOST.md),
-[railwatch-server README](https://github.com/Rebulk/railwatch-server#readme)).
+[railwatch-sidecar README](https://github.com/Rebulk/railwatch-sidecar#readme)).
 
 ## What about PII?
 

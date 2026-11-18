@@ -43,7 +43,7 @@ begin
   assert!(package_spec.version.to_s == version, "package version does not match Railwatch::VERSION")
   assert!(package_spec.authors == [ "Cole Robertson" ], "package author changed")
   assert!(package_spec.licenses == [ "MIT" ], "package must use the MIT license")
-  assert!(package_spec.homepage == "https://railwatch.rebulk.com", "package homepage changed")
+  assert!(package_spec.homepage == "https://railwatch.dev", "package homepage changed")
   assert!(package_spec.required_ruby_version == Gem::Requirement.new(">= 3.4"), "supported Ruby constraint changed")
   assert!(package_spec.metadata["rubygems_mfa_required"] == "true", "RubyGems MFA must be required")
   expected_source = "https://github.com/Rebulk/railwatch"

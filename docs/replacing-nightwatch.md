@@ -6,7 +6,7 @@ produced them, and a dashboard turns them into routes, jobs, queries,
 issues, and alerts. Railwatch Cloud is the hosted option; unlike
 Nightwatch, the server can also be self-hosted
 ([railwatch-rs](self-hosting.md)) or run inside your app with the
-[`railwatch-server`](getting-started.md#embedded-railwatch-server) gem.
+[`railwatch-sidecar`](getting-started.md#embedded-railwatch-sidecar) gem.
 If you know Nightwatch, you already know how to read Railwatch — this page maps the vocabulary and points out the three
 places the Rails answer is genuinely different.
 

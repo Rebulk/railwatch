@@ -28,7 +28,7 @@ require "railwatch/minitest"
 
 Railwatch must be *enabled* in the test environment or every block would look
 empty, and it is enabled only with a token present: set any non-blank
-`RAILWATCH_TOKEN` for the test env. railwatch-server is off under
+`RAILWATCH_TOKEN` for the test env. railwatch-sidecar is off under
 `Rails.env.test` and does not set one for you. Records go to an
 in-memory transport, never over the network, and there is no database to
 prepare. If Railwatch is disabled, the matchers raise

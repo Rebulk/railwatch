@@ -21,7 +21,7 @@ module Railwatch
       Railwatch::Console.silence!
     end
 
-    # The dashboard gate railwatch-server's proxy applies. Same source
+    # The dashboard gate railwatch-sidecar's proxy applies. Same source
     # Mission Control Jobs reads: railwatch.http_basic_auth_user and
     # _password in Rails credentials, which `bin/rails
     # railwatch:authentication:configure` writes. An initializer or env var
