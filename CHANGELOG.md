@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.1 (2026-11-18)
+
 - Security fixes from the 2026-11 review:
   - **Browser URLs no longer carry query strings or fragments.** Reset,
     magic-link and OAuth links put their secret there. The beacon now
