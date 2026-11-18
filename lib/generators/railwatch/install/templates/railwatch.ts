@@ -78,10 +78,12 @@ export interface RailwatchOptions {
   denyUrls?: RegExp[]
   // The tenant the user is looking at. The beacon posts to /railwatch/beacon,
   // which is outside whatever path or subdomain the app scopes tenants by,
-  // so the server cannot work this out for itself. Read on every flush, so
-  // it follows the user across tenants without a page load. Return the
-  // signed hint the server rendered with Railwatch.beacon_tenant_hint(tenant):
-  // the beacon ignores a bare tenant name, which anyone could send.
+  // so the server cannot work this out for itself. Read on every flush:
+  // return the current tenant's hint, signed by the server with
+  // Railwatch.beacon_tenant_hint(tenant) (in an Inertia app, a shared prop
+  // read from the current page; a layout meta tag only changes on a full
+  // page load). The beacon ignores a bare tenant name, which anyone could
+  // send.
   tenant?: () => string | undefined
   // Send each page's query string. Off: reset, magic-link and OAuth secrets
   // ride there. The server keeps one only when

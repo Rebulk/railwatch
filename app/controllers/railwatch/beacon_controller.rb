@@ -23,7 +23,11 @@ module Railwatch
     # A click crumb names the element and quotes a little of its visible
     # text, which is page content: enough to recognise a button, not a row.
     MAX_CLICK_TEXT = 32
+    # A browser URL is cleaned at up to this length, then stored at 2048.
+    MAX_URL_INPUT = 16_384
     CLICK_TEXT = /\A(?<target>[^"]*) "(?<text>.*)"\z/m
+    # The same, cut to MAX_CRUMB_TEXT before its closing quote arrived.
+    CLICK_TEXT_UNTERMINATED = /\A(?<target>[^"]*) "(?<text>.*)\z/m
     NAVIGATE_TEXT = /\A(?<method>[A-Z]+) (?<url>.*)\z/m
     CONSOLE_LEVEL = /\A(?<level>error|warn)\b/
     MAX_CONTEXT_KEYS = 20
@@ -288,7 +292,7 @@ module Railwatch
         match = NAVIGATE_TEXT.match(text) or return browser_url(text)
         "#{match[:method]} #{browser_url(match[:url])}"
       when "click"
-        match = CLICK_TEXT.match(text) or return text
+        match = CLICK_TEXT.match(text) || CLICK_TEXT_UNTERMINATED.match(text) or return text
         quoted = match[:text][0, MAX_CLICK_TEXT]
         quoted.empty? ? match[:target] : %(#{match[:target]} "#{quoted}")
       when "console"
@@ -304,8 +308,11 @@ module Railwatch
     # without its query unless the app opted in
     # (config.capture_browser_query_strings): reset, magic-link and OAuth
     # secrets ride there. The same treatment a server-side request URL gets.
+    #
+    # Cleaned at the length the beacon carried it, and cut to 2048 only
+    # after: cut first, a long userinfo loses its "@" and survives.
     def browser_url(value)
-      url = safe_string(value, 2048)
+      url = safe_string(value, MAX_URL_INPUT)
       return Record.url_without_sensitive_components(url, limit: 2048) unless Railwatch.config.capture_browser_query_strings
 
       url = url[0, url.index("#")] if url.include?("#")

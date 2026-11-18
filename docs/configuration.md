@@ -791,6 +791,27 @@ with the hint rendered by the layout:
 <meta name="railwatch-tenant" content="<%= Railwatch.beacon_tenant_hint(Current.account&.slug) %>">
 ```
 
+The layout renders on a full page load only. In an Inertia app, where
+switching tenant is a visit and not a page load, that meta tag keeps the
+first tenant's hint. Send the hint as a shared prop instead, and read it
+from the current page on every flush:
+
+```ruby
+# app/controllers/application_controller.rb
+inertia_share railwatch_tenant: -> { Railwatch.beacon_tenant_hint(Current.account&.slug) }
+```
+
+```ts
+import { router } from "@inertiajs/react"
+
+let tenantHint: string | undefined
+router.on("navigate", (event) => { tenantHint = event.detail.page.props.railwatch_tenant as string | undefined })
+startRailwatch({ tenant: () => tenantHint })
+```
+
+An app that only changes tenant with a full page load can use the meta
+tag as it is.
+
 The same file exports two more things. `railwatchRootOptions()` returns
 React 19's `onCaughtError`/`onUncaughtError` root options, used as
 `createRoot(el, railwatchRootOptions())`. That is what reports an error a
@@ -979,8 +1000,12 @@ admin, redirect to sign-in) run in front of every dashboard request.
 
 Basic off with `base_controller_class` left at `ActionController::Base` is
 no gate at all. `Railwatch.config.dashboard_gate_configured?` is false
-then, and railwatch-sidecar refuses to serve the dashboard outside
-development in that configuration.
+then. railwatch-sidecar 0.2.1 and later refuse to serve the dashboard
+outside development in that configuration (a 503 that says what to set,
+and an error at boot), and sign a visitor the app does not name as a
+`member`. railwatch-sidecar 0.2.0 and earlier (and railwatch-server) do
+neither: they serve that configuration to anyone, as an admin. Upgrade
+the sidecar, or keep Basic on.
 
 ```ruby
 c.dashboard_default_role = "member"  # RAILWATCH_DASHBOARD_DEFAULT_ROLE; "member" or "admin"

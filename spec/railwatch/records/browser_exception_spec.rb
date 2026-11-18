@@ -118,6 +118,18 @@ RSpec.describe "browser exception record", type: :request do
     expect(context["visit"]).to eq("https://app.example/auth/callback")
   end
 
+  # Userinfo longer than the stored URL must be removed before the URL is
+  # cut to length, or the cut leaves the credential with no "@" to find.
+  it "never stores a credential carried in the userinfo of a very long page URL" do
+    secret = "user:" + ("p" * 3000)
+    post_beacon(errors: [ { name: "TypeError", message: "boom", url: "https://#{secret}@app.example/home",
+                            visit: "https://#{secret}@app.example/home" } ])
+
+    context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
+    expect(context["url"]).to eq("https://app.example/home")
+    expect(context["visit"]).to eq("https://app.example/home")
+  end
+
   it "keeps the page's query, but never its fragment, when the app opts in" do
     Railwatch.config.capture_browser_query_strings = true
     post_beacon(errors: [ { name: "TypeError", message: "boom", url: "/search?q=boots#results" } ])
@@ -329,6 +341,21 @@ RSpec.describe "browser exception record", type: :request do
       trail = post_crumbs([ { at: 0, kind: "click", text: %(td#balance.cell "#{text}") } ])
 
       expect(trail.sole["text"]).to eq(%(td#balance.cell "#{text[0, 32]}"))
+    end
+
+    # The crumb is cut to 500 characters first; a long quote then loses its
+    # closing mark and must still not keep more than the short prefix.
+    it "keeps only a short prefix of a clicked element's text even when the crumb was too long to keep its closing quote" do
+      text = "Account 4485 1234 5678 9012 " * 30
+      trail = post_crumbs([ { at: 0, kind: "click", text: %(td#balance.cell "#{text}") } ])
+
+      expect(trail.sole["text"]).to eq(%(td#balance.cell "#{text[0, 32]}"))
+    end
+
+    it "keeps a click crumb that names only its target" do
+      trail = post_crumbs([ { at: 0, kind: "click", text: "button#save" } ])
+
+      expect(trail.sole["text"]).to eq("button#save")
     end
 
     it "keeps the level of a console crumb but not what was logged, unless the app opts in" do
