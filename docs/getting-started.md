@@ -330,7 +330,7 @@ Environment variables only:
 
 ```sh
 RAILWATCH_TOKEN=rw_...
-RAILWATCH_INGEST_URL=https://app.railwatch.dev   # only when self-hosting
+RAILWATCH_INGEST_URL=https://monitor.example.com   # only when self-hosting: your server
 RAILWATCH_DEPLOY=<release identifier>
 ```
 
