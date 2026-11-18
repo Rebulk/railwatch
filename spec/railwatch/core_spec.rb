@@ -210,15 +210,33 @@ RSpec.describe Railwatch do
       end
     end
 
-    it "treats an unknown adapter as backslash-escaping, which masks more rather than less" do
+    it "masks the rest of the statement when an unknown adapter's backslash could escape a quote or not" do
       slash = "\\"
       sql = "SELECT 'it#{slash}'s customer-secret@example.test', 42"
 
       [ nil, "", "AcmeDB" ].each do |adapter|
         normalized = described_class.normalize(sql, adapter: adapter)
-        expect(normalized).to eq("SELECT ?, ?")
+        expect(normalized).to eq("SELECT ?")
         expect(normalized).not_to include("customer-secret@example.test")
       end
+    end
+
+    # A trailing backslash ends the value under the standard reading and
+    # escapes the quote under MySQL's, so the two readings pair every later
+    # quote differently and one of them puts the next value outside quotes.
+    it "never leaks a later value when an unknown adapter's backslash makes the quoting ambiguous" do
+      slash = "\\"
+      sql = "SELECT * FROM files WHERE path = 'C:#{slash}' AND ssn = '123-45-6789' AND email = 'a@b.com'"
+
+      [ nil, "", "AcmeDB" ].each do |adapter|
+        normalized = described_class.normalize(sql, adapter: adapter)
+        expect(normalized).to eq("SELECT * FROM files WHERE path = ?")
+        expect(normalized).not_to include("a@b.com")
+        expect(normalized).not_to include("123")
+      end
+      # A known dialect has one reading, so its shape is kept.
+      expect(described_class.normalize(sql, adapter: "sqlite"))
+        .to eq("SELECT * FROM files WHERE path = ? AND ssn = ? AND email = ?")
     end
 
     it "fails closed for MySQL-style values and comments when adapter metadata is unknown" do

@@ -6,6 +6,61 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security fixes from the 2026-11 review:
+  - **Browser URLs no longer carry query strings or fragments.** Reset,
+    magic-link and OAuth links put their secret there. The beacon now
+    stores only the path of a visit's `url`, an error's page `url` and
+    `visit`, and each navigation breadcrumb, the way server-side request
+    records always have; URL userinfo is dropped too. An app that wants
+    queries opts in on both sides: `c.capture_browser_query_strings = true`
+    (`RAILWATCH_CAPTURE_BROWSER_QUERY_STRINGS`) and
+    `startRailwatch({ captureQueryStrings: true })`.
+  - **Console breadcrumbs keep only the level** (`error`/`warn`), not what
+    was logged; opt in with `c.capture_browser_console_arguments = true`
+    and `startRailwatch({ captureConsoleArguments: true })`. A click
+    breadcrumb quotes at most 32 characters of the element's text (was 80).
+  - The server applies all of this to every beacon, so an app still running
+    an older copy of the browser client is covered as soon as it upgrades
+    the gem. The client file itself is copied into the app and is not
+    updated by `bundle update`: take the new one with
+    `bin/rails generate railwatch:install --force --no-doctor` (or copy
+    `Railwatch.browser_client_path` over `lib/railwatch.ts`), so the
+    browser stops sending queries in the first place.
+  - **The beacon's tenant hint must be signed.** The beacon takes no
+    credential, so anyone could file browser errors and session events
+    under any tenant. `startRailwatch({ tenant })` must now return
+    `Railwatch.beacon_tenant_hint(tenant)`, rendered into the page by the
+    server (for example in a `<meta>` tag); a bare tenant name is ignored
+    and the records carry no tenant. A tenant the server resolves for
+    itself still wins. **Breaking** for apps that derived the tenant in
+    the browser.
+  - **railwatch-sidecar's default dashboard role is `member`**, not
+    `admin`, for a visitor the app did not name (the HTTP Basic user or the
+    single operator): `c.dashboard_default_role`
+    (`RAILWATCH_DASHBOARD_DEFAULT_ROLE`), `"admin"` restores the old
+    behaviour. Takes effect with a railwatch-sidecar release that reads it.
+  - New `Railwatch.config.dashboard_gate_configured?`: false when HTTP Basic
+    is off and `base_controller_class` is still `ActionController::Base`,
+    which leaves the dashboard open to anyone. railwatch-sidecar uses it to
+    refuse to serve the dashboard outside development in that configuration.
+  - More headers are masked by default: `X-Forwarded-Email`,
+    `X-Forwarded-User`, `X-Remote-User`, `X-Client-Cert`,
+    `X-Forwarded-Client-Cert`, `Ocp-Apim-Subscription-Key`, `X-Session-Id`,
+    `X-Password` (any name with a `password`, `session-id`,
+    `subscription-key`, `client-cert`, or forwarded/remote user or email
+    segment).
+  - SQL from a connection whose adapter is unknown (or reported as empty)
+    could leave literals in the normalized statement:
+    `path = 'C:\' AND ssn = '123-45-6789' AND email = 'a@b.com'` kept
+    `a@b.com`. When the two backslash readings disagree on where a quoted
+    value ends, the rest of the statement is now masked.
+  - The generated Kamal `post-deploy` hook passes the ingest token to curl
+    on stdin instead of its command line, where `ps` showed it. Existing
+    hooks are not rewritten: regenerate with
+    `bin/rails generate railwatch:install --force --no-doctor`, or change
+    `-H "Authorization: Bearer $RAILWATCH_TOKEN"` to
+    `printf 'Authorization: Bearer %s\n' "$RAILWATCH_TOKEN" | curl ... -H @-`.
+
 - Railwatch Cloud moved to **app.railwatch.dev**: it is the default
   `ingest_url` now (was railwatch.rebulk.com, which still accepts
   telemetry and redirects its pages). An app with `RAILWATCH_INGEST_URL`

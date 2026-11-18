@@ -20,6 +20,12 @@ module Railwatch
     MAX_ERROR_STACK = 8192
     MAX_BREADCRUMBS = 20
     MAX_CRUMB_TEXT = 500
+    # A click crumb names the element and quotes a little of its visible
+    # text, which is page content: enough to recognise a button, not a row.
+    MAX_CLICK_TEXT = 32
+    CLICK_TEXT = /\A(?<target>[^"]*) "(?<text>.*)"\z/m
+    NAVIGATE_TEXT = /\A(?<method>[A-Z]+) (?<url>.*)\z/m
+    CONSOLE_LEVEL = /\A(?<level>error|warn)\b/
     MAX_CONTEXT_KEYS = 20
     MAX_CONTEXT_VALUE = 4096
     CRUMB_KINDS = %w[console click navigate].freeze
@@ -43,7 +49,7 @@ module Railwatch
           group: Record.group_hash(safe_string(v["component"], 255)),
           timestamp: safe_float(v["started_at"]) / 1000.0,
           component: safe_string(v["component"], 255),
-          url: safe_string(v["url"], 2048),
+          url: browser_url(v["url"]),
           method: safe_string(v["method"], 10),
           duration: (safe_float(v["duration_ms"]) * 1000).round,
           status: safe_string(v["status"], 20),
@@ -202,9 +208,11 @@ module Railwatch
     # through whatever path or subdomain the app scopes tenants by, so an
     # app that scopes them at all resolves nothing here -- the client's hint
     # (startRailwatch({ tenant })) fills that gap, and never overrides a
-    # tenant the server did resolve for itself.
+    # tenant the server did resolve for itself. The beacon takes no
+    # credential, so the hint counts only when the app signed it into the
+    # page (Railwatch.beacon_tenant_hint); a bare name is anyone's to choose.
     def beacon_tenant(hint)
-      Context.current_tenant || (hint.is_a?(String) ? safe_string(hint, 255).presence : nil)
+      Context.current_tenant || Railwatch.verified_beacon_tenant(hint)&.then { |t| safe_string(t, 255).presence }
     end
 
     # The flush's session id, for an error that does not name its own (a
@@ -241,9 +249,9 @@ module Railwatch
         line: top[:line],
         frames: frames,
         context: Context.serialized_with(error_context(error["context"]).merge(browser: {
-          url: safe_string(error["url"], 2048).presence,
+          url: browser_url(error["url"]).presence,
           component: safe_string(error["component"], 255).presence,
-          visit: safe_string(error["visit"], 2048).presence,
+          visit: browser_url(error["visit"]).presence,
           session: session_id,
           tab: Sessions.browser_id(error["tab_id"]),
           user_agent: safe_string(request.user_agent, 256).presence,
@@ -265,10 +273,45 @@ module Railwatch
         next unless crumb
         kind = safe_string(crumb["kind"], 20)
         next unless CRUMB_KINDS.include?(kind)
-        text = safe_string(crumb["text"], MAX_CRUMB_TEXT)
+        text = crumb_text(kind, safe_string(crumb["text"], MAX_CRUMB_TEXT))
         next if text.empty?
         { at: safe_float(crumb["at"]), kind: kind, text: text }
       end
+    end
+
+    # The browser client trims these itself now, but a copy generated before
+    # it did sends the full URL of each navigation, a click's text, and the
+    # arguments of every console call, so the server holds the line too.
+    def crumb_text(kind, text)
+      case kind
+      when "navigate"
+        match = NAVIGATE_TEXT.match(text) or return browser_url(text)
+        "#{match[:method]} #{browser_url(match[:url])}"
+      when "click"
+        match = CLICK_TEXT.match(text) or return text
+        quoted = match[:text][0, MAX_CLICK_TEXT]
+        quoted.empty? ? match[:target] : %(#{match[:target]} "#{quoted}")
+      when "console"
+        return text if Railwatch.config.capture_browser_console_arguments
+
+        CONSOLE_LEVEL.match(text)&.[](:level) || "console"
+      else
+        text
+      end
+    end
+
+    # A page URL the browser sent, without its fragment or userinfo, and
+    # without its query unless the app opted in
+    # (config.capture_browser_query_strings): reset, magic-link and OAuth
+    # secrets ride there. The same treatment a server-side request URL gets.
+    def browser_url(value)
+      url = safe_string(value, 2048)
+      return Record.url_without_sensitive_components(url, limit: 2048) unless Railwatch.config.capture_browser_query_strings
+
+      url = url[0, url.index("#")] if url.include?("#")
+      path, query = url.split("?", 2)
+      clean = Record.url_without_sensitive_components(path, limit: 2048)
+      query ? "#{clean}?#{query}"[0, 2048] : clean
     end
 
     # Whatever the app handed Railwatch's reportError -- a React error

@@ -29,6 +29,27 @@ RSpec.describe "visit record", type: :request do
     expect(railwatch_records(:request)).to be_empty
   end
 
+  describe "the visit's url" do
+    def visit_url(url)
+      post_beacon([ { component: "X", url: url, method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1 } ])
+      railwatch_records(:visit).last[:url]
+    end
+
+    it "never stores a reset, magic-link or OAuth secret riding in the query or fragment" do
+      expect(visit_url("/password/edit?reset_token=s3cret")).to eq("/password/edit")
+      expect(visit_url("/magic?token=abc#x")).to eq("/magic")
+      expect(visit_url("https://user:pw@app.example/cb#access_token=t0k")).to eq("https://app.example/cb")
+    end
+
+    it "keeps the query, but never the fragment, when the app opts in to browser query strings" do
+      Railwatch.config.capture_browser_query_strings = true
+
+      expect(visit_url("/search?q=boots#results")).to eq("/search?q=boots")
+    ensure
+      Railwatch.config.capture_browser_query_strings = false
+    end
+  end
+
   describe "Core Web Vitals" do
     def post_vitals(vitals)
       post_beacon([ { component: "Widgets/Index", url: "/widgets", method: "GET",

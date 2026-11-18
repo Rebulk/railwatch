@@ -101,9 +101,30 @@ RSpec.describe "browser exception record", type: :request do
     context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
     expect(context["url"]).to eq("/issues/7")
     expect(context["component"]).to eq("issues/show")
-    expect(context["visit"]).to eq("/issues/7?tab=events")
+    expect(context["visit"]).to eq("/issues/7")
     expect(context["session"]).to eq("sess123")
     expect(context["user_agent"]).to include("Chrome/141")
+  end
+
+  # Reset links, magic links and OAuth callbacks carry their secret in the
+  # query or the fragment. Server-side request records never keep a query,
+  # and a copy of the browser client from before 1.7 still sends one.
+  it "never stores the query or fragment of the page or visit an error happened on" do
+    post_beacon(errors: [ { name: "TypeError", message: "boom", url: "/password/edit?reset_token=s3cret",
+                            visit: "https://app.example/auth/callback?code=oauth-code#access_token=t0k" } ])
+
+    context = JSON.parse(railwatch_records(:exception).sole[:context]).fetch("browser")
+    expect(context["url"]).to eq("/password/edit")
+    expect(context["visit"]).to eq("https://app.example/auth/callback")
+  end
+
+  it "keeps the page's query, but never its fragment, when the app opts in" do
+    Railwatch.config.capture_browser_query_strings = true
+    post_beacon(errors: [ { name: "TypeError", message: "boom", url: "/search?q=boots#results" } ])
+
+    expect(JSON.parse(railwatch_records(:exception).sole[:context]).dig("browser", "url")).to eq("/search?q=boots")
+  ensure
+    Railwatch.config.capture_browser_query_strings = false
   end
 
   it "carries the tab the error was thrown in beside its session" do
@@ -276,7 +297,7 @@ RSpec.describe "browser exception record", type: :request do
                             { at: at + 20, kind: "console", text: "error: boom" } ])
 
       expect(trail.map { |c| c["kind"] }).to eq(%w[navigate click console])
-      expect(trail.last["text"]).to eq("error: boom")
+      expect(trail.last["text"]).to eq("error") # what was logged is opt-in
       expect(trail.first["at"]).to be_within(1).of(at)
     end
 
@@ -292,6 +313,34 @@ RSpec.describe "browser exception record", type: :request do
                             "not a crumb", { at: 0, kind: "click", text: "button" } ])
 
       expect(trail).to eq([ { "at" => 0.0, "kind" => "click", "text" => "button" } ])
+    end
+
+    # A copy of the client from before 1.7 sends the full URL of every
+    # navigation; the server is what keeps its query out of the record.
+    it "drops the query and fragment from a navigation crumb, keeping the method and path" do
+      trail = post_crumbs([ { at: 0, kind: "navigate", text: "GET /password/edit?reset_token=s3cret#step-2" },
+                            { at: 0, kind: "navigate", text: "POST https://user:pw@app.example/session?code=oauth" } ])
+
+      expect(trail.map { |c| c["text"] }).to eq([ "GET /password/edit", "POST https://app.example/session" ])
+    end
+
+    it "keeps only a short prefix of a clicked element's visible text" do
+      text = "Statement for Alice Smith, account 4485 1234 5678 9012"
+      trail = post_crumbs([ { at: 0, kind: "click", text: %(td#balance.cell "#{text}") } ])
+
+      expect(trail.sole["text"]).to eq(%(td#balance.cell "#{text[0, 32]}"))
+    end
+
+    it "keeps the level of a console crumb but not what was logged, unless the app opts in" do
+      trail = post_crumbs([ { at: 0, kind: "console", text: "error: payment failed for alice@example.com" } ])
+      expect(trail.sole["text"]).to eq("error")
+
+      Railwatch.config.capture_browser_console_arguments = true
+      post_beacon(errors: [ { name: "TypeError", message: "boom2", breadcrumbs: [ { at: 0, kind: "console", text: "warn: slow" } ] } ])
+      kept = JSON.parse(railwatch_records(:exception).last[:context]).fetch("browser")["breadcrumbs"]
+      expect(kept.sole["text"]).to eq("warn: slow")
+    ensure
+      Railwatch.config.capture_browser_console_arguments = false
     end
 
     it "leaves breadcrumbs out entirely when the client sent none" do
@@ -328,18 +377,33 @@ RSpec.describe "browser exception record", type: :request do
     end
   end
 
+  # The beacon takes no credential, so a tenant it is merely told is anyone's
+  # to choose. Only a hint the app signed for this page is believed.
   describe "the tenant hint" do
-    it "stamps the tenant the client reported, since the beacon is outside the app's tenant scoping" do
-      post_beacon(tenant: "acme", errors: [ { name: "TypeError", message: "boom" } ])
+    it "stamps the tenant the app signed into the page, since the beacon is outside the app's tenant scoping" do
+      post_beacon(tenant: Railwatch.beacon_tenant_hint("acme"), errors: [ { name: "TypeError", message: "boom" } ])
 
       expect(railwatch_records(:exception).sole[:tenant]).to eq("acme")
       expect(railwatch_records(:session)).to be_empty
     end
 
+    it "ignores a tenant the client merely names, so nobody can file errors into another tenant" do
+      post_beacon(tenant: "globex", errors: [ { name: "TypeError", message: "boom" } ])
+
+      expect(railwatch_records(:exception).sole[:tenant]).to be_nil
+    end
+
+    it "ignores a signed hint that was tampered with" do
+      forged = Railwatch.beacon_tenant_hint("acme").sub(/\A./) { |c| c == "a" ? "b" : "a" }
+      post_beacon(tenant: forged, errors: [ { name: "TypeError", message: "boom" } ])
+
+      expect(railwatch_records(:exception).sole[:tenant]).to be_nil
+    end
+
     it "prefers the tenant the server resolved for itself over the client's hint" do
       tenant_record = Class.new { def self.current_tenant = "resolved" }
       stub_const("TenantRecord", tenant_record)
-      post_beacon(tenant: "spoofed", errors: [ { name: "TypeError", message: "boom" } ])
+      post_beacon(tenant: Railwatch.beacon_tenant_hint("spoofed"), errors: [ { name: "TypeError", message: "boom" } ])
 
       expect(railwatch_records(:exception).sole[:tenant]).to eq("resolved")
     end
@@ -352,8 +416,9 @@ RSpec.describe "browser exception record", type: :request do
     end
 
     it "stamps the hint on the beacon's visits too" do
-      post_beacon(tenant: "acme", visits: [ { component: "X", url: "/x", method: "GET",
-                                              started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success" } ])
+      post_beacon(tenant: Railwatch.beacon_tenant_hint("acme"),
+                  visits: [ { component: "X", url: "/x", method: "GET",
+                              started_at: Time.now.to_f * 1000, duration_ms: 1, status: "success" } ])
 
       expect(railwatch_records(:visit).sole[:tenant]).to eq("acme")
     end

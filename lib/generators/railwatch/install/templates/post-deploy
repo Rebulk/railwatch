@@ -45,9 +45,12 @@ case "$INGEST" in
     ;;
 esac
 
+# The token goes to curl on stdin (-H @-), not in its arguments, which any
+# user on the deployer can read with `ps`. printf is a shell builtin, so it
+# never appears in a process list either.
 post() {
-  curl -sS -m 10 -X POST "$1" \
-    -H "Authorization: Bearer $RAILWATCH_TOKEN" \
+  printf 'Authorization: Bearer %s\n' "$RAILWATCH_TOKEN" | curl -sS -m 10 -X POST "$1" \
+    -H @- \
     -H "Content-Type: application/json" \
     -d "$2" >/dev/null 2>&1 || true
 }

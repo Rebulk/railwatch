@@ -524,6 +524,33 @@ describe("startRailwatch error capture", () => {
     expect(lastFlush().errors[0].visit).toBe("/issues/7")
   })
 
+  // Reset links, magic links and OAuth callbacks carry their secret in the
+  // query or the fragment; the page's path is what says where it broke.
+  it("sends the page and visit an error happened on without their query or fragment", () => {
+    history.replaceState(null, "", "/password/edit?reset_token=s3cret#step-2")
+    try {
+      fire("start", {
+        visit: { url: "/auth/callback?code=oauth#access_token=t0k", method: "get" },
+      })
+      throwUncaught(new Error("kaboom"))
+      vi.advanceTimersByTime(5000)
+
+      expect(lastFlush().errors[0]).toMatchObject({
+        url: "/password/edit",
+        visit: "/auth/callback",
+      })
+    } finally {
+      history.replaceState(null, "", "/")
+    }
+  })
+
+  it("sends a visit's url without its query or fragment", () => {
+    completeVisit("http://localhost:3000/magic?token=abc#x")
+    vi.advanceTimersByTime(5000)
+
+    expect(lastFlush().visits[0].url).toBe("http://localhost:3000/magic")
+  })
+
   it("leaves the visit off an error thrown with no visit in flight", () => {
     completeVisit("/dashboard")
     throwUncaught(new Error("kaboom"))
@@ -699,7 +726,7 @@ describe("startRailwatch breadcrumbs", () => {
 
   it("renders a plain object or array in a console crumb as JSON, and a value with its own toString as itself", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    start()
+    start({ captureConsoleArguments: true })
     console.error(
       "payload",
       { status: 404, ok: false },
@@ -719,7 +746,7 @@ describe("startRailwatch breadcrumbs", () => {
 
   it("records console.error and console.warn as crumbs and still writes them to the console", () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    start()
+    start({ captureConsoleArguments: true })
     const loggedAt = Date.now()
     console.error("checkout failed", 42)
     throwUncaught(new Error("boom"))
@@ -730,6 +757,37 @@ describe("startRailwatch breadcrumbs", () => {
     ])
     expect(spy).toHaveBeenCalledWith("checkout failed", 42)
     spy.mockRestore()
+  })
+
+  it("records only the level of a console call unless the app opts in to its arguments", () => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+    start()
+    console.warn("payment failed for", "alice@example.com")
+    throwUncaught(new Error("boom"))
+    vi.advanceTimersByTime(5000)
+
+    expect(crumbsOf().map((c) => c.text)).toEqual(["warn"])
+    expect(spy).toHaveBeenCalledWith("payment failed for", "alice@example.com")
+    spy.mockRestore()
+  })
+
+  it("quotes only the first 32 characters of a clicked element's text", () => {
+    document.body.innerHTML =
+      '<div id="balance">Statement for Alice Smith, account 4485 1234 5678 9012</div>'
+    document.getElementById("balance")?.click()
+    throwUncaught(new Error("boom"))
+    vi.advanceTimersByTime(5000)
+
+    expect(crumbsOf()[0].text).toBe('div#balance "Statement for Alice Smith, accou"')
+    document.body.innerHTML = ""
+  })
+
+  it("records a navigation without its query or fragment", () => {
+    completeVisit("/password/edit?reset_token=s3cret#step-2")
+    throwUncaught(new Error("boom"))
+    vi.advanceTimersByTime(5000)
+
+    expect(crumbsOf().map((c) => c.text)).toEqual(["GET /password/edit"])
   })
 
   it("records a click as its tag, id, classes, and visible text", () => {
@@ -778,7 +836,7 @@ describe("startRailwatch breadcrumbs", () => {
 
   it("gives up its oldest crumbs rather than blow the byte budget", () => {
     const spy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    start()
+    start({ captureConsoleArguments: true })
     for (let i = 0; i < 20; i++) console.warn("x".repeat(600))
     throwUncaught(new Error("boom"))
     vi.advanceTimersByTime(5000)
@@ -821,6 +879,16 @@ describe("startRailwatch initial page load", () => {
     )
     expect(visit?.component).toBe("orders/Show")
     expect(visit?.ttfb).toBe(120)
+  })
+
+  it("sends the first page load's url without its query or fragment", () => {
+    history.replaceState(null, "", "/password/edit?reset_token=s3cret#step-2")
+    try {
+      const visit = loadWith('<div id="app"></div>')
+      expect(visit?.url).toBe("/password/edit")
+    } finally {
+      history.replaceState(null, "", "/")
+    }
   })
 
   it("names it from <div id=app data-page> (older inertia_rails)", () => {

@@ -242,7 +242,8 @@ createRoot(el, railwatchRootOptions()).render(<App {...props} />)
 On React 18, whose roots take no error options, call
 `reportError(error, { componentStack: info.componentStack })` from the
 boundary's `componentDidCatch` instead. `startRailwatch` also takes optional
-`ignoreErrors`, `denyUrls`, and `tenant` settings; see
+`ignoreErrors`, `denyUrls`, `tenant`, `captureQueryStrings` and
+`captureConsoleArguments` settings; see
 [`docs/configuration.md`](configuration.md) and
 [`docs/replacing-sentry.md`](replacing-sentry.md).
 

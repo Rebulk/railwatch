@@ -141,10 +141,11 @@ module Railwatch
           # default the notification does not carry: MySQL escapes (unless the
           # session sets NO_BACKSLASH_ESCAPES), PostgreSQL does not (unless it
           # sets standard_conforming_strings off, deprecated since 9.1), E''
-          # always does, SQLite never does. Scan with each dialect's default,
-          # and treat an unknown adapter as MySQL-like -- getting that wrong
-          # only masks more than necessary, while the other way round exposes
-          # the tail of the value currently being masked.
+          # always does, SQLite never does. Scan with each dialect's default.
+          # An unknown adapter is scanned both ways: where the readings agree
+          # nothing is lost, and where they disagree no single reading is
+          # safe (each exposes a value the other hides), so the rest of the
+          # statement is masked (#ambiguous_quoted_value_end).
           #
           # This deliberately no longer abandons the rest of the statement on
           # seeing \'. That was safe but destroyed the shape, and on MySQL --
@@ -154,26 +155,16 @@ module Railwatch
           # hashed into one query group. Values are masked either way; only
           # the tail's shape was being thrown away.
           backslash_escapes = mysql || unknown_adapter || explicit_escape_string
-          i += 1
-          while i < length
-            if backslash_escapes && bytes.getbyte(i) == 92
-              i += 2
-            elsif bytes.getbyte(i) == 39
-              if bytes.getbyte(i + 1) == 39
-                i += 2
-              else
-                i += 1
-                break
-              end
-            else
-              i += 1
-            end
+          i = if unknown_adapter && !explicit_escape_string
+            ambiguous_quoted_value_end(bytes, i, 39)
+          else
+            skip_quoted_value(bytes, i, 39, backslash_escapes: backslash_escapes)
           end
           out << "?"
         # When adapter metadata is unavailable, privacy wins over preserving
         # ANSI quoted-identifier shape: this may be a MySQL-compatible string.
         elsif mysql_ambiguous && byte == 34 # MySQL/Trilogy default: "..." is a string.
-          i = skip_quoted_value(bytes, i, 34, backslash_escapes: true)
+          i = mysql ? skip_quoted_value(bytes, i, 34, backslash_escapes: true) : ambiguous_quoted_value_end(bytes, i, 34)
           out << "?"
         elsif sqlite && byte == 34 # SQLite DQS is ambiguous; mask unless syntax proves identifier use.
           close_at = quoted_identifier_end(bytes, i, 34)
@@ -216,6 +207,17 @@ module Railwatch
       end
 
       out.force_encoding(Encoding::UTF_8)
+    end
+
+    # Where a quoted value ends when the adapter is unknown, so whether a
+    # backslash escapes the quote after it is too. Where the two readings
+    # agree, that is the end. Where they disagree ('C:\' AND ssn = '1' ...)
+    # they pair every later quote differently, and whichever is wrong puts
+    # the next value outside quotes -- so the rest of the statement is masked.
+    def ambiguous_quoted_value_end(bytes, index, quote)
+      escaped = skip_quoted_value(bytes, index, quote, backslash_escapes: true)
+      standard = skip_quoted_value(bytes, index, quote, backslash_escapes: false)
+      escaped == standard ? escaped : bytes.bytesize
     end
 
     def skip_quoted_value(bytes, index, quote, backslash_escapes:)

@@ -23,6 +23,8 @@ values set in the initializer always win over the env var.
 | `timing_headers` | `RAILWATCH_TIMING_HEADERS` | on in development, off elsewhere | Adds `Server-Timing` (`total`, `db` with the query count in `desc`, `view`, `other`) and `X-Railwatch-Execution-Id` to every recorded request's response, so `curl -i`, the browser's network panel, or a coding agent sees the cost and the execution to pass to `get_execution`. The id is left out when the request was sampled out. An existing `Server-Timing` (Rails' `config.server_timing`) is appended to. Off outside development by default because it tells every visitor how the app spends its time. Costs about 4 µs per request when on. |
 | `beacon_allowed_origins` | `RAILWATCH_BEACON_ALLOWED_ORIGINS` | `[]` | Extra origins allowed to post to the beacon beyond the app's own, comma-separated: a full origin (`https://app.example.com`) or a bare host. Like Sentry's allowed domains this bounds abuse rather than authenticating, since an endpoint a browser posts to cannot hold a secret. |
 | `beacon_global_rate_limit` | `RAILWATCH_BEACON_GLOBAL_RATE_LIMIT` | `6000` | Beacons accepted per minute across every client, so a rotating address cannot multiply past the per-client limit. 0 disables it. |
+| `capture_browser_query_strings` | `RAILWATCH_CAPTURE_BROWSER_QUERY_STRINGS` | `false` | Keep the query string of a browser visit's `url`, an error's page `url` and `visit`, and each navigation breadcrumb. Off: only the path is stored, because reset, magic-link and OAuth secrets ride in the query. Fragments and URL userinfo are always dropped. The browser client sends a query only with `startRailwatch({ captureQueryStrings: true })`. |
+| `capture_browser_console_arguments` | `RAILWATCH_CAPTURE_BROWSER_CONSOLE_ARGUMENTS` | `false` | Keep what the page passed to `console.error`/`console.warn` in a breadcrumb. Off: the crumb is just `error` or `warn`. The browser client sends the arguments only with `startRailwatch({ captureConsoleArguments: true })`. |
 | `beacon_rate_limit` | `RAILWATCH_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /railwatch/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
 `Railwatch.enabled?` delegates to `config.enabled?`, which is `@enabled &&
@@ -309,8 +311,12 @@ raised an exception. See `request` in `docs/records.md`.
 
 Header names containing a credential-shaped segment are always masked as
 a safe default. The segments are `api-key`, `access-key`, `private-key`,
-`auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`, `secret`, and
-`signature`. This holds even when they arrive as concatenated Rack
+`auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`, `secret`,
+`signature`, `password`, `session-id`, `subscription-key` (Azure API
+Management's `Ocp-Apim-Subscription-Key`), `client-cert`
+(`X-Forwarded-Client-Cert`), and the identity headers an authenticating
+proxy adds (`X-Forwarded-User`, `X-Forwarded-Email`, `X-Remote-User`).
+This holds even when they arrive as concatenated Rack
 aliases such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`,
 `X-ClientToken`, `X-SessionToken`, `X-RefreshToken`, `X-SecretKey`,
 `X-HmacSignature`, or `X-CSRFToken`. Add application-specific aliases to
@@ -748,9 +754,8 @@ call `startRailwatch()` from your Inertia entrypoint. It is generated at
 `app/frontend/lib/railwatch.ts` (see Getting started for how the directory
 is chosen and how to update the copy).
 
-`startRailwatch` takes three optional settings, none of which has a
-server-side equivalent. They are decisions about the browser the code is
-running in:
+`startRailwatch` takes five optional settings. They are decisions about the
+browser the code is running in:
 
 ```ts
 startRailwatch({
@@ -766,10 +771,24 @@ startRailwatch({
   denyUrls: [/analytics\./],
   // Only for apps that scope tenants by path or subdomain: the beacon
   // posts to /railwatch/beacon, outside that scoping, so the server cannot
-  // resolve the tenant itself. Read on every flush. A tenant the server
-  // does resolve (`Context.current_tenant`) always wins.
-  tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
+  // resolve the tenant itself. Read on every flush. Return the hint the
+  // server signed into the page (Railwatch.beacon_tenant_hint(tenant)); the
+  // beacon ignores a bare tenant name, which anyone could send. A tenant
+  // the server does resolve (`Context.current_tenant`) always wins.
+  tenant: () => document.querySelector<HTMLMetaElement>('meta[name="railwatch-tenant"]')?.content,
+  // Both off by default. A page's query string is where reset, magic-link
+  // and OAuth secrets ride, and console arguments are whatever the page
+  // had in hand. Each also needs its server setting
+  // (capture_browser_query_strings, capture_browser_console_arguments).
+  captureQueryStrings: false,
+  captureConsoleArguments: false,
 })
+```
+
+with the hint rendered by the layout:
+
+```erb
+<meta name="railwatch-tenant" content="<%= Railwatch.beacon_tenant_hint(Current.account&.slug) %>">
 ```
 
 The same file exports two more things. `railwatchRootOptions()` returns
@@ -957,6 +976,21 @@ An app with its own admin authentication turns Basic off and names a
 base controller. railwatch-sidecar's proxy controller inherits from
 `base_controller_class`, so the app's own `before_action`s (require an
 admin, redirect to sign-in) run in front of every dashboard request.
+
+Basic off with `base_controller_class` left at `ActionController::Base` is
+no gate at all. `Railwatch.config.dashboard_gate_configured?` is false
+then, and railwatch-sidecar refuses to serve the dashboard outside
+development in that configuration.
+
+```ruby
+c.dashboard_default_role = "member"  # RAILWATCH_DASHBOARD_DEFAULT_ROLE; "member" or "admin"
+```
+
+The role railwatch-sidecar gives a visitor the app did not name (no
+`Railwatch::Sidecar.config.user`): the HTTP Basic user, or the single
+operator. `member` by default, so a shared Basic password does not hand out
+token, member and integration management; set `admin` for the old
+behaviour, or name users and their roles with `Railwatch::Sidecar.config.user`.
 
 ## Rake tasks
 

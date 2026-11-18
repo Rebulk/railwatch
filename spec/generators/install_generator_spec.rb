@@ -87,6 +87,31 @@ RSpec.describe Railwatch::Generators::InstallGenerator do
     end
   end
 
+  # Anyone on the deployer can read another process's argv (`ps`), so the
+  # ingest token must reach curl some other way.
+  it "never puts the ingest token on curl's command line" do
+    template = File.expand_path("../../lib/generators/railwatch/install/templates/post-deploy", __dir__)
+    Dir.mktmpdir do |dir|
+      bin = File.join(dir, "bin")
+      FileUtils.mkdir_p(bin)
+      argv_log = File.join(dir, "argv.log")
+      stdin_log = File.join(dir, "stdin.log")
+      File.write(File.join(bin, "curl"), "#!/bin/sh\necho \"$@\" >> #{argv_log}\ncat >> #{stdin_log}\n")
+      File.write(File.join(bin, "ruby"), "#!/bin/sh\necho '{}'\n")
+      FileUtils.chmod(0o755, Dir[File.join(bin, "*")])
+
+      env = { "PATH" => "#{bin}:/usr/bin:/bin", "RAILWATCH_TOKEN" => "rwp_secret-token",
+              "RAILWATCH_INGEST_URL" => "https://railwatch.example" }
+      _out, _err, status = Open3.capture3(env, "sh", template, chdir: dir)
+
+      expect(status).to be_success
+      argv = File.read(argv_log)
+      expect(argv).to include("https://railwatch.example/ingest/deploys", "https://railwatch.example/ingest/kamal")
+      expect(argv).not_to include("rwp_secret-token")
+      expect(File.read(stdin_log).scan("Authorization: Bearer rwp_secret-token").size).to eq(2)
+    end
+  end
+
   it "creates the browser client only when app/frontend exists" do
     FileUtils.mkdir_p(File.join(destination_root, "app/frontend"))
 
