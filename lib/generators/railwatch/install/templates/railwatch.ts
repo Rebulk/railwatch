@@ -78,9 +78,21 @@ export interface RailwatchOptions {
   denyUrls?: RegExp[]
   // The tenant the user is looking at. The beacon posts to /railwatch/beacon,
   // which is outside whatever path or subdomain the app scopes tenants by,
-  // so the server cannot work this out for itself. Read on every flush, so
-  // it follows the user across tenants without a page load.
+  // so the server cannot work this out for itself. Read on every flush:
+  // return the current tenant's hint, signed by the server with
+  // Railwatch.beacon_tenant_hint(tenant) (in an Inertia app, a shared prop
+  // read from the current page; a layout meta tag only changes on a full
+  // page load). The beacon ignores a bare tenant name, which anyone could
+  // send.
   tenant?: () => string | undefined
+  // Send each page's query string. Off: reset, magic-link and OAuth secrets
+  // ride there. The server keeps one only when
+  // config.capture_browser_query_strings is on too. Fragments are never sent.
+  captureQueryStrings?: boolean
+  // Put what the page passed to console.error/console.warn in a breadcrumb.
+  // Off: the crumb says only "error" or "warn". The server keeps the
+  // arguments only when config.capture_browser_console_arguments is on too.
+  captureConsoleArguments?: boolean
 }
 
 // Browser noise that is never actionable: ResizeObserver fires from benign
@@ -128,6 +140,8 @@ let timer: number | undefined
 let ignoreErrors: (string | RegExp)[] = DEFAULT_IGNORE_ERRORS
 let denyUrls: RegExp[] = DEFAULT_DENY_URLS
 let tenantOf: (() => string | undefined) | undefined
+let captureQueryStrings = false
+let captureConsoleArguments = false
 // Whether the user is waiting on a request. A visit the page starts by
 // itself -- a poll, a refresh when the tab comes back, a prefetch on hover
 // -- runs without the progress bar (`showProgress: false`, which Inertia
@@ -438,10 +452,23 @@ function tag(visit: { url: unknown; headers?: Record<string, string> }) {
   }
 }
 
+// A URL the page was on, without its fragment, and without its query unless
+// the app opted in (captureQueryStrings).
+function pageUrl(url: string): string {
+  const withoutFragment = url.split("#")[0]
+  return captureQueryStrings ? withoutFragment : withoutFragment.split("?")[0]
+}
+
+function currentPage(): string {
+  return pageUrl(location.pathname + location.search)
+}
+
 // --- Breadcrumbs -------------------------------------------------------
 
 const MAX_CRUMBS = 20
 const MAX_CRUMB_TEXT = 500
+// Enough of a clicked element's text to recognise a button, not a table row.
+const MAX_CLICK_TEXT = 32
 // A budget for one error's whole trail, so a page that logs War and Peace to
 // the console cannot crowd out the errors themselves.
 const MAX_CRUMB_BYTES = 8000
@@ -473,7 +500,10 @@ function describeTarget(target: EventTarget | null): string {
   const text =
     target instanceof HTMLInputElement
       ? ""
-      : (target.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 80)
+      : (target.textContent ?? "")
+          .trim()
+          .replace(/\s+/g, " ")
+          .slice(0, MAX_CLICK_TEXT)
   return `${target.tagName.toLowerCase()}${id}${classes}${text ? ` "${text}"` : ""}`
 }
 
@@ -488,7 +518,12 @@ function startBreadcrumbs() {
       ...args: unknown[]
     ) => void
     console[level] = (...args: unknown[]) => {
-      crumb("console", `${level}: ${args.map(stringify).join(" ")}`)
+      crumb(
+        "console",
+        captureConsoleArguments
+          ? `${level}: ${args.map(stringify).join(" ")}`
+          : level,
+      )
       original(...args)
     }
   }
@@ -550,7 +585,7 @@ function capture(
     message: message.slice(0, MAX_MESSAGE),
     stack: stack?.slice(0, MAX_STACK),
     component,
-    url: location.pathname + location.search,
+    url: currentPage(),
     visit: current?.url,
     session_id: liveSession(),
     tab_id: tab,
@@ -954,7 +989,7 @@ function initialVisit(): Visit | null {
       (performance.timeOrigin ?? Date.now() - performance.now()) +
         nav.startTime,
     ),
-    url: location.pathname + location.search,
+    url: currentPage(),
     method: "GET",
     component,
     duration_ms: duration,
@@ -994,6 +1029,8 @@ export function startRailwatch(options: RailwatchOptions = {}) {
   ignoreErrors = [...DEFAULT_IGNORE_ERRORS, ...(options.ignoreErrors ?? [])]
   denyUrls = [...DEFAULT_DENY_URLS, ...(options.denyUrls ?? [])]
   tenantOf = options.tenant
+  captureQueryStrings = options.captureQueryStrings ?? false
+  captureConsoleArguments = options.captureConsoleArguments ?? false
   startVitals()
   startSession()
   component = pageComponent()
@@ -1028,7 +1065,7 @@ export function startRailwatch(options: RailwatchOptions = {}) {
     }
     current = {
       started_at: Date.now(),
-      url: v.url.toString(),
+      url: pageUrl(v.url.toString()),
       method: v.method,
       partial: Boolean(v.only?.length || v.except?.length),
       only: v.only,

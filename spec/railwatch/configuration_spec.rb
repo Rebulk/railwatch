@@ -227,6 +227,60 @@ RSpec.describe Railwatch::Configuration do
     end
   end
 
+  # railwatch-sidecar asks this before serving the dashboard outside
+  # development: Basic off with the default base controller is no gate at all.
+  describe "#dashboard_gate_configured?" do
+    def config_with(basic:, base: described_class::DEFAULT_BASE_CONTROLLER)
+      described_class.new.tap do |config|
+        config.http_basic_auth_enabled = basic
+        config.base_controller_class = base
+      end
+    end
+
+    it "says the dashboard is ungated when Basic is off and the base controller is still ActionController::Base" do
+      expect(config_with(basic: false).dashboard_gate_configured?).to be(false)
+      expect(config_with(basic: false, base: "::ActionController::Base").dashboard_gate_configured?).to be(false)
+      expect(config_with(basic: false, base: " ").dashboard_gate_configured?).to be(false)
+    end
+
+    it "counts HTTP Basic as a gate, configured or not, since unconfigured Basic refuses everyone" do
+      expect(config_with(basic: true).dashboard_gate_configured?).to be(true)
+    end
+
+    it "counts the host's own base controller as a gate when Basic is off" do
+      expect(config_with(basic: false, base: "AdminController").dashboard_gate_configured?).to be(true)
+    end
+
+    it "is reachable from the facade, where railwatch-sidecar looks for it" do
+      expect(Railwatch.config).to respond_to(:dashboard_gate_configured?)
+    end
+  end
+
+  # railwatch-sidecar's role for a dashboard visitor the app did not name
+  # (its config.user unset): the HTTP Basic user or the one operator.
+  describe "#dashboard_default_role" do
+    it "makes a dashboard visitor the app did not name a member, not an admin" do
+      with_env("RAILWATCH_DASHBOARD_DEFAULT_ROLE" => nil) do |config|
+        expect(config.dashboard_default_role).to eq("member")
+      end
+    end
+
+    it "lets an app that wants the old behaviour choose admin" do
+      with_env("RAILWATCH_DASHBOARD_DEFAULT_ROLE" => "admin") do |config|
+        expect(config.dashboard_default_role).to eq("admin")
+      end
+      config = described_class.new
+      config.dashboard_default_role = :admin
+      expect(config.dashboard_default_role).to eq("admin")
+    end
+
+    it "falls back to member for a role railwatch-sidecar does not know, rather than passing it on" do
+      config = described_class.new
+      config.dashboard_default_role = "owner"
+      expect(config.dashboard_default_role).to eq("member")
+    end
+  end
+
   describe "#ingest_url_allowed?" do
     it "allows HTTPS and loopback HTTP, but refuses other HTTP by default" do
       with_env("RAILWATCH_ALLOW_HTTP" => nil, "RAILWATCH_INGEST_URL" => "https://railwatch.example") do |config|

@@ -64,8 +64,12 @@ module Railwatch
     # names its own.
     DEFAULT_BASE_CONTROLLER = "ActionController::Base"
 
+    # The roles railwatch-sidecar can hand a dashboard visitor.
+    DASHBOARD_ROLES = %w[admin member].freeze
+
     attr_accessor :enabled, :token, :ingest_url, :allow_http, :server, :environment,
                   :http_basic_auth_enabled, :http_basic_auth_user, :http_basic_auth_password, :base_controller_class,
+                  :capture_browser_query_strings, :capture_browser_console_arguments,
                   :sample, :log_level, :capture_request_payload,
                   :capture_exception_source, :capture_exception_locals, :redact_headers, :redact_params,
                   :buffer_size, :buffer_bytes, :execution_buffer_bytes, :batch_bytes,
@@ -88,7 +92,7 @@ module Railwatch
                   :capture_console, :interactive_runner_paths, :ignored_request_paths,
                   :capture_llm_content, :timing_headers, :browser_client
 
-    attr_reader :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
+    attr_reader :dashboard_default_role, :deploy, :deploy_source, :detect_deploy, :user_resolver, :beacon_user_resolver,
                 :fingerprint_resolver, :redactors, :rejectors, :before_ingest, :backpressure_high_water
 
     def initialize
@@ -112,6 +116,12 @@ module Railwatch
       # in front of every page. The default authenticates nothing itself
       # beyond HTTP Basic above.
       @base_controller_class = ENV.fetch("RAILWATCH_BASE_CONTROLLER_CLASS", DEFAULT_BASE_CONTROLLER)
+      # The role railwatch-sidecar gives a dashboard visitor the app did not
+      # name (no Railwatch::Sidecar.config.user): the HTTP Basic user, or the
+      # one operator. A member, so a shared Basic password or a gate that
+      # turns out to be open does not hand out token, member and integration
+      # management. "admin" restores the old behaviour.
+      self.dashboard_default_role = ENV.fetch("RAILWATCH_DASHBOARD_DEFAULT_ROLE", "member")
       @ingest_url = ENV.fetch("RAILWATCH_INGEST_URL", "https://app.railwatch.dev")
       @allow_http = env_bool("RAILWATCH_ALLOW_HTTP", false)
       @project_root = defined?(Rails) ? Rails.root : Dir.pwd
@@ -190,6 +200,14 @@ module Railwatch
       # as Sentry's allowed domains: "https://app.example.com", or a host on
       # its own. Empty means same-origin only.
       @beacon_allowed_origins = ENV["RAILWATCH_BEACON_ALLOWED_ORIGINS"]&.split(",")&.map(&:strip)&.reject(&:empty?) || []
+      # A page's query string is where reset, magic-link and OAuth secrets
+      # ride, so the beacon keeps only the path of the page, the visit and
+      # each navigation unless an app opts in. The fragment is always dropped.
+      @capture_browser_query_strings = env_bool("RAILWATCH_CAPTURE_BROWSER_QUERY_STRINGS", false)
+      # What the page passed to console.error/console.warn is whatever it had
+      # in hand, user data included, so a console breadcrumb keeps only its
+      # level unless an app opts in.
+      @capture_browser_console_arguments = env_bool("RAILWATCH_CAPTURE_BROWSER_CONSOLE_ARGUMENTS", false)
       @debug = env_bool("RAILWATCH_DEBUG", false)
       # Tail-based sampling: a head-sampled-out execution is still kept when
       # it ran at least this long, raised, or Railwatch.keep! was called. nil = off.
@@ -323,6 +341,24 @@ module Railwatch
         ActiveSupport::SecurityUtils.secure_compare(user, http_basic_auth_user.to_s) &
           ActiveSupport::SecurityUtils.secure_compare(password, http_basic_auth_password.to_s)
       end == true
+    end
+
+    # Whether anything stands in front of railwatch-sidecar's dashboard:
+    # HTTP Basic (which refuses everyone until credentials exist), or a base
+    # controller of the host's own whose before_actions run first. False is
+    # Basic turned off with the base controller left at ActionController::Base,
+    # which serves the dashboard to anyone. railwatch-sidecar asks this
+    # (when the gem has it) and refuses to serve outside development.
+    def dashboard_gate_configured?
+      return true if http_basic_auth_enabled
+
+      base = base_controller_class.to_s.strip.delete_prefix("::")
+      base != "" && base != DEFAULT_BASE_CONTROLLER
+    end
+
+    def dashboard_default_role=(value)
+      role = value.to_s.strip.downcase
+      @dashboard_default_role = DASHBOARD_ROLES.include?(role) ? role : "member"
     end
 
     def ingest_url_allowed?

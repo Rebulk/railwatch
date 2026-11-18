@@ -101,6 +101,27 @@ RSpec.describe "redaction and rejection", type: :request do
     end
   end
 
+  describe "identity and credential headers a proxy or gateway adds" do
+    it "masks the user, email, client certificate, gateway key, session id and password headers" do
+      sensitive = {
+        "X-Forwarded-Email" => "alice@example.com",
+        "X-Forwarded-User" => "alice",
+        "X-Remote-User" => "alice",
+        "X-Client-Cert" => "-----BEGIN CERTIFICATE-----",
+        "X-Forwarded-Client-Cert" => "Hash=abc;Subject=alice",
+        "Ocp-Apim-Subscription-Key" => "azure-gateway-key",
+        "X-Session-Id" => "session-abc",
+        "X-Password" => "hunter2"
+      }
+      get "/widgets", headers: sensitive.merge("User-Agent" => "Mozilla/5.0", "X-Request-Id" => "req-1")
+
+      headers = railwatch_records(:request).sole[:headers]
+      sensitive.each_key { |name| expect(headers[name]).to eq("[FILTERED]"), name }
+      expect(headers["User-Agent"]).to eq("Mozilla/5.0")
+      expect(headers["X-Request-Id"]).to eq("req-1")
+    end
+  end
+
   describe "payload masking" do
     it "masks Rails filter_parameters fields in the payload, including nested hashes and arrays" do
       Railwatch.config.capture_request_payload = true

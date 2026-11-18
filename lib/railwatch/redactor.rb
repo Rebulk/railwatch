@@ -9,7 +9,9 @@ module Railwatch
     # Credentials are often carried in vendor-specific headers that an app
     # cannot enumerate ahead of time (X-Api-Key, Stripe-Signature,
     # X-Auth-Token, and similar). Match credential-shaped name segments in
-    # addition to the exact configurable denylist.
+    # addition to the exact configurable denylist. Identity headers an
+    # authenticating proxy adds (X-Forwarded-Email, X-Remote-User, a client
+    # certificate) name a person, so they count too.
     SENSITIVE_HEADER_NAME = %r{
       (?:\A|-)
       (?:
@@ -20,7 +22,9 @@ module Railwatch
         security-?token|service-?token|identity-?token|id-?token|
         csrf-?token|xsrf-?token|credential|
         hmac(?:-?signature)?|jwt(?:-?(?:assertion|token))?|
-        webhook-?(?:hmac|secret|signature)|token|secret|signature
+        webhook-?(?:hmac|secret|signature)|token|secret|signature|
+        password|passwd|session-?id|subscription-?key|client-?cert|
+        (?:forwarded|remote)-?(?:user|email)
       )
       (?:-|\z)
     }ix

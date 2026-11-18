@@ -321,6 +321,30 @@ module Railwatch
       config.user(&block)
     end
 
+    # The tenant hint for the browser client (startRailwatch({ tenant })),
+    # signed with the app's secret_key_base. The beacon takes no credential,
+    # so it believes only a tenant this app put in the page itself; a bare
+    # name a client sends is ignored. nil in, nil out.
+    def beacon_tenant_hint(tenant)
+      return nil if tenant.nil? || tenant.to_s.empty?
+
+      beacon_tenant_verifier.generate(tenant.to_s[0, 255], purpose: :railwatch_beacon_tenant)
+    end
+
+    # The tenant a signed hint names, or nil for anything this app did not sign.
+    def verified_beacon_tenant(hint)
+      return nil unless hint.is_a?(String) && !hint.empty?
+
+      tenant = beacon_tenant_verifier.verified(hint, purpose: :railwatch_beacon_tenant)
+      tenant.is_a?(String) ? tenant : nil
+    rescue StandardError
+      nil
+    end
+
+    def beacon_tenant_verifier
+      Rails.application.message_verifier("railwatch.beacon_tenant")
+    end
+
     def fingerprint(&block)
       config.fingerprint(&block)
     end

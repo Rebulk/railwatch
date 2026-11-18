@@ -411,8 +411,9 @@ startRailwatch({
   denyUrls: [/analytics\./],
   // Only if the app scopes tenants by path or subdomain: the beacon posts
   // to /railwatch/beacon, which is outside that scoping, so the server
-  // cannot work the tenant out for itself.
-  tenant: () => /^\/orgs\/([^/]+)/.exec(location.pathname)?.[1],
+  // cannot work the tenant out for itself. Return the hint the layout
+  // rendered with Railwatch.beacon_tenant_hint(tenant); a bare name is ignored.
+  tenant: () => document.querySelector<HTMLMetaElement>('meta[name="railwatch-tenant"]')?.content,
 })
 ```
 
