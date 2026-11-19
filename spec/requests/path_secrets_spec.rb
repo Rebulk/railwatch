@@ -137,6 +137,14 @@ RSpec.describe "secrets in the request path", type: :request do
       .to eq("http://www.example.com/reset/[FILTERED]")
   end
 
+  it "filters the capture beside literal text even when the token equals a literal word of the route" do
+    get "/reset/prefix-reset"
+
+    path = railwatch_records(:request).sole[:path]
+    expect(path.split("/").last).to eq("[FILTERED]"), "the token, not only the literal it equals, is hidden"
+    expect(path).not_to include("prefix-reset")
+  end
+
   describe "beacon URLs, which the browser sends without knowing the routes" do
     def post_beacon(payload)
       post "/railwatch/beacon", params: payload.to_json, headers: { "Content-Type" => "application/json" }

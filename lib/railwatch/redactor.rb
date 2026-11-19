@@ -82,14 +82,11 @@ module Railwatch
       secrets.each do |secret|
         next if secret.include?("/")
 
-        whole = false
-        segments.map! do |segment|
-          filtered = filter_segment(segment, secret)
-          whole ||= !filtered.equal?(segment)
-          filtered
-        end
-        next if whole
-
+        # Whole segments first, then a capture beside literal text in its
+        # segment. Both, always: a secret equal to a literal word of the
+        # route (/reset/prefix-:token with token "reset") must not let the
+        # literal's match stand in for the capture's.
+        segments.map! { |segment| filter_segment(segment, secret) }
         segments.map! { |segment| unescape(segment).include?(secret) ? FILTERED : segment }
       end
       origin + segments.join("/")
