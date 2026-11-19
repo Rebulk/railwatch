@@ -343,7 +343,11 @@ param: :token`) records `/passwords/[FILTERED]/edit`; so do invite,
 magic-link and confirmation routes named that way. The request's own
 route comes from the router; any other URL of this app (the browser does
 not know the app's routes) is matched against the routes that have such a
-segment, and recognised by the router when it has that shape. A URL on
+segment, and recognised by the router when it has that shape (on the
+URL's host, and for a 307/308 redirect with the request's own method,
+which the browser keeps; GET otherwise). A segment that holds literal text
+beside the value (`/reset/prefix-:token`) is filtered whole, and a glob
+value (`*token`) is filtered however it is percent-encoded. A URL on
 another host is left as it is. Name a segment so it matches, or add its
 name to `filter_parameters`, to have it filtered; `:id` and `:slug` are
 kept.

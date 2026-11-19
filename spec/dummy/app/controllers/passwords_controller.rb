@@ -17,6 +17,10 @@ class PasswordsController < ApplicationController
     redirect_to edit_password_url("RESET_TOKEN_IN_REDIRECT")
   end
 
+  def redirect_to_reset_preserving
+    redirect_to "/resets/RESET_TOKEN_IN_307", status: :temporary_redirect
+  end
+
   def boom
     raise ArgumentError, "reset failed"
   end

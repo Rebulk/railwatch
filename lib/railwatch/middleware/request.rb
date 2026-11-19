@@ -251,12 +251,12 @@ module Railwatch
       def path_secrets(req, env)
         redactor = Railwatch.redactor
         original = env["action_dispatch.original_path"]
-        return redactor.url_secrets(original, method: env["action_dispatch.original_request_method"] || req.request_method) if original
+        return redactor.url_secrets(original, method: env["action_dispatch.original_request_method"] || req.request_method, host: req.host) if original
 
         params = env[ActionDispatch::Http::Parameters::PARAMETERS_KEY]
         return redactor.path_secrets(params) if params && !params.empty?
 
-        redactor.url_secrets(req.path, method: req.request_method)
+        redactor.url_secrets(req.path, method: req.request_method, host: req.host)
       rescue StandardError
         Redactor::NO_SECRETS
       end

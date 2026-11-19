@@ -39,6 +39,7 @@ module Railwatch
     SENSITIVE_PATH_PARAMETER = /token|secret|key|code|signature|password/i
     ROUTING_PATH_PARAMETERS = %i[controller action format].freeze
     NO_SECRETS = [].freeze
+    URL_ORIGIN = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*:)?//[^/]*}
 
     def initialize(config)
       @config = config
@@ -64,19 +65,34 @@ module Railwatch
     # path (or a URL) with each segment that holds one of secrets replaced
     # by [FILTERED]. A segment is compared unescaped, so any percent-encoding
     # of the value matches; "<secret>.json" keeps its format. A glob value
-    # spans segments and is replaced where it appears whole.
+    # spans segments and is replaced where it appears whole, however its
+    # characters (slashes included) are encoded. A value no segment holds
+    # whole sits beside literal text (/reset/prefix-:token): every segment
+    # that contains it is replaced.
     def filter_path(path, secrets)
       return path if secrets.empty? || path.nil?
 
       path = path.to_s
+      # A URL's scheme and authority are not the route's: only its path is
+      # compared.
+      origin = path[URL_ORIGIN].to_s
+      path = path[origin.length..]
+      secrets.each { |secret| path = filter_glob(path, secret) if secret.include?("/") }
+      segments = path.split("/", -1)
       secrets.each do |secret|
-        next unless secret.include?("/")
+        next if secret.include?("/")
 
-        path = path.gsub(secret, FILTERED)
-        escaped = URI::DEFAULT_PARSER.escape(secret)
-        path = path.gsub(escaped, FILTERED) unless escaped == secret
+        whole = false
+        segments.map! do |segment|
+          filtered = filter_segment(segment, secret)
+          whole ||= !filtered.equal?(segment)
+          filtered
+        end
+        next if whole
+
+        segments.map! { |segment| unescape(segment).include?(secret) ? FILTERED : segment }
       end
-      path.split("/", -1).map! { |segment| filter_segment(segment, secrets) }.join("/")
+      origin + segments.join("/")
     end
 
     # A URL of this app (a redirect target, a Referer, a page the browser
@@ -95,7 +111,7 @@ module Railwatch
       end
       return url if path.nil? || path.empty?
 
-      filter_path(url, url_secrets(path, method: method))
+      filter_path(url, url_secrets(path, method: method, host: host))
     rescue StandardError
       url
     end
@@ -106,13 +122,17 @@ module Railwatch
     # (sensitive_routes): every other URL costs a few regexp matches, not a
     # route recognition. When the router recognises none for method (a
     # mounted Rack app, a verb the route does not take), the shape decides,
-    # and the segment is filtered.
-    def url_secrets(path, method: "GET")
+    # and the segment is filtered. The path is normalised the way the router
+    # does it first (a trailing slash, doubled slashes), and recognised on
+    # host when given, so a route constrained to a host is the one picked
+    # for a URL on that host.
+    def url_secrets(path, method: "GET", host: nil)
+      path = ActionDispatch::Journey::Router::Utils.normalize_path(path) if defined?(ActionDispatch::Journey::Router::Utils)
       shaped = shaped_secrets(path, sensitive_routes)
       return shaped if shaped.empty? || !defined?(Rails) || !Rails.application
 
       begin
-        params = Rails.application.routes.recognize_path(path, method: method)
+        params = Rails.application.routes.recognize_path(host ? "http://#{host}#{path}" : path, method: method)
       rescue StandardError
         return shaped
       end
@@ -182,15 +202,62 @@ module Railwatch
       secrets || NO_SECRETS
     end
 
-    def filter_segment(segment, secrets)
+    # segment itself when it does not hold secret, as the same object.
+    def filter_segment(segment, secret)
       return segment if segment.empty?
 
-      plain = segment.include?("%") ? CGI.unescapeURIComponent(segment) : segment
-      secrets.each do |secret|
-        return FILTERED if plain == secret
-        return "#{FILTERED}#{plain[secret.length..]}" if plain.start_with?(secret) && plain[secret.length] == "."
-      end
+      plain = unescape(segment)
+      return FILTERED if plain == secret
+      return "#{FILTERED}#{plain[secret.length..]}" if plain.start_with?(secret) && plain[secret.length] == "."
+
       segment
+    end
+
+    def unescape(segment)
+      segment.include?("%") ? CGI.unescapeURIComponent(segment) : segment
+    end
+
+    # path with each run of whole segments that decodes to secret (a glob
+    # value, "a/b") replaced by [FILTERED], whichever of its bytes, "/"
+    # included, are percent-encoded. Compared byte by byte on the decoded
+    # path; each decoded byte remembers where it started in path.
+    def filter_glob(path, secret)
+      raw = path.b
+      target = secret.b
+      decoded = +"".b
+      origin = []
+      i = 0
+      while i < raw.bytesize
+        origin << i
+        hex = raw.getbyte(i) == 37 && raw.byteslice(i + 1, 2)
+        if hex && hex.match?(/\A\h\h\z/)
+          decoded << hex.to_i(16).chr
+          i += 3
+        else
+          decoded << raw.byteslice(i)
+          i += 1
+        end
+      end
+      origin << raw.bytesize
+
+      out = +"".b
+      kept = 0
+      from = 0
+      while (at = decoded.index(target, from))
+        finish = at + target.bytesize
+        before = origin[at].zero? ? nil : raw.getbyte(origin[at] - 1)
+        after = raw.getbyte(origin[finish])
+        if before == 47 && (after.nil? || after == 47 || after == 46)
+          out << raw.byteslice(kept...origin[at]) << FILTERED
+          kept = origin[finish]
+          from = finish
+        else
+          from = at + 1
+        end
+      end
+      return path if kept.zero?
+
+      (out << raw.byteslice(kept..)).force_encoding(path.encoding)
     end
 
     def sensitive_path_parameter?(name)

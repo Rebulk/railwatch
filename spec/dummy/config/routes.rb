@@ -32,4 +32,13 @@ Rails.application.routes.draw do
   get "invitations/:invite_code/accept", to: "passwords#accept"
   get "redirect_to_reset", to: "passwords#redirect_to_reset"
   get "reset_boom/:token", to: "passwords#boom"
+  post "redirect_to_reset_preserving", to: "passwords#redirect_to_reset_preserving"
+  # Same shape, different verb: POST takes a token, GET an ordinary id.
+  post "resets/:token", to: "passwords#update"
+  get "resets/:id", to: "widgets#show"
+  get "files/*token", to: "passwords#accept"
+  get "reset/prefix-:token", to: "passwords#accept"
+  # A token route only on one host, and an ordinary sibling everywhere else.
+  constraints(host: "auth.example.com") { get "magic/:token/edit", to: "passwords#accept" }
+  get "magic/:id/edit", to: "widgets#show"
 end

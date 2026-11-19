@@ -25,7 +25,8 @@ exe = Railwatch.start_execution(source: :request, sample_kind: :requests)
 exe.enter_stage(:action)
 rows << [ "  parent_fields (builds the request record's fields)", per_call { mw.send(:parent_fields, env, exe, 200, { "Content-Length" => "2" }) } ]
 rows << [ "    ActionDispatch::Request.new + original_url + remote_ip + format", per_call { r = ActionDispatch::Request.new(env); r.original_url; r.remote_ip; r.format; r.user_agent } ]
-rows << [ "    request_headers (env walk + redaction)", per_call { mw.send(:request_headers, env) } ]
+bench_request = ActionDispatch::Request.new(env)
+rows << [ "    request_headers (env walk + redaction)", per_call { mw.send(:request_headers, env, bench_request) } ]
 rows << [ "    Users.resolve_id (Current.user set)", per_call { Railwatch::Subscribers::Users.resolve_id(env) } ]
 rows << [ "    Record.group_hash(method, pattern)", per_call { Railwatch::Record.group_hash("GET", "/widgets") } ]
 rows << [ "    ignored_request?", per_call { mw.send(:ignored_request?, env) } ]

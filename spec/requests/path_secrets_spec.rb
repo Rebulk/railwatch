@@ -93,6 +93,50 @@ RSpec.describe "secrets in the request path", type: :request do
     expect(railwatch_records(:request).sole[:headers]["Referer"]).to eq("http://www.example.com/passwords/[FILTERED]/edit")
   end
 
+  # PR #169 review follow-ups.
+  it "recognises a 307 redirect target with the request's own method, which the browser keeps" do
+    post "/redirect_to_reset_preserving"
+
+    req = railwatch_records(:request).sole
+    expect(req[:status_code]).to eq(307)
+    expect(req[:redirect_to]).to eq("http://www.example.com/resets/[FILTERED]")
+  end
+
+  it "filters a glob token however its characters, slashes included, are percent-encoded" do
+    expect(Railwatch.redactor.filter_url("/files/a/b")).to eq("/files/[FILTERED]")
+    expect(Railwatch.redactor.filter_url("/files/%61/b")).to eq("/files/[FILTERED]")
+    expect(Railwatch.redactor.filter_url("/files/a%2Fb")).to eq("/files/[FILTERED]")
+
+    get "/files/%61/b"
+    expect(railwatch_records(:request).sole[:path]).to eq("/files/[FILTERED]")
+  end
+
+  it "filters a token in a URL with a trailing slash, which the router ignores" do
+    expect(Railwatch.redactor.filter_url("/passwords/#{token}/edit/")).to eq("/passwords/[FILTERED]/edit/")
+    expect(Railwatch.redactor.filter_url("/passwords/#{token}/edit")).to eq("/passwords/[FILTERED]/edit")
+  end
+
+  it "recognises a URL on its own host, so a token route constrained to that host is the one picked" do
+    expect(Railwatch.redactor.filter_url("https://auth.example.com/magic/MAGIC_TOKEN/edit", host: "auth.example.com"))
+      .to eq("https://auth.example.com/magic/[FILTERED]/edit")
+    expect(Railwatch.redactor.filter_url("/magic/42/edit", host: "www.example.com")).to eq("/magic/42/edit"),
+      "on another host the ordinary sibling route is the one, and its :id is kept"
+
+    host! "auth.example.com"
+    get "/widgets", headers: { "Referer" => "https://auth.example.com/magic/MAGIC_TOKEN/edit" }
+    expect(railwatch_records(:request).sole[:headers]["Referer"]).to eq("https://auth.example.com/magic/[FILTERED]/edit")
+  end
+
+  it "filters a token captured beside literal text in its segment" do
+    get "/reset/prefix-PREFIXED_SECRET"
+
+    req = railwatch_records(:request).sole
+    expect(req[:path]).to eq("/reset/[FILTERED]")
+    expect(req.to_s).not_to include("PREFIXED_SECRET")
+    expect(Railwatch.redactor.filter_url("http://www.example.com/reset/prefix-PREFIXED_SECRET", host: "www.example.com"))
+      .to eq("http://www.example.com/reset/[FILTERED]")
+  end
+
   describe "beacon URLs, which the browser sends without knowing the routes" do
     def post_beacon(payload)
       post "/railwatch/beacon", params: payload.to_json, headers: { "Content-Type" => "application/json" }
