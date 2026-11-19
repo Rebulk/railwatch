@@ -10,7 +10,7 @@ require "spec_helper"
 RSpec.describe "bench scripts" do
   it "call the request middleware's private methods with as many arguments as they take" do
     calls = Dir[File.expand_path("../../bench/*.rb", __dir__)].flat_map do |file|
-      File.read(file).scan(/\bmw\.send\(:(\w+)((?:, *[^,)]+)*)\)/).map { |name, args| [ File.basename(file), name, args.count(",") ] }
+      File.read(file).scan(/\bmw\.send\(:(\w+[?!]?)([^)]*)\)/).map { |name, args| [ File.basename(file), name, args.count(",") ] }
     end
     expect(calls).not_to be_empty
 
