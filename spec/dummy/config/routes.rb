@@ -26,4 +26,10 @@ Rails.application.routes.draw do
   post "upload", to: "widgets#upload"
   get "page", to: "widgets#page"
   get "ssr_widgets", to: "ssr_widgets#index"
+  # What Rails 8's authentication generator writes: the reset token is a
+  # path segment.
+  resources :passwords, param: :token, only: %i[new create edit update]
+  get "invitations/:invite_code/accept", to: "passwords#accept"
+  get "redirect_to_reset", to: "passwords#redirect_to_reset"
+  get "reset_boom/:token", to: "passwords#boom"
 end

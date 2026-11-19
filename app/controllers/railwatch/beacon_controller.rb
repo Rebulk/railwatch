@@ -53,7 +53,7 @@ module Railwatch
           group: Record.group_hash(safe_string(v["component"], 255)),
           timestamp: safe_float(v["started_at"]) / 1000.0,
           component: safe_string(v["component"], 255),
-          url: browser_url(v["url"]),
+          url: browser_url(v["url"], method: v["method"]),
           method: safe_string(v["method"], 10),
           duration: (safe_float(v["duration_ms"]) * 1000).round,
           status: safe_string(v["status"], 20),
@@ -290,7 +290,7 @@ module Railwatch
       case kind
       when "navigate"
         match = NAVIGATE_TEXT.match(text) or return browser_url(text)
-        "#{match[:method]} #{browser_url(match[:url])}"
+        "#{match[:method]} #{browser_url(match[:url], method: match[:method])}"
       when "click"
         match = CLICK_TEXT.match(text) || CLICK_TEXT_UNTERMINATED.match(text) or return text
         quoted = match[:text][0, MAX_CLICK_TEXT]
@@ -309,16 +309,16 @@ module Railwatch
     # (config.capture_browser_query_strings): reset, magic-link and OAuth
     # secrets ride there. The same treatment a server-side request URL gets.
     #
+    # The browser cannot see the app's routes, so a token in the path
+    # (/passwords/<token>/edit) is found here: a URL of this app is matched
+    # against its routes and the sensitive segments of a matching route are
+    # filtered, as they are on the request record.
+    #
     # Cleaned at the length the beacon carried it, and cut to 2048 only
     # after: cut first, a long userinfo loses its "@" and survives.
-    def browser_url(value)
-      url = safe_string(value, MAX_URL_INPUT)
-      return Record.url_without_sensitive_components(url, limit: 2048) unless Railwatch.config.capture_browser_query_strings
-
-      url = url[0, url.index("#")] if url.include?("#")
-      path, query = url.split("?", 2)
-      clean = Record.url_without_sensitive_components(path, limit: 2048)
-      query ? "#{clean}?#{query}"[0, 2048] : clean
+    def browser_url(value, method: "GET")
+      method = safe_string(method, 10).upcase.presence || "GET"
+      Railwatch.redactor.browser_url(safe_string(value, MAX_URL_INPUT), limit: 2048, host: request.host, method: method)
     end
 
     # Whatever the app handed Railwatch's reportError -- a React error

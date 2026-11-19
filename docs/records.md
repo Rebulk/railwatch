@@ -85,8 +85,8 @@ boundaries. The `action`/`render` boundaries come from
 |---|---|
 | `group` | Hash of `method` + route `pattern`. |
 | `method` | HTTP verb. |
-| `url` | Request origin + path, with authority credentials, the entire query string, and fragment removed, truncated to 2048 chars. |
-| `path` | Request path. |
+| `url` | Request origin + path, with authority credentials, the entire query string, and fragment removed, and the route's secret segments as in `path`, truncated to 2048 chars. |
+| `path` | Request path, with the value of each dynamic segment of the matched route whose name contains `token`, `secret`, `key`, `code`, `signature` or `password`, or that `filter_parameters`/`redact_params` filters, replaced by `[FILTERED]`: `resources :passwords, param: :token` gives `/passwords/[FILTERED]/edit`. See [Redaction](configuration.md#redaction). |
 | `route` | Matched route pattern (`request.route_uri_pattern`), or `"unmatched"` for a 404. |
 | `route_methods` | Array with the route's declared verb, if known. |
 | `route_domain` | `request.host`. |
@@ -98,12 +98,12 @@ boundaries. The `action`/`render` boundaries come from
 | `request_size` / `response_size` | Bytes, from `Content-Length`. |
 | `queue_time` | Microseconds the request waited in the proxy/web-server queue before the execution started, parsed from `X-Request-Start` (or `X-Queue-Start`): `t=1700000000.123` (seconds), `t=1700000000123` (ms), `t=1700000000123456` (µs), or the same values bare — the unit is decided by magnitude. A proxy clock running ahead clamps to `0`; anything over 60 seconds is treated as clock skew and dropped. nil when the header is absent or unparseable. |
 | `view_runtime` / `db_runtime` | Milliseconds, from Action Controller's own `process_action.action_controller` payload. |
-| `redirect_to` | Redirect target with authority credentials, the entire query string, and fragment removed, truncated to 512 chars, if `redirect_to` was called. This sanitizes telemetry only; it does not change the response's `Location` header. |
+| `redirect_to` | Redirect target with authority credentials, the entire query string, and fragment removed, and, for a URL of this app, its route's secret segments filtered as in `path`, truncated to 512 chars, if `redirect_to` was called. This sanitizes telemetry only; it does not change the response's `Location` header. |
 | `halted_callback` | Filter that halted the callback chain (`throw :abort`), if any. |
 | `unpermitted_parameters` | Array of param keys strong parameters rejected. |
 | `rate_limited` | `{name:, count:, to:}` if `ActionController::RateLimiting` fired, else nil. |
 | `inertia` | Present only on an Inertia request (`X-Inertia` header or an Inertia render happened): `{component, version, partial_component, partial_only, partial_except, props_bytes, ssr_ms}`. `ssr_ms` is only set when `inertia_rails` SSR actually rendered this request (`lib/railwatch/patches/inertia.rb`). |
-| `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/railwatch/redactor.rb`). |
+| `headers` | Request headers as a hash, header names Title-Cased; values matching a redacted pattern replaced with `Redactor::FILTERED` (`lib/railwatch/redactor.rb`). `Referer` is cleaned like a browser URL (no userinfo or fragment, no query unless `capture_browser_query_strings`, route secrets filtered); `Origin` loses any userinfo, query and fragment; `X-Original-Url`, `X-Original-Uri` and `X-Rewrite-Url` are cleaned like `url`. |
 | `payload` | Filtered request params — only captured when `config.capture_request_payload` is on **and** the request raised an exception (never for successful requests). |
 | `user_agent` | Truncated to 256 chars. |
 | `files` | Array of `{name, size, content_type, error}` for each uploaded file in a multipart request (metadata only, never contents). A non-multipart request body is never parsed to fill this in. |
@@ -412,7 +412,7 @@ itself keeps the real file and line.
 `component`, the `visit` the error happened in if any, the browser
 `session` id and the `tab` id it was thrown in, both stamped by the client
 when the error fired (the flush's session stands in for a client that
-sends none; each at most 64 of `[A-Za-z0-9_-]`, absent otherwise), the `user_agent`, and up to 20 `breadcrumbs`. Each
+sends none; each at most 64 of `[A-Za-z0-9_-]`, absent otherwise), the `user_agent`, and up to 20 `breadcrumbs`. The page `url`, `visit` and each `navigate` breadcrumb are cleaned like a visit's `url`. Each
 breadcrumb is `{at, kind, text}`, with `kind` being `console`, `click`,
 or `navigate`. The breadcrumbs are the trail the client recorded before
 the crash. Anything the app passed as `reportError(error, context)` is
@@ -773,7 +773,7 @@ entirely if `config.beacon_enabled` is off.
 |---|---|
 | `group` | Hash of the Inertia component name. |
 | `component` | Truncated to 255 chars. |
-| `url` | Truncated to 2048 chars. |
+| `url` | Path only (query only with `capture_browser_query_strings`; never fragment or userinfo), with this app's route secrets filtered as in the request's `path`. Truncated to 2048 chars. |
 | `method` | Truncated to 10 chars. |
 | `duration` | Microseconds, client-measured (`Date.now()` start to `finish`). |
 | `status` | `"success"`, `"error"`, or `"cancelled"` (visit was superseded before finishing). |

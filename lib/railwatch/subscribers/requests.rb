@@ -45,7 +45,12 @@ module Railwatch
 
         subscribe("redirect_to.action_controller") do |event|
           env = event.payload[:request]&.env or next
-          env["railwatch.redirect_to"] = Record.url_without_sensitive_components(event.payload[:location], limit: 512)
+          location = event.payload[:location].to_s
+          # Cleaned whole, cut after; a redirect to a page of this app whose
+          # route puts a token in the path (an edit-password link) has it
+          # filtered.
+          clean = Record.url_without_sensitive_components(location, limit: location.length)
+          env["railwatch.redirect_to"] = Railwatch.redactor.filter_url(clean, host: event.payload[:request].host)[0, 512]
         end
 
         subscribe("halted_callback.action_controller") do |event|

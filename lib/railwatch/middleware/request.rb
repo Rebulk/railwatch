@@ -207,12 +207,14 @@ module Railwatch
 
         inertia = inertia_fields(env, headers)
         payload = Railwatch.config.capture_request_payload && exe.counters[:exceptions].positive? ? Railwatch.redactor.params(req.filtered_parameters.except("controller", "action")) : nil
+        secrets = path_secrets(req, env)
+        url = Record.url_without_sensitive_components(req.original_url, limit: req.original_url.length)
 
         {
           group: Record.group_hash(method, pattern),
           method: method,
-          url: Record.url_without_sensitive_components(req.original_url, limit: 2048),
-          path: req.path,
+          url: Railwatch.redactor.filter_path(url, secrets)[0, 2048],
+          path: Railwatch.redactor.filter_path(req.path, secrets),
           route: pattern,
           route_methods: [ route[:verb] ].compact,
           route_domain: req.host,
@@ -230,13 +232,33 @@ module Railwatch
           unpermitted_parameters: env["railwatch.unpermitted_parameters"],
           rate_limited: env["railwatch.rate_limited"],
           inertia: inertia,
-          headers: request_headers(env),
+          headers: request_headers(env, req),
           payload: payload,
           queue_time: queue_time(env, exe),
           user_agent: req.user_agent.to_s[0, 256],
           files: env["railwatch.files"] || uploaded_files_fallback(req, env),
           **Sessions.browser_fields(env)
         }
+      end
+
+      # The values of the route's credential-shaped dynamic segments
+      # (`resources :passwords, param: :token`), which path and url must not
+      # carry. The router left the matched route's path_parameters in env. A
+      # request something answered before routing (a rack-attack throttle)
+      # has none, and one rendered by an exceptions_app that is the app's own
+      # routes has its error route's (ShowExceptions keeps the path it came
+      # in on): both are recognised again (Redactor#url_secrets).
+      def path_secrets(req, env)
+        redactor = Railwatch.redactor
+        original = env["action_dispatch.original_path"]
+        return redactor.url_secrets(original, method: env["action_dispatch.original_request_method"] || req.request_method) if original
+
+        params = env[ActionDispatch::Http::Parameters::PARAMETERS_KEY]
+        return redactor.path_secrets(params) if params && !params.empty?
+
+        redactor.url_secrets(req.path, method: req.request_method)
+      rescue StandardError
+        Redactor::NO_SECRETS
       end
 
       # Rack parses the request body the first time anything asks it for
@@ -337,15 +359,33 @@ module Railwatch
         end
       end
 
+      # Headers whose value is a URL, cleaned the way the request's own url
+      # is: the page the browser came from (its query only with
+      # capture_browser_query_strings, like a beacon URL), and the original
+      # URL a rewriting proxy (IIS, Azure) passes on (never its query). Both
+      # have their route's sensitive segments filtered when they are this
+      # app's. Origin is only scheme, host and port, so it has no route.
+      PROXY_URL_HEADERS = %w[X-Original-Url X-Original-Uri X-Rewrite-Url].freeze
+
       # Builds the (already redacted) header hash in one pass over env so the
       # redactor does not have to walk a second, intermediate hash.
-      def request_headers(env)
+      def request_headers(env, req)
         redactor = Railwatch.redactor
         out = {}
         env.each_pair do |k, v|
           next unless k.start_with?("HTTP_") || k == "CONTENT_TYPE" || k == "CONTENT_LENGTH"
           name = header_name(k)
-          out[name] = redactor.redact_header?(name) ? Redactor::FILTERED : v.to_s[0, 512]
+          out[name] = if redactor.redact_header?(name)
+            Redactor::FILTERED
+          elsif name == "Referer"
+            redactor.browser_url(v, limit: 512, host: req.host)
+          elsif name == "Origin"
+            Record.url_without_sensitive_components(v, limit: 512)
+          elsif PROXY_URL_HEADERS.include?(name)
+            redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: req.host)[0, 512]
+          else
+            v.to_s[0, 512]
+          end
         end
         out
       end
