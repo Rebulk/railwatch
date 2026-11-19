@@ -6,6 +6,27 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security fixes from the 2026-11-19 GA review:
+  - **Secrets in the URL path are filtered.** Rails 8's authentication
+    generator puts the live reset token in the path
+    (`resources :passwords, param: :token`), and the request record stored
+    it in `path` and `url`. A dynamic route segment whose name contains
+    `token`, `secret`, `key`, `code`, `signature` or `password`, or that
+    `filter_parameters` filters, is now `[FILTERED]` in the request's
+    `path` and `url`, `redirect_to`, the `Referer` and original-URL
+    headers, and the browser beacon's visit and error URLs and navigation
+    breadcrumbs (matched against the app's routes on the server, since the
+    browser does not know them).
+  - **`Referer` and `Origin` are cleaned like URLs.** The `Referer` header
+    kept its full query, so a reset or OAuth `code` from the previous page
+    was stored. It now keeps its query only with
+    `capture_browser_query_strings`; userinfo and fragments are always
+    dropped.
+  - **More identity headers are masked:** AWS ALB's `X-Amzn-Oidc-*`,
+    Azure's `X-Ms-Client-Principal*`, `DPoP`, a bare `session` segment
+    (`X-Session`), `X-User-Email`/`X-Email`, and `preferred-username`.
+    `X-Original-Url`, `X-Original-Uri` and `X-Rewrite-Url` keep no query.
+
 ## 1.6.1 (2026-11-18)
 
 - Security fixes from the 2026-11 review:

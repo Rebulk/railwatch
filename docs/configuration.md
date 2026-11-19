@@ -23,7 +23,7 @@ values set in the initializer always win over the env var.
 | `timing_headers` | `RAILWATCH_TIMING_HEADERS` | on in development, off elsewhere | Adds `Server-Timing` (`total`, `db` with the query count in `desc`, `view`, `other`) and `X-Railwatch-Execution-Id` to every recorded request's response, so `curl -i`, the browser's network panel, or a coding agent sees the cost and the execution to pass to `get_execution`. The id is left out when the request was sampled out. An existing `Server-Timing` (Rails' `config.server_timing`) is appended to. Off outside development by default because it tells every visitor how the app spends its time. Costs about 4 µs per request when on. |
 | `beacon_allowed_origins` | `RAILWATCH_BEACON_ALLOWED_ORIGINS` | `[]` | Extra origins allowed to post to the beacon beyond the app's own, comma-separated: a full origin (`https://app.example.com`) or a bare host. Like Sentry's allowed domains this bounds abuse rather than authenticating, since an endpoint a browser posts to cannot hold a secret. |
 | `beacon_global_rate_limit` | `RAILWATCH_BEACON_GLOBAL_RATE_LIMIT` | `6000` | Beacons accepted per minute across every client, so a rotating address cannot multiply past the per-client limit. 0 disables it. |
-| `capture_browser_query_strings` | `RAILWATCH_CAPTURE_BROWSER_QUERY_STRINGS` | `false` | Keep the query string of a browser visit's `url`, an error's page `url` and `visit`, and each navigation breadcrumb. Off: only the path is stored, because reset, magic-link and OAuth secrets ride in the query. Fragments and URL userinfo are always dropped. The browser client sends a query only with `startRailwatch({ captureQueryStrings: true })`. |
+| `capture_browser_query_strings` | `RAILWATCH_CAPTURE_BROWSER_QUERY_STRINGS` | `false` | Keep the query string of a browser visit's `url`, an error's page `url` and `visit`, and each navigation breadcrumb. Off: only the path is stored, because reset, magic-link and OAuth secrets ride in the query. Fragments and URL userinfo are always dropped. The browser client sends a query only with `startRailwatch({ captureQueryStrings: true })`. Also decides whether a request's `Referer` header keeps its query. |
 | `capture_browser_console_arguments` | `RAILWATCH_CAPTURE_BROWSER_CONSOLE_ARGUMENTS` | `false` | Keep what the page passed to `console.error`/`console.warn` in a breadcrumb. Off: the crumb is just `error` or `warn`. The browser client sends the arguments only with `startRailwatch({ captureConsoleArguments: true })`. |
 | `beacon_rate_limit` | `RAILWATCH_BEACON_RATE_LIMIT` | `120` | Beacon POSTs accepted per client IP per minute before `POST /railwatch/beacon` answers 429. The beacon is unauthenticated and keeps every browser error it is sent, so this is what stops a script from spending the app's event quota. Counted in the app's cache store; `0` turns it off. |
 
@@ -312,15 +312,45 @@ raised an exception. See `request` in `docs/records.md`.
 Header names containing a credential-shaped segment are always masked as
 a safe default. The segments are `api-key`, `access-key`, `private-key`,
 `auth`, `bearer`, `credential`, `hmac`, `jwt`, `token`, `secret`,
-`signature`, `password`, `session-id`, `subscription-key` (Azure API
-Management's `Ocp-Apim-Subscription-Key`), `client-cert`
-(`X-Forwarded-Client-Cert`), and the identity headers an authenticating
-proxy adds (`X-Forwarded-User`, `X-Forwarded-Email`, `X-Remote-User`).
+`signature`, `password`, `session-id`, a bare `session` (`X-Session`),
+`subscription-key` (Azure API Management's `Ocp-Apim-Subscription-Key`),
+`client-cert` (`X-Forwarded-Client-Cert`), `dpop`, and the identity
+headers an authenticating proxy or load balancer adds: `X-Forwarded-User`,
+`X-Remote-User`, any `email`/`user-email` (`X-Forwarded-Email`,
+`X-User-Email`, `X-Email`), `preferred-username`, `oidc` (AWS ALB's
+`X-Amzn-Oidc-Data`, `-Accesstoken`, `-Identity`) and `client-principal`
+(Azure App Service's `X-Ms-Client-Principal`).
 This holds even when they arrive as concatenated Rack
 aliases such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`,
 `X-ClientToken`, `X-SessionToken`, `X-RefreshToken`, `X-SecretKey`,
 `X-HmacSignature`, or `X-CSRFToken`. Add application-specific aliases to
 `redact_headers`. Ordinary diagnostic headers remain available.
+
+Headers that carry a URL are kept, cleaned. `Referer` keeps its path,
+and its query only with `capture_browser_query_strings`; `Origin`, and the
+original URL a rewriting proxy passes on (`X-Original-Url`,
+`X-Original-Uri`, `X-Rewrite-Url`), keep no query. None keeps userinfo or a
+fragment.
+
+**Secrets in the path.** A dynamic route segment whose name contains
+`token`, `secret`, `key`, `code`, `signature` or `password`, or that
+`redact_params`/`filter_parameters` would filter as a parameter, is
+replaced by `[FILTERED]` wherever its URL is recorded: the request's
+`path` and `url`, `redirect_to`, the `Referer` and original-URL headers,
+and the browser beacon's visit `url`, error `url`/`visit` and navigation
+breadcrumbs. Rails 8's authentication generator (`resources :passwords,
+param: :token`) records `/passwords/[FILTERED]/edit`; so do invite,
+magic-link and confirmation routes named that way. The request's own
+route comes from the router; any other URL of this app (the browser does
+not know the app's routes) is matched against the routes that have such a
+segment, and recognised by the router when it has that shape (on the
+URL's host, and for a 307/308 redirect with the request's own method,
+which the browser keeps; GET otherwise). A segment that holds literal text
+beside the value (`/reset/prefix-:token`) is filtered whole, and a glob
+value (`*token`) is filtered however it is percent-encoded. A URL on
+another host is left as it is. Name a segment so it matches, or add its
+name to `filter_parameters`, to have it filtered; `:id` and `:slug` are
+kept.
 
 **Per-field redaction blocks** run after a record is built, before it's
 buffered. The block receives and can mutate the record hash in place:
@@ -1011,11 +1041,14 @@ the sidecar, or keep Basic on.
 c.dashboard_default_role = "member"  # RAILWATCH_DASHBOARD_DEFAULT_ROLE; "member" or "admin"
 ```
 
-The role railwatch-sidecar gives a visitor the app did not name (no
-`Railwatch::Sidecar.config.user`): the HTTP Basic user, or the single
-operator. `member` by default, so a shared Basic password does not hand out
-token, member and integration management; set `admin` for the old
+The role railwatch-sidecar gives a visitor whose role the app did not
+name: the HTTP Basic user or the single operator (no
+`Railwatch::Sidecar.config.user`), and a user `config.user` returns
+without a `role`. `member` by default, so a shared Basic password does not
+hand out token, member and integration management; set `admin` for the old
 behaviour, or name users and their roles with `Railwatch::Sidecar.config.user`.
+Read by railwatch-sidecar releases after 0.2.1; 0.2.1 always used `member` for
+an unnamed visitor and `admin` for a `config.user` without a role.
 
 ## Rake tasks
 

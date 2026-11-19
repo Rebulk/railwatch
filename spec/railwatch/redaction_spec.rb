@@ -122,6 +122,71 @@ RSpec.describe "redaction and rejection", type: :request do
     end
   end
 
+  describe "identity headers from cloud load balancers and identity proxies (GA review finding 6)" do
+    it "masks ALB OIDC data, Azure client principal, DPoP proofs, bare session and email/username headers" do
+      sensitive = {
+        "X-Amzn-Oidc-Data" => "eyJalb.oidc",
+        "X-Amzn-Oidc-Identity" => "alb-subject",
+        "X-Ms-Client-Principal" => "eyJazure",
+        "X-Ms-Client-Principal-Name" => "alice@example.com",
+        "Dpop" => "eyJdpop",
+        "X-Session" => "sess",
+        "Session" => "sess2",
+        "X-User-Email" => "alice@example.com",
+        "X-Email" => "alice@example.com",
+        "X-Forwarded-Preferred-Username" => "alice"
+      }
+      get "/widgets", headers: sensitive.merge("X-Sessions-Count" => "3", "X-Request-Id" => "req-1")
+
+      headers = railwatch_records(:request).sole[:headers]
+      sensitive.each_key { |name| expect(headers[name]).to eq("[FILTERED]"), name }
+      expect(headers["X-Request-Id"]).to eq("req-1")
+      expect(headers["X-Sessions-Count"]).to eq("3"), "only a whole session segment"
+    end
+
+    it "keeps the path of a rewriting proxy's original-URL headers, never their query" do
+      original = {
+        "X-Original-Url" => "/reset?token=abc",
+        "X-Original-Uri" => "/reset?token=abc#frag",
+        "X-Rewrite-Url" => "https://user:pw@www.example.com/reset?token=abc"
+      }
+      get "/widgets", headers: original
+
+      headers = railwatch_records(:request).sole[:headers]
+      expect(headers["X-Original-Url"]).to eq("/reset")
+      expect(headers["X-Original-Uri"]).to eq("/reset")
+      expect(headers["X-Rewrite-Url"]).to eq("https://www.example.com/reset")
+    end
+
+    it "filters a reset token in the path of an original-URL header" do
+      get "/widgets", headers: { "X-Original-Url" => "/passwords/RESET_TOKEN_abc/edit?x=1" }
+
+      expect(railwatch_records(:request).sole[:headers]["X-Original-Url"]).to eq("/passwords/[FILTERED]/edit")
+    end
+  end
+
+  describe "Referer and Origin (GA review finding 5)" do
+    it "never stores a reset, magic-link or OAuth secret riding in the Referer's query or fragment" do
+      get "/widgets", headers: {
+        "Referer" => "https://user:pw@customer.test/password/reset/edit?token=SECRET_RESET_TOKEN_123#frag",
+        "Origin" => "https://customer.test"
+      }
+
+      headers = railwatch_records(:request).sole[:headers]
+      expect(headers["Referer"]).to eq("https://customer.test/password/reset/edit")
+      expect(headers["Origin"]).to eq("https://customer.test")
+    end
+
+    it "keeps the Referer's query, not its fragment, when the app opts in to browser query strings" do
+      Railwatch.config.capture_browser_query_strings = true
+      get "/widgets", headers: { "Referer" => "https://customer.test/search?q=boots#results" }
+
+      expect(railwatch_records(:request).sole[:headers]["Referer"]).to eq("https://customer.test/search?q=boots")
+    ensure
+      Railwatch.config.capture_browser_query_strings = false
+    end
+  end
+
   describe "payload masking" do
     it "masks Rails filter_parameters fields in the payload, including nested hashes and arrays" do
       Railwatch.config.capture_request_payload = true

@@ -12,6 +12,8 @@ module Railwatch
       # params walk below is skipped entirely for the vast majority of
       # requests instead of running once per action.
       EMPTY_FILES = [].freeze
+      # Redirects a browser follows with the original request method.
+      PRESERVING_REDIRECTS = [ 307, 308 ].freeze
 
       module_function
 
@@ -45,7 +47,16 @@ module Railwatch
 
         subscribe("redirect_to.action_controller") do |event|
           env = event.payload[:request]&.env or next
-          env["railwatch.redirect_to"] = Record.url_without_sensitive_components(event.payload[:location], limit: 512)
+          request = event.payload[:request]
+          location = event.payload[:location].to_s
+          # Cleaned whole, cut after; a redirect to a page of this app whose
+          # route puts a token in the path (an edit-password link) has it
+          # filtered. The browser follows a 307 or 308 with the request's
+          # own method, and every other redirect with GET, so the target is
+          # recognised the way it will be requested.
+          method = PRESERVING_REDIRECTS.include?(event.payload[:status].to_i) ? request.request_method : "GET"
+          clean = Record.url_without_sensitive_components(location, limit: location.length)
+          env["railwatch.redirect_to"] = Railwatch.redactor.filter_url(clean, host: request.host, method: method)[0, 512]
         end
 
         subscribe("halted_callback.action_controller") do |event|
