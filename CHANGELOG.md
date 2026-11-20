@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.2 (2026-11-19)
+
 - Security fixes from the 2026-11-19 GA review:
   - **Secrets in the URL path are filtered.** Rails 8's authentication
     generator puts the live reset token in the path
