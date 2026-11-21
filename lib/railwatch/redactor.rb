@@ -40,10 +40,14 @@ module Railwatch
     ROUTING_PATH_PARAMETERS = %i[controller action format].freeze
     NO_SECRETS = [].freeze
     # #scrub: nesting followed before a container is elided, which bounds the
-    # walk and ends a structure that contains itself; and entries read from
-    # one container, which is past anything a 200-character #inspect shows.
+    # walk; entries read from one container, which is past anything a
+    # 200-character #inspect shows; and values visited in all, across every
+    # branch, so a structure holding the same container many times over is
+    # not walked once per path to it. A container already on the path to
+    # itself is elided at once.
     SCRUB_MAX_DEPTH = 5
     SCRUB_MAX_ENTRIES = 100
+    SCRUB_MAX_NODES = 1_000
     SCRUB_ELIDED = Object.new.tap { |elided| def elided.inspect = "…" }.freeze
     URL_ORIGIN = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*:)?//[^/]*}
 
@@ -187,26 +191,46 @@ module Railwatch
     # filtered key masked. #params can only filter by the name the string is
     # stored under, so `attrs = { password: ... }` needs its keys looked at
     # while it still has them. Anything that is not a Hash, an Array or a
-    # params object comes back as it is.
-    def scrub(value, depth = 0)
-      value = value.to_unsafe_h if defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
-      case value
-      when Hash
-        return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH
-
-        value.first(SCRUB_MAX_ENTRIES).to_h do |key, item|
-          [ key, scrub_key?(key) ? FILTERED : scrub(item, depth + 1) ]
-        end
-      when Array
-        return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH
-
-        value.first(SCRUB_MAX_ENTRIES).map { |item| scrub(item, depth + 1) }
-      else
-        value
-      end
+    # params object comes back as it is. It runs while an exception is being
+    # reported, so it must end, and soon, whatever it is given.
+    def scrub(value)
+      scrub_value(value, 0, [], [ SCRUB_MAX_NODES ])
     end
 
     private
+
+    # path: the containers from the root down to value, compared by
+    # identity. budget: one count of values left, shared by the whole walk.
+    # key and key_path: the name value is stored under and the dotted names
+    # leading to it ("billing.number"), the way the app's parameter filter
+    # would see them. A params object is read from its own store: #to_unsafe_h
+    # converts all of it, with no limit, first, and #each_pair converts each
+    # nested Array whole, so either overflows the stack on one that holds
+    # itself (a SystemStackError, which no `rescue StandardError` stops).
+    def scrub_value(value, depth, path, budget, key = nil, key_path = nil)
+      return SCRUB_ELIDED if (budget[0] -= 1).negative?
+
+      if defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
+        value = value.instance_variable_get(:@parameters)
+        return SCRUB_ELIDED unless value.is_a?(Hash)
+      end
+      return scrub_leaf(key, value) unless value.is_a?(Hash) || value.is_a?(Array)
+      return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH || path.any? { |container| container.equal?(value) }
+
+      path.push(value)
+      begin
+        if value.is_a?(Hash)
+          value.first(SCRUB_MAX_ENTRIES).to_h do |name, item|
+            name_path = key_path ? "#{key_path}.#{name}" : name.to_s
+            [ name, scrub_key?(name, name_path) ? FILTERED : scrub_value(item, depth + 1, path, budget, name, name_path) ]
+          end
+        else
+          value.first(SCRUB_MAX_ENTRIES).map { |item| scrub_value(item, depth + 1, path, budget, key, key_path) }
+        end
+      ensure
+        path.pop
+      end
+    end
 
     def shaped_secrets(path, entries)
       secrets = nil
@@ -287,14 +311,28 @@ module Railwatch
       (out << raw.byteslice(kept..)).force_encoding(path.encoding)
     end
 
-    # Fails closed, like #params.
-    def scrub_key?(key)
+    # Fails closed, like #params. A dotted filter ("billing.number") names
+    # the whole path, so a nested key is also tried with its parents.
+    def scrub_key?(key, key_path)
       return false unless key.is_a?(String) || key.is_a?(Symbol)
 
       name = key.to_s
-      param_filter.filter_param(name, name) != name
+      param_filter.filter_param(name, name) != name ||
+        (key_path != name && param_filter.filter_param(key_path, key_path) != key_path)
     rescue StandardError
       true
+    end
+
+    # A value under a key no filter names, given to the app's Proc filters
+    # as the value itself: one that masks by what the value holds (a
+    # four-digit pin) cannot tell from the key's name alone. The filter
+    # works on a copy. Fails closed.
+    def scrub_leaf(key, value)
+      return value unless key.is_a?(String) || key.is_a?(Symbol)
+
+      param_filter.filter_param(key.to_s, value)
+    rescue StandardError
+      FILTERED
     end
 
     def sensitive_path_parameter?(name)
