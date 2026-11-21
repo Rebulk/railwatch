@@ -44,7 +44,12 @@ configuration and record specs:
   attached only to a request that raised, never to a successful request.
 - `capture_exception_locals` is false. When enabled, at most 25 locals are
   converted with `inspect`, truncated to 200 characters, and parameter
-  filtered. `Locals.inspect_value` rescues an `inspect` implementation that
+  filtered: by the local's name, and by key inside a local that is a Hash,
+  an Array or request parameters (so `attrs = { password: ... }` ships as
+  `[FILTERED]` under `password`). A secret held in a plain String under a
+  name the filter does not match, or printed by another object's own
+  `inspect`, is sent as it is; leave this off where that can happen.
+  `Locals.inspect_value` rescues an `inspect` implementation that
   raises; this behavior is covered by an exception-record spec.
 - `capture_exception_source` is true. Source lines surrounding in-application
   backtrace frames are recorded and sent to the configured server. Disable it if source context is outside the

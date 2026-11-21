@@ -39,6 +39,12 @@ module Railwatch
     SENSITIVE_PATH_PARAMETER = /token|secret|key|code|signature|password/i
     ROUTING_PATH_PARAMETERS = %i[controller action format].freeze
     NO_SECRETS = [].freeze
+    # #scrub: nesting followed before a container is elided, which bounds the
+    # walk and ends a structure that contains itself; and entries read from
+    # one container, which is past anything a 200-character #inspect shows.
+    SCRUB_MAX_DEPTH = 5
+    SCRUB_MAX_ENTRIES = 100
+    SCRUB_ELIDED = Object.new.tap { |elided| def elided.inspect = "…" }.freeze
     URL_ORIGIN = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*:)?//[^/]*}
 
     def initialize(config)
@@ -176,6 +182,30 @@ module Railwatch
       {}
     end
 
+    # For a value about to be turned into ONE string with #inspect (an
+    # exception local, a span attribute): a copy with every value under a
+    # filtered key masked. #params can only filter by the name the string is
+    # stored under, so `attrs = { password: ... }` needs its keys looked at
+    # while it still has them. Anything that is not a Hash, an Array or a
+    # params object comes back as it is.
+    def scrub(value, depth = 0)
+      value = value.to_unsafe_h if defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
+      case value
+      when Hash
+        return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH
+
+        value.first(SCRUB_MAX_ENTRIES).to_h do |key, item|
+          [ key, scrub_key?(key) ? FILTERED : scrub(item, depth + 1) ]
+        end
+      when Array
+        return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH
+
+        value.first(SCRUB_MAX_ENTRIES).map { |item| scrub(item, depth + 1) }
+      else
+        value
+      end
+    end
+
     private
 
     def shaped_secrets(path, entries)
@@ -255,6 +285,16 @@ module Railwatch
       return path if kept.zero?
 
       (out << raw.byteslice(kept..)).force_encoding(path.encoding)
+    end
+
+    # Fails closed, like #params.
+    def scrub_key?(key)
+      return false unless key.is_a?(String) || key.is_a?(Symbol)
+
+      name = key.to_s
+      param_filter.filter_param(name, name) != name
+    rescue StandardError
+      true
     end
 
     def sensitive_path_parameter?(name)

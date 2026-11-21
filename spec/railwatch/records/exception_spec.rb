@@ -236,6 +236,82 @@ RSpec.describe "exception record", type: :request do
     end
   end
 
+  # The name `attrs` is not sensitive, so the filter over local NAMES passes
+  # it; what is inside it has to be filtered by key before it is one string.
+  describe "a local that holds keyed data" do
+    def captured_locals
+      Railwatch.config.capture_exception_locals = true
+      Railwatch::Subscribers::Exceptions::Locals.install!
+      Railwatch.start_execution(source: :command, sample_kind: :commands)
+      begin
+        yield
+      rescue ArgumentError => e
+        Rails.error.report(e, handled: true)
+      end
+      Railwatch.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+      railwatch_records(:exception).sole[:locals]
+    ensure
+      Railwatch::Subscribers::Exceptions::Locals.uninstall!
+      Railwatch.config.capture_exception_locals = false
+    end
+
+    it "masks a filtered key inside a hash, whether the key is a string or a symbol" do
+      locals = captured_locals do
+        attrs = { "email" => "a@example.test", "password" => "hunter2", secret_code: "s3cret" }
+        raise ArgumentError, "with a hash #{attrs.size}"
+      end
+
+      expect(locals["attrs"]).to include("a@example.test", "[FILTERED]")
+      expect(locals["attrs"]).not_to include("hunter2", "s3cret")
+    end
+
+    it "masks a filtered key nested in hashes and arrays" do
+      locals = captured_locals do
+        rows = [ { user: { name: "Ada", password: "hunter2" } }, { "password" => "hunter3" } ]
+        raise ArgumentError, "with rows #{rows.size}"
+      end
+
+      expect(locals["rows"]).to include("Ada", "[FILTERED]")
+      expect(locals["rows"]).not_to include("hunter2", "hunter3")
+    end
+
+    it "masks a filtered key inside request parameters" do
+      locals = captured_locals do
+        permitted = ActionController::Parameters.new(user: { email: "a@example.test", password: "hunter2" })
+        raise ArgumentError, "with params #{permitted.keys.size}"
+      end
+
+      expect(locals["permitted"]).to include("a@example.test", "[FILTERED]")
+      expect(locals["permitted"]).not_to include("hunter2")
+    end
+
+    it "leaves the local's own data alone" do
+      attrs = { "name" => "Ada", "nested" => { "password" => "hunter2" } }
+
+      Railwatch::Subscribers::Exceptions::Locals.inspect_value(attrs)
+
+      expect(attrs).to eq("name" => "Ada", "nested" => { "password" => "hunter2" })
+    end
+
+    it "ends a structure that contains itself" do
+      cycle = { "name" => "Ada", "password" => "hunter2" }
+      cycle["self"] = cycle
+
+      value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(cycle)
+
+      expect(value).to include("Ada", "[FILTERED]", "…")
+      expect(value).not_to include("hunter2")
+    end
+
+    it "reads a large hash exactly as before, up to the length it keeps" do
+      big = (1..500).to_h { |n| [ "k#{n}", n ] }
+
+      value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(big)
+
+      expect(value).to eq(big.inspect[0, 200] + "…")
+    end
+  end
+
   it "falls back to the class when a local value's inspect raises" do
     explosive = stub_const("ExplosiveInspect", Class.new do
       def inspect

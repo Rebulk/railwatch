@@ -6,6 +6,18 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security: **a secret inside a Hash, Array or params local is filtered.**
+  With `capture_exception_locals` on, each local was turned into one string
+  and only then run through the parameter filter, which could see nothing
+  but the local's own name. A `password` local was `[FILTERED]`, but
+  `attrs = { password: "..." }` or a `params` local shipped the password,
+  because the name `attrs` is not sensitive. Keys inside a Hash, an Array of
+  them, or `ActionController::Parameters` are now filtered before the value
+  is stringified. Span attributes (`Railwatch.span("x", payload: {...})`)
+  had the same gap and get the same fix. Not covered, and now documented in
+  `docs/security.md`: a secret in a plain String under a neutral name, or
+  one printed by another object's own `inspect`.
+
 ## 1.6.2 (2026-11-19)
 
 - Security fixes from the 2026-11-19 GA review:
