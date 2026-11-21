@@ -25,6 +25,16 @@ module Railwatch
     MAX_CLICK_TEXT = 32
     # A browser URL is cleaned at up to this length, then stored at 2048.
     MAX_URL_INPUT = 16_384
+    # Different URLs one beacon may have cleaned. Cleaning one matches it
+    # against the app's routes, and a beacon can name a URL per visit, two per
+    # error and one per navigation crumb: 1,150 route recognitions from one
+    # unauthenticated request, which the body cap and the rate limits (they
+    # bound size and count) did nothing about. The browser client sends a few
+    # dozen at most, the same ones over and over, so each is cleaned once and
+    # anything past this many is not stored at all. Errors are read before
+    # visits, so in a beacon that does run out it is the errors that keep
+    # their URLs.
+    MAX_URL_CLEANINGS = 100
     CLICK_TEXT = /\A(?<target>[^"]*) "(?<text>.*)"\z/m
     # The same, cut to MAX_CRUMB_TEXT before its closing quote arrived.
     CLICK_TEXT_UNTERMINATED = /\A(?<target>[^"]*) "(?<text>.*)\z/m
@@ -316,9 +326,21 @@ module Railwatch
     #
     # Cleaned at the length the beacon carried it, and cut to 2048 only
     # after: cut first, a long userinfo loses its "@" and survives.
+    #
+    # Once per URL and method in a beacon (an error storm repeats one trail
+    # fifty times), and at most MAX_URL_CLEANINGS of them: past that a URL is
+    # stored as [FILTERED], never as the browser sent it.
     def browser_url(value, method: "GET")
       method = safe_string(method, 10).upcase.presence || "GET"
-      Railwatch.redactor.browser_url(safe_string(value, MAX_URL_INPUT), limit: 2048, host: request.host, method: method)
+      value = safe_string(value, MAX_URL_INPUT)
+      return value if value.empty?
+
+      cleaned = (@cleaned_urls ||= {})
+      cleaned.fetch([ value, method ]) do |key|
+        next Redactor::FILTERED if cleaned.size >= MAX_URL_CLEANINGS
+
+        cleaned[key] = Railwatch.redactor.browser_url(value, limit: 2048, host: request.host, method: method)
+      end
     end
 
     # Whatever the app handed Railwatch's reportError -- a React error

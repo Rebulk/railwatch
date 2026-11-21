@@ -176,5 +176,60 @@ RSpec.describe "secrets in the request path", type: :request do
       expect(browser["breadcrumbs"].map { |c| c["text"] }).to eq([ "GET /passwords/[FILTERED]/edit" ])
       expect(ex.to_s).not_to include(token)
     end
+
+    # Cleaning a URL matches it against the app's routes. One beacon can name
+    # 1,150 of them (a visit's, two per error, one per navigation crumb), and
+    # the beacon takes no credential.
+    describe "the work one beacon can ask for" do
+      def recognitions
+        count = 0
+        allow(Rails.application.routes).to receive(:recognize_path).and_wrap_original do |original, *args, **options|
+          count += 1
+          original.call(*args, **options)
+        end
+        yield
+        count
+      end
+
+      def beacon_of(urls)
+        url = urls.each
+        { visits: Array.new(50) { { component: "Passwords/Edit", url: url.next, method: "GET", started_at: Time.now.to_f * 1000, duration_ms: 1 } },
+          errors: Array.new(50) do
+            { name: "TypeError", message: "x is undefined", stack: "", url: url.next, visit: url.next,
+              breadcrumbs: Array.new(20) { { kind: "navigate", text: "GET #{url.next}", at: 1 } } }
+          end }
+      end
+
+      it "recognises a URL the beacon repeats only once" do
+        count = recognitions { post_beacon(beacon_of([ "/passwords/#{token}/edit" ].cycle)) }
+
+        expect(response).to have_http_status(:no_content)
+        expect(count).to eq(1)
+        expect(railwatch_records(:visit).map { |v| v[:url] }.uniq).to eq([ "/passwords/[FILTERED]/edit" ])
+        crumbs = railwatch_records(:exception).flat_map { |ex| JSON.parse(ex[:context])["browser"]["breadcrumbs"] }
+        expect(crumbs.size).to eq(1_000)
+        expect(crumbs.map { |c| c["text"] }.uniq).to eq([ "GET /passwords/[FILTERED]/edit" ])
+      end
+
+      it "stops at a ceiling when every URL is different, and stores none of the rest as sent" do
+        urls = (1..).lazy.map { |n| "/passwords/#{token}#{n}/edit" }
+        count = recognitions { post_beacon(beacon_of(urls)) }
+
+        expect(response).to have_http_status(:no_content)
+        expect(count).to eq(Railwatch::BeaconController::MAX_URL_CLEANINGS)
+        # Errors are read first, so they are the ones cleaned properly: the
+        # first error's own URLs keep their shape, and everything after the
+        # ceiling (the later errors, every visit) is masked whole.
+        browsers = railwatch_records(:exception).map { |ex| JSON.parse(ex[:context])["browser"] }
+        urls = railwatch_records(:visit).map { |v| v[:url] } + browsers.flat_map { |b| b.values_at("url", "visit") } +
+          browsers.flat_map { |b| b["breadcrumbs"].map { |c| c["text"].delete_prefix("GET ") } }
+        expect(urls.size).to eq(1_150)
+        expect(urls.uniq).to contain_exactly("/passwords/[FILTERED]/edit", "[FILTERED]")
+        expect(urls.count("/passwords/[FILTERED]/edit")).to eq(Railwatch::BeaconController::MAX_URL_CLEANINGS)
+        expect(browsers.first.values_at("url", "visit")).to eq([ "/passwords/[FILTERED]/edit" ] * 2)
+        expect(railwatch_records(:visit).map { |v| v[:url] }.uniq).to eq([ "[FILTERED]" ])
+        expect((railwatch_records(:visit) + railwatch_records(:exception)).map(&:to_s).join).not_to include(token)
+      end
+    end
   end
 end

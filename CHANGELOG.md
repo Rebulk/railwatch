@@ -17,6 +17,14 @@
   had the same gap and get the same fix. Not covered, and now documented in
   `docs/security.md`: a secret in a plain String under a neutral name, or
   one printed by another object's own `inspect`.
+- Security: **one beacon can no longer ask for 1,150 route recognitions.**
+  Each URL a beacon names (a visit's, two per error, one per navigation
+  breadcrumb) is matched against the app's routes to filter secrets in its
+  path, and the endpoint takes no credential. The body cap and the rate
+  limits bound a beacon's size and how many arrive, not the work inside
+  one. A URL is now cleaned once per beacon however often it repeats, and
+  at most 100 different URLs are cleaned; one past that is stored as
+  `[FILTERED]`, never as sent. The browser client sends far fewer.
 
 ## 1.6.2 (2026-11-19)
 
