@@ -404,6 +404,76 @@ RSpec.describe "exception record", type: :request do
         expect(pin).to eq("1234")
       end
     end
+
+    describe "with filters that match a key's #to_s or read the enclosing hash" do
+      around do |example|
+        filters = Rails.application.config.filter_parameters
+        added = [
+          /\A42\z/,
+          ->(key, value, original) { value.replace("[F]") if key == "pin" && original&.dig(:sensitive) }
+        ]
+        filters.concat(added)
+        Railwatch.instance_variable_set(:@redactor, nil)
+        example.run
+      ensure
+        added.each { |filter| filters.delete(filter) }
+        Railwatch.instance_variable_set(:@redactor, nil)
+      end
+
+      it "masks a value under a non-string key that a filter matches by its #to_s" do
+        scrubbed = Railwatch.redactor.scrub(42 => "private-value", 7 => "kept", nested: { 42 => [ "also-private" ] })
+
+        expect(scrubbed).to eq(42 => "[FILTERED]", 7 => "kept", nested: { 42 => "[FILTERED]" })
+      end
+
+      it "leaves a value stored under no key alone, at the root or in a root array" do
+        expect(Railwatch.redactor.scrub("42")).to eq("42")
+        expect(Railwatch.redactor.scrub([ "42", 42 ])).to eq([ "42", 42 ])
+      end
+
+      it "gives a three-argument Proc filter the hash the key is in" do
+        scrubbed = Railwatch.redactor.scrub(sensitive: true, pin: "1234")
+
+        expect(scrubbed).to eq(sensitive: true, pin: "[F]")
+        expect(Railwatch.redactor.scrub(sensitive: false, pin: "1234")).to eq(sensitive: false, pin: "1234")
+      end
+
+      it "gives it the immediate parent hash, not the root of what is scrubbed" do
+        scrubbed = Railwatch.redactor.scrub(sensitive: true, card: { pin: "1234" }, other: { sensitive: true, pin: [ "5678" ] })
+
+        expect(scrubbed).to eq(sensitive: true, card: { pin: "1234" }, other: { sensitive: true, pin: [ "[F]" ] })
+      end
+    end
+
+    it "gives a Proc filter a frozen copy of the parent hash, no more than SCRUB_MAX_ENTRIES of it" do
+      seen = []
+      # The key check (#scrub_key?) also calls it, as #filter_param does, with no original.
+      filter = ->(key, _value, original) { seen << original if key == "k1" && original }
+      Rails.application.config.filter_parameters << filter
+      Railwatch.instance_variable_set(:@redactor, nil)
+      big = (1..500).to_h { |n| [ "k#{n}", n.to_s ] }
+
+      Railwatch.redactor.scrub(big)
+
+      expect(seen.size).to eq(1)
+      expect(seen.first).to be_frozen
+      expect(seen.first.size).to eq(Railwatch::Redactor::SCRUB_MAX_ENTRIES)
+      expect(big.size).to eq(500)
+    ensure
+      Rails.application.config.filter_parameters.delete(filter)
+      Railwatch.instance_variable_set(:@redactor, nil)
+    end
+
+    it "masks a value when a Proc filter raises on its parent hash" do
+      filter = ->(key, _value, original) { original.fetch(:missing) if original && key == "code" }
+      Rails.application.config.filter_parameters << filter
+      Railwatch.instance_variable_set(:@redactor, nil)
+
+      expect(Railwatch.redactor.scrub(name: "Ada", nested: [ { code: "x" } ])).to eq(name: "Ada", nested: [ { code: "[FILTERED]" } ])
+    ensure
+      Rails.application.config.filter_parameters.delete(filter)
+      Railwatch.instance_variable_set(:@redactor, nil)
+    end
   end
 
   it "falls back to the class when a local value's inspect raises" do
