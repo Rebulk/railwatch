@@ -39,6 +39,19 @@ module Railwatch
     SENSITIVE_PATH_PARAMETER = /token|secret|key|code|signature|password/i
     ROUTING_PATH_PARAMETERS = %i[controller action format].freeze
     NO_SECRETS = [].freeze
+    # #scrub: nesting followed before a container is elided, which bounds the
+    # walk; entries read from one container, which is past anything a
+    # 200-character #inspect shows; and values visited in all, across every
+    # branch, so a structure holding the same container many times over is
+    # not walked once per path to it. A container already on the path to
+    # itself is elided at once.
+    SCRUB_MAX_DEPTH = 5
+    SCRUB_MAX_ENTRIES = 100
+    SCRUB_MAX_NODES = 1_000
+    SCRUB_ELIDED = Object.new.tap { |elided| def elided.inspect = "…" }.freeze
+    # #scrub's key for a value stored under no name at all: the root, or an
+    # element of an Array at the root. No filter looks at it.
+    SCRUB_NO_KEY = Object.new.freeze
     URL_ORIGIN = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*:)?//[^/]*}
 
     def initialize(config)
@@ -176,7 +189,54 @@ module Railwatch
       {}
     end
 
+    # For a value about to be turned into ONE string with #inspect (an
+    # exception local, a span attribute): a copy with every value under a
+    # filtered key masked. #params can only filter by the name the string is
+    # stored under, so `attrs = { password: ... }` needs its keys looked at
+    # while it still has them. Anything that is not a Hash, an Array or a
+    # params object comes back as it is. It runs while an exception is being
+    # reported, so it must end, and soon, whatever it is given.
+    def scrub(value)
+      scrub_value(value, 0, [], [ SCRUB_MAX_NODES ])
+    end
+
     private
+
+    # path: the containers from the root down to value, compared by
+    # identity. budget: one count of values left, shared by the whole walk.
+    # key and key_path: the name value is stored under and the dotted names
+    # leading to it ("billing.number"), the way the app's parameter filter
+    # would see them; SCRUB_NO_KEY for a value stored under no name. parent:
+    # [the Hash that key is in, its copy for a Proc filter once made]. A
+    # params object is read from its own store: #to_unsafe_h converts all of
+    # it, with no limit, first, and #each_pair converts each nested Array
+    # whole, so either overflows the stack on one that holds itself (a
+    # SystemStackError, which no `rescue StandardError` stops).
+    def scrub_value(value, depth, path, budget, key = SCRUB_NO_KEY, key_path = nil, parent = nil)
+      return SCRUB_ELIDED if (budget[0] -= 1).negative?
+
+      if defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
+        value = value.instance_variable_get(:@parameters)
+        return SCRUB_ELIDED unless value.is_a?(Hash)
+      end
+      return scrub_leaf(key, value, parent) unless value.is_a?(Hash) || value.is_a?(Array)
+      return SCRUB_ELIDED if depth >= SCRUB_MAX_DEPTH || path.any? { |container| container.equal?(value) }
+
+      path.push(value)
+      begin
+        if value.is_a?(Hash)
+          holder = [ value ]
+          value.first(SCRUB_MAX_ENTRIES).to_h do |name, item|
+            name_path = key_path ? "#{key_path}.#{name}" : name.to_s
+            [ name, scrub_key?(name, name_path) ? FILTERED : scrub_value(item, depth + 1, path, budget, name, name_path, holder) ]
+          end
+        else
+          value.first(SCRUB_MAX_ENTRIES).map { |item| scrub_value(item, depth + 1, path, budget, key, key_path, parent) }
+        end
+      ensure
+        path.pop
+      end
+    end
 
     def shaped_secrets(path, entries)
       secrets = nil
@@ -257,6 +317,49 @@ module Railwatch
       (out << raw.byteslice(kept..)).force_encoding(path.encoding)
     end
 
+    # Fails closed, like #params. A dotted filter ("billing.number") names
+    # the whole path, so a nested key is also tried with its parents. Any
+    # key is matched by its #to_s, as the parameter filter matches one
+    # (`{ 42 => ... }` against /\A42\z/).
+    def scrub_key?(key, key_path)
+      name = key.to_s
+      param_filter.filter_param(name, name) != name ||
+        (key_path != name && param_filter.filter_param(key_path, key_path) != key_path)
+    rescue StandardError
+      true
+    end
+
+    # A value under a key no filter names, given to the app's Proc filters
+    # as the value itself: one that masks by what the value holds (a
+    # four-digit pin) cannot tell from the key's name alone. Called as the
+    # parameter filter calls them, on copies, except that the third
+    # argument (the original params, which #filter_param has no way to
+    # pass) is the Hash the key is in, not the root of what is scrubbed: a
+    # frozen copy of its first SCRUB_MAX_ENTRIES entries, made once per
+    # Hash. Fails closed.
+    def scrub_leaf(key, value, parent)
+      return value if key.equal?(SCRUB_NO_KEY)
+
+      procs = proc_filters
+      return value if procs.empty?
+
+      name = key.to_s
+      value = value.dup if value.duplicable?
+      procs.each do |filter|
+        next filter.call(name.dup, value) if filter.arity == 2
+
+        filter.call(name.dup, value, parent && (parent[1] ||= original_for(parent[0])))
+      end
+      value
+    rescue StandardError
+      FILTERED
+    end
+
+    def original_for(hash)
+      copy = hash.size > SCRUB_MAX_ENTRIES ? hash.class[hash.first(SCRUB_MAX_ENTRIES)] : hash.dup
+      copy.freeze
+    end
+
     def sensitive_path_parameter?(name)
       SENSITIVE_PATH_PARAMETER.match?(name) || param_filter.filter_param(name, name) != name
     end
@@ -290,11 +393,17 @@ module Railwatch
     end
 
     def param_filter
-      @param_filter ||= begin
-        filters = @config.redact_params.dup
-        filters.concat(Rails.application.config.filter_parameters) if defined?(Rails) && Rails.application
-        ActiveSupport::ParameterFilter.new(filters.uniq, mask: FILTERED)
-      end
+      @param_filter ||= ActiveSupport::ParameterFilter.new(filters, mask: FILTERED)
+    end
+
+    def proc_filters
+      @proc_filters ||= filters.grep(Proc)
+    end
+
+    def filters
+      filters = @config.redact_params.dup
+      filters.concat(Rails.application.config.filter_parameters) if defined?(Rails) && Rails.application
+      filters.uniq
     end
   end
 end
