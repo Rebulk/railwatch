@@ -58,6 +58,14 @@ RSpec.describe "span record" do
     expect(span[:attributes]).to eq("password" => "[FILTERED]", "user" => "cole")
   end
 
+  # The attribute's own name (`payload`) is not sensitive; the key inside is.
+  it "filters a sensitive key inside a hash or array attribute" do
+    span = record_span("api.call", payload: { user: "cole", password: "hunter2" }, rows: [ { "password" => "hunter3" } ])
+
+    expect(span[:attributes]["payload"]).to include("cole", "[FILTERED]")
+    expect(span[:attributes].values.join).not_to include("hunter2", "hunter3")
+  end
+
   it "keeps at most 25 attributes" do
     span = record_span("pdf.render", **30.times.to_h { |i| [ :"k#{i}", i ] })
 

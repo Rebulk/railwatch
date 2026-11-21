@@ -565,12 +565,13 @@ module Railwatch
     end
 
     # Same treatment exception locals get: stringified, truncated, capped,
-    # and run through the app's parameter filter.
+    # and run through the app's parameter filter -- by key inside a Hash or
+    # Array value first (Redactor#scrub), then by the attribute's own name.
     def span_attributes(attributes)
       return nil if attributes.empty?
 
       raw = attributes.first(SPAN_MAX_ATTRIBUTES).to_h do |k, v|
-        s = v.is_a?(String) ? v : v.inspect
+        s = v.is_a?(String) ? v : redactor.scrub(v).inspect
         [ k.to_s, s.length > SPAN_MAX_VALUE ? s[0, SPAN_MAX_VALUE] : s ]
       end
       redactor.params(raw)

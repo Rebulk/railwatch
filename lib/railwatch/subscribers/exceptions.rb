@@ -40,6 +40,14 @@ module Railwatch
       # already stringified, truncated, and run through the param filter so
       # a `password` local ships as [FILTERED]. Costs one binding walk per
       # raise, nothing on the happy path.
+      #
+      # The param filter above sees only the local's own NAME, and by then
+      # the value is one string. So a Hash, an Array of them, or a params
+      # object is filtered by KEY first (Redactor#scrub), while it still has
+      # keys: `attrs = { password: ... }` used to ship the password, because
+      # nothing about the name `attrs` is sensitive. What this cannot see is
+      # a secret in a plain String under a neutral name, or inside some other
+      # object's own #inspect.
       module Locals
         MAX_LOCALS = 25
         MAX_VALUE = 200
@@ -71,7 +79,7 @@ module Railwatch
         end
 
         def inspect_value(value)
-          s = value.inspect
+          s = Railwatch.redactor.scrub(value).inspect
           s.length > MAX_VALUE ? s[0, MAX_VALUE] + "…" : s
         rescue StandardError
           "#<#{value.class}>"

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "timeout"
 
 RSpec.describe "exception record", type: :request do
   it "captures class, message, handled, severity, source, file, line, and frames for an unhandled error" do
@@ -233,6 +234,175 @@ RSpec.describe "exception record", type: :request do
     ensure
       Railwatch::Subscribers::Exceptions::Locals.uninstall!
       Railwatch.config.capture_exception_locals = false
+    end
+  end
+
+  # The name `attrs` is not sensitive, so the filter over local NAMES passes
+  # it; what is inside it has to be filtered by key before it is one string.
+  describe "a local that holds keyed data" do
+    def captured_locals
+      Railwatch.config.capture_exception_locals = true
+      Railwatch::Subscribers::Exceptions::Locals.install!
+      Railwatch.start_execution(source: :command, sample_kind: :commands)
+      begin
+        yield
+      rescue ArgumentError => e
+        Rails.error.report(e, handled: true)
+      end
+      Railwatch.finish_execution(:command, group: "g", class: "Rake::Task", name: "demo", command: "rake demo", exit_code: 0)
+      railwatch_records(:exception).sole[:locals]
+    ensure
+      Railwatch::Subscribers::Exceptions::Locals.uninstall!
+      Railwatch.config.capture_exception_locals = false
+    end
+
+    it "masks a filtered key inside a hash, whether the key is a string or a symbol" do
+      locals = captured_locals do
+        attrs = { "email" => "a@example.test", "password" => "hunter2", secret_code: "s3cret" }
+        raise ArgumentError, "with a hash #{attrs.size}"
+      end
+
+      expect(locals["attrs"]).to include("a@example.test", "[FILTERED]")
+      expect(locals["attrs"]).not_to include("hunter2", "s3cret")
+    end
+
+    it "masks a filtered key nested in hashes and arrays" do
+      locals = captured_locals do
+        rows = [ { user: { name: "Ada", password: "hunter2" } }, { "password" => "hunter3" } ]
+        raise ArgumentError, "with rows #{rows.size}"
+      end
+
+      expect(locals["rows"]).to include("Ada", "[FILTERED]")
+      expect(locals["rows"]).not_to include("hunter2", "hunter3")
+    end
+
+    it "masks a filtered key inside request parameters" do
+      locals = captured_locals do
+        permitted = ActionController::Parameters.new(user: { email: "a@example.test", password: "hunter2" })
+        raise ArgumentError, "with params #{permitted.keys.size}"
+      end
+
+      expect(locals["permitted"]).to include("a@example.test", "[FILTERED]")
+      expect(locals["permitted"]).not_to include("hunter2")
+    end
+
+    it "leaves the local's own data alone" do
+      attrs = { "name" => "Ada", "nested" => { "password" => "hunter2" } }
+
+      Railwatch::Subscribers::Exceptions::Locals.inspect_value(attrs)
+
+      expect(attrs).to eq("name" => "Ada", "nested" => { "password" => "hunter2" })
+    end
+
+    it "ends a structure that contains itself" do
+      cycle = { "name" => "Ada", "password" => "hunter2" }
+      cycle["self"] = cycle
+
+      value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(cycle)
+
+      expect(value).to include("Ada", "[FILTERED]", "…")
+      expect(value).not_to include("hunter2")
+    end
+
+    it "reads a large hash exactly as before, up to the length it keeps" do
+      big = (1..500).to_h { |n| [ "k#{n}", n ] }
+
+      value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(big)
+
+      expect(value).to eq(big.inspect[0, 200] + "…")
+    end
+
+    # Scrubbing runs while an exception is being reported: it must return,
+    # promptly, and raise nothing, whatever the local holds.
+    def promptly(&)
+      Timeout.timeout(2, &)
+    end
+
+    it "ends request parameters that contain themselves" do
+      params = ActionController::Parameters.new(name: "Ada", password: "hunter2")
+      params[:self] = params
+
+      value = nil
+      expect { promptly { value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(params) } }.not_to raise_error
+
+      expect(value).to include("Ada", "[FILTERED]", "…")
+      expect(value).not_to include("hunter2")
+    end
+
+    it "does not convert all of a large params object before keeping the first entries" do
+      params = ActionController::Parameters.new((1..500).to_h { |n| [ "k#{n}", { "n" => n } ] })
+      expect(params).not_to receive(:to_unsafe_h)
+
+      scrubbed = Railwatch.redactor.scrub(params)
+
+      expect(scrubbed.size).to eq(Railwatch::Redactor::SCRUB_MAX_ENTRIES)
+      expect(scrubbed["k1"]).to eq("n" => 1)
+    end
+
+    it "does not expand an array that holds itself a hundred times once per path" do
+      a = []
+      100.times { a << a }
+
+      value = nil
+      expect { promptly { value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(a) } }.not_to raise_error
+
+      expect(value).to start_with("[…, …")
+    end
+
+    it "bounds a structure that holds the same container many times without a cycle" do
+      level = { "password" => "hunter2", "name" => "Ada" }
+      4.times { level = Array.new(100) { level } }
+      keys_read = 0
+      allow(Railwatch.redactor).to receive(:scrub_key?).and_wrap_original do |original, *args|
+        keys_read += 1
+        original.call(*args)
+      end
+
+      value = nil
+      expect { promptly { value = Railwatch::Subscribers::Exceptions::Locals.inspect_value(level) } }.not_to raise_error
+
+      expect(keys_read).to be <= 2 * Railwatch::Redactor::SCRUB_MAX_NODES
+      expect(value).to include("[FILTERED]", "Ada")
+      expect(value).not_to include("hunter2")
+    end
+
+    it "scrubs ordinary nested values exactly as before" do
+      value = { "user" => { "name" => "Ada", "password" => "hunter2", "tags" => [ "a", { "secret_code" => "s" } ] }, "n" => 1 }
+
+      expect(Railwatch.redactor.scrub(value)).to eq(
+        "user" => { "name" => "Ada", "password" => "[FILTERED]", "tags" => [ "a", { "secret_code" => "[FILTERED]" } ] }, "n" => 1
+      )
+    end
+
+    describe "with filters that name a path or look at the value" do
+      around do |example|
+        saved = Railwatch.config.redact_params
+        filters = Rails.application.config.filter_parameters
+        pin = ->(key, value) { value.replace("[PIN]") if key == "pin" && value.is_a?(String) && value.match?(/\A\d{4}\z/) }
+        Railwatch.config.redact_params = saved + [ "billing.number" ]
+        filters << pin
+        Railwatch.instance_variable_set(:@redactor, nil)
+        example.run
+      ensure
+        Railwatch.config.redact_params = saved
+        filters.delete(pin)
+        Railwatch.instance_variable_set(:@redactor, nil)
+      end
+
+      it "masks a key a dotted filter names through its parents, and only there" do
+        scrubbed = Railwatch.redactor.scrub(billing: { number: "4111111111111111", city: "Paris" }, shipping: { number: "12" })
+
+        expect(scrubbed).to eq(billing: { number: "[FILTERED]", city: "Paris" }, shipping: { number: "12" })
+      end
+
+      it "gives a Proc filter the value itself, on a copy" do
+        pin = +"1234"
+
+        scrubbed = Railwatch.redactor.scrub(pin: pin, card: { pin: [ "5678" ] }, name: "Ada")
+
+        expect(scrubbed).to eq(pin: "[PIN]", card: { pin: [ "[PIN]" ] }, name: "Ada")
+        expect(pin).to eq("1234")
+      end
     end
   end
 
