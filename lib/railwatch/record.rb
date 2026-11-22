@@ -120,25 +120,43 @@ module Railwatch
     # while dropping authority credentials, every query value, and fragments
     # without relying on strict parsing of application-provided redirects.
     def url_without_sensitive_components(value, limit:)
-      url = value.to_s
+      url = without_userinfo(value.to_s)
       query = url.index("?")
       fragment = url.index("#")
       cutoff = query && fragment ? [ query, fragment ].min : query || fragment
       url = url[0, cutoff] if cutoff
+      url[0, limit]
+    end
 
+    PLAUSIBLE_AUTHORITY = /\A(?:\[[0-9A-Fa-f:.]*\]|[^\s:\[\]@]*)(?::\d*)?\z/
+
+    # Drops "user:pass@" from the authority. A URL without a scheme is read
+    # as starting with its authority. An unencoded ? or # can sit inside a
+    # password ("https://user:se?cret@host/"): that @ is still taken as the
+    # end of the userinfo when the text before the ? is no host[:port], so
+    # an @ in a real query ("https://host?to=a@b") is left to the query cut.
+    def without_userinfo(url)
       scheme_end = url.index("://")
       authority_start = if url.start_with?("//")
         2
       elsif scheme_end && /\A[A-Za-z][A-Za-z0-9+.-]*\z/.match?(url[0, scheme_end])
         scheme_end + 3
+      elsif scheme_end.nil?
+        0
       end
-      if authority_start
-        authority_end = url.index("/", authority_start) || url.length
-        userinfo_end = url.rindex("@", authority_end - 1)
-        url = url[0, authority_start] + url[(userinfo_end + 1)..] if userinfo_end && userinfo_end >= authority_start
-      end
+      return url unless authority_start
 
-      url[0, limit]
+      authority_end = url.index("/", authority_start) || url.length
+      return url if authority_end <= authority_start
+
+      userinfo_end = url.rindex("@", authority_end - 1)
+      return url unless userinfo_end && userinfo_end >= authority_start
+
+      userinfo = url[authority_start...userinfo_end]
+      before_delimiter = userinfo[/\A[^?#]*/]
+      return url if before_delimiter != userinfo && PLAUSIBLE_AUTHORITY.match?(before_delimiter)
+
+      url[0, authority_start] + url[(userinfo_end + 1)..]
     end
   end
 end

@@ -433,7 +433,7 @@ the app database.
 | `flush_interval` | `RAILWATCH_FLUSH_INTERVAL` | `2.0` (seconds) | Background thread wakes and flushes on this cadence even if the buffer never fills. |
 | `flush_threshold` | `RAILWATCH_FLUSH_THRESHOLD` | `500` | A `write` that pushes the buffer past this size wakes the thread immediately instead of waiting for the next interval. |
 | `connect_timeout` | `RAILWATCH_CONNECT_TIMEOUT` | `1.0` (seconds) | TCP connect timeout for the ingest POST. |
-| `timeout` | `RAILWATCH_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. |
+| `timeout` | `RAILWATCH_TIMEOUT` | `3.0` (seconds) | Read/write timeout for the ingest POST. The whole exchange is also bounded, at `connect_timeout + 4 × timeout` (13 s by default), so a receiver that answers one byte at a time cannot hold it open. |
 | `shutdown_timeout` | `RAILWATCH_SHUTDOWN_TIMEOUT` | `2.0` (seconds) | Deadline for the reporter thread to deliver retained records during `at_exit`. A deployment drain timeout must be longer than this. |
 
 Delivery is `Railwatch::Transport::Http`, in

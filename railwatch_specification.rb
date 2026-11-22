@@ -42,6 +42,10 @@ module Railwatch
         # Used for profile stacks and attachments. A bundled gem since Ruby
         # 3.4, so it must be declared rather than assumed from stdlib.
         spec.add_dependency "base64", "~> 0.2"
+        # 0.10 bounds a response head (1 MiB, 64 KiB per field). Older
+        # versions, including the 0.6 Ruby 3.4 ships, read a header line of
+        # any length, and Transport::Http's own cap covers only the body.
+        spec.add_dependency "net-http", "~> 0.10"
       end
     end
   end

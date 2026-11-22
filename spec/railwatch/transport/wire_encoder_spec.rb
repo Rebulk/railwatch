@@ -49,6 +49,43 @@ RSpec.describe Railwatch::Transport::WireEncoder do
     expect(decode(encoded.body)).to include('"b"')
   end
 
+  # Puma hands a header value over as raw bytes, so one anonymous request
+  # with "User-Agent: probe\xFF" puts a string JSON refuses into a record.
+  it "replaces bytes that are not UTF-8 rather than failing the batch they ride in" do
+    batch = Array.new(9) { |n| { "t" => "log", "n" => n } }
+    batch.insert(4, { "t" => "request", "headers" => { "User-Agent" => "probe\xFF".b }, "path" => "caf\xC3".b })
+
+    encoded = encoder.encode(batch)
+    lines = decode(encoded.body).lines.map { |line| JSON.parse(line) }
+
+    expect(encoded.sent).to eq(10)
+    expect(lines[4]).to include("headers" => { "User-Agent" => "probe�" }, "path" => "caf�")
+    expect(lines.map { |line| line["n"] }.compact).to eq((0..8).to_a)
+  end
+
+  it "replaces invalid bytes in a hash key, and in a string labelled UTF-8 that is not" do
+    encoded = encoder.encode([ { "bad\xFF".b => "x\xFE".dup.force_encoding(Encoding::UTF_8) } ])
+
+    expect(JSON.parse(decode(encoded.body))).to eq("bad�" => "x�")
+  end
+
+  it "leaves out a record that cannot be encoded at all and counts it, keeping the rest" do
+    encoded = encoder.encode([ { "t" => "a" }, { "t" => "b", "v" => Float::NAN }, { "t" => "c" } ])
+
+    expect(encoded.sent).to eq(2)
+    expect(encoded.unencodable).to eq(1)
+    expect(decode(encoded.body).lines.map { |line| JSON.parse(line)["t"] }).to eq(%w[a c])
+  end
+
+  it "leaves out a record that refers to itself and counts it, keeping the rest" do
+    cyclic = { "t" => "b", "bad" => "x\xFF".b }
+    cyclic["self"] = cyclic
+    encoded = encoder.encode([ { "t" => "a" }, cyclic, { "t" => "c" } ])
+
+    expect(encoded.unencodable).to eq(1)
+    expect(decode(encoded.body).lines.map { |line| JSON.parse(line)["t"] }).to eq(%w[a c])
+  end
+
   it "encodes an empty batch without raising" do
     encoded = encoder.encode([])
     expect(encoded.sent).to eq(0)

@@ -54,6 +54,7 @@ begin
   end
   expected_dependencies = {
     "base64" => Gem::Requirement.new("~> 0.2"),
+    "net-http" => Gem::Requirement.new("~> 0.10"),
     "rails" => Gem::Requirement.new(">= 8.1", "< 9")
   }
   assert!(runtime_dependencies == expected_dependencies, "runtime dependencies changed: #{runtime_dependencies}")
