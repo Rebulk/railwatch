@@ -638,6 +638,45 @@ RSpec.describe Railwatch do
       expect(holding.buffer.instance_variable_get(:@byte_capacity)).to eq(8_192)
     end
 
+    # A rake process builds its reporter -- and the transport with it --
+    # before config/initializers runs. The token the initializer sets is
+    # read per request, the ingest_url was not.
+    it "sends to the ingest_url the initializer set, not the one the reporter was built with" do
+      ingest_url = Railwatch.config.ingest_url
+      early = Railwatch::Reporter.new(Railwatch.config)
+      Railwatch.config.ingest_url = "http://selfhosted.test"
+      stub_request(:post, "http://selfhosted.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+      Railwatch.instance_variable_set(:@reporter, early)
+      Railwatch.adopt_final_config!
+
+      early.buffer.push({ t: "log", message: "after boot" })
+
+      expect(early.flush.ok).to be(true)
+      expect(a_request(:post, "http://selfhosted.test/ingest")
+        .with(headers: { "Authorization" => "Bearer test-token" })).to have_been_made.once
+      expect(a_request(:post, "http://railwatch.test/ingest")).not_to have_been_made
+    ensure
+      Railwatch.config.ingest_url = ingest_url
+    end
+
+    it "keeps a transport it was handed, so an explicit endpoint still wins" do
+      ingest_url = Railwatch.config.ingest_url
+      pinned = Railwatch::Transport::Http.new(Railwatch.config, endpoint: "http://pinned.test/ingest")
+      reporter = Railwatch::Reporter.new(Railwatch.config, transport: pinned)
+      Railwatch.config.ingest_url = "http://selfhosted.test"
+      stub_request(:post, "http://pinned.test/ingest").to_return(status: 200, body: '{"accepted":1,"rejected":0}')
+      Railwatch.instance_variable_set(:@reporter, reporter)
+      Railwatch.adopt_final_config!
+
+      reporter.buffer.push({ t: "log", message: "after boot" })
+
+      expect(reporter.flush.ok).to be(true)
+      expect(a_request(:post, "http://pinned.test/ingest")).to have_been_made.once
+      expect(a_request(:post, "http://selfhosted.test/ingest")).not_to have_been_made
+    ensure
+      Railwatch.config.ingest_url = ingest_url
+    end
+
     it "does not build a reporter for a process that never reported" do
       Railwatch.instance_variable_set(:@reporter, nil)
       Railwatch.adopt_final_config!

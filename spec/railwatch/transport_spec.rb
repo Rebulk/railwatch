@@ -480,6 +480,24 @@ RSpec.describe Railwatch::Reporter do
     end
 
 
+    # One anonymous request with "User-Agent: probe\xFF" used to make every
+    # encode of its batch raise: the whole batch walked the retry ladder,
+    # was dropped, and the ladder sampled the app down to an eighth.
+    it "delivers a batch holding one record JSON refuses, and does not back off for it" do
+      reporter = described_class.new(Railwatch.config, transport: Railwatch::Transport::Http.new(Railwatch.config))
+      9.times { |n| reporter.buffer.push({ t: "log", n: n }) }
+      reporter.buffer.push({ t: "request", headers: { "User-Agent" => "probe\xFF".b } })
+
+      result = reporter.flush
+      reporter.flush
+
+      expect(result.ok).to be(true)
+      expect(result.accepted).to eq(10)
+      expect(reporter.instance_variable_get(:@retry_batch)).to be_nil
+      expect(reporter.backpressure_factor).to eq(1.0)
+      expect(a_request(:post, "http://railwatch.test/ingest")).to have_been_made.once
+    end
+
     it "retains a retryable batch and delivers it once after recovery" do
       attempts = []
       outcomes = [

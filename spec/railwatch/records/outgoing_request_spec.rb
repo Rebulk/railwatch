@@ -69,6 +69,18 @@ RSpec.describe "outgoing_request record" do
     expect(req[:status_code]).to eq(204)
   end
 
+  it "instrument_outgoing drops userinfo, the query and the fragment, like the Net::HTTP and Faraday patches" do
+    Railwatch.start_execution(source: :command, sample_kind: :commands)
+    Railwatch.instrument_outgoing(:get, "https://svc-user:svc-pass@api.example.test/v1/things?api_key=KEY_123#frag") do
+      Struct.new(:status).new(200)
+    end
+    finish!
+
+    req = railwatch_records(:outgoing_request).sole
+    expect(req[:url]).to eq("https://api.example.test/v1/things")
+    expect(req[:host]).to eq("api.example.test")
+  end
+
   it "instrument_outgoing does not record anything when the yielded result has no #status" do
     Railwatch.start_execution(source: :command, sample_kind: :commands)
     result = Railwatch.instrument_outgoing("GET", "http://custom-adapter.test/x") { "plain string" }

@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "spec_helper"
+require "socket"
+require "timeout"
 
 RSpec.describe Railwatch::Transport::Http do
   let(:transport) { described_class.new(Railwatch.config) }
@@ -100,6 +102,73 @@ RSpec.describe Railwatch::Transport::Http do
         .to_return(status: 429, body: "wait", headers: { "Retry-After" => at })
 
       expect(transport.deliver([ { "t" => "request" } ]).retry_after_at).to be_within(2).of(Time.httpdate(at))
+    end
+
+    # WebMock replaces Net::HTTP, and the response head is read inside it,
+    # so these need a real socket. The receiver reads the request, then
+    # answers with whatever the example writes.
+    def with_receiver(answer)
+      server = TCPServer.new("127.0.0.1", 0)
+      thread = Thread.new do
+        socket = server.accept
+        head = +""
+        head << socket.readpartial(65_536) until head.include?("\r\n\r\n")
+        length = head[/^content-length: *(\d+)/i, 1].to_i
+        body_read = head.split("\r\n\r\n", 2).last.bytesize
+        socket.read(length - body_read) if length > body_read
+        answer.call(socket)
+      rescue StandardError
+        nil
+      ensure
+        socket&.close
+      end
+      WebMock.allow_net_connect!
+      yield "http://127.0.0.1:#{server.addr[1]}"
+    ensure
+      WebMock.disable_net_connect!
+      thread&.kill
+      server&.close
+    end
+
+    def local_transport(url, timeout: 0.1)
+      config = Railwatch.config.dup
+      config.ingest_url = url
+      config.connect_timeout = timeout
+      config.timeout = timeout
+      described_class.new(config)
+    end
+
+    it "refuses a response head larger than the body cap many times over" do
+      pad = "a" * (2 * 1024 * 1024)
+      ack = '{"accepted":1,"rejected":0}'
+      answer = ->(socket) { socket.write("HTTP/1.1 200 OK\r\nX-Pad: #{pad}\r\nContent-Length: #{ack.bytesize}\r\n\r\n#{ack}") }
+
+      result = with_receiver(answer) { |url| local_transport(url, timeout: 2).deliver([ { "t" => "request" } ]) }
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to match(/too long/)
+    end
+
+    it "gives up on a receiver that drips its response out under the per-read timeout" do
+      answer = lambda do |socket|
+        socket.write("HTTP/1.1 200 OK\r\n")
+        loop do
+          socket.write("X")
+          sleep 0.02
+        end
+      end
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = with_receiver(answer) do |url|
+        Timeout.timeout(8) { local_transport(url).deliver([ { "t" => "request" } ]) }
+      end
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      expect(result.ok).to be(false)
+      expect(result).to be_retryable
+      expect(result.error).to include("DeliveryTimeout")
+      expect(elapsed).to be < 5
     end
 
     it "refuses a Retry-After further out than it is willing to wait, in either spelling" do

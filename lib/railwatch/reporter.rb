@@ -61,6 +61,9 @@ module Railwatch
     def initialize(config, transport: nil, random: Random)
       @config = config
       @buffer = build_buffer
+      # A transport handed in (an explicit endpoint, a test double) is the
+      # caller's; only one built here from the config is rebuilt from it.
+      @owns_transport = transport.nil?
       @transport = transport || Transport::Http.new(config)
       @random = random
       @mutex = Mutex.new
@@ -193,6 +196,12 @@ module Railwatch
       # only while the buffer is still empty: resizing means a new buffer,
       # and anything already in the old one would go with it.
       @buffer = build_buffer if @thread.nil? && @buffer.size.zero?
+      # The transport resolved ingest_url when it was built, so without this
+      # the token the initializer set went to the endpoint the environment
+      # named before it -- by default Railwatch Cloud, not the self-hosted
+      # server the initializer pointed at. No thread means nothing has been
+      # delivered through it yet.
+      @transport = Transport::Http.new(@config) if @owns_transport && @thread.nil?
       self
     end
 

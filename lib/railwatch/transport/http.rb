@@ -5,6 +5,7 @@ require "time"
 require "openssl"
 require "zlib"
 require "json"
+require "timeout"
 
 module Railwatch
   module Transport
@@ -87,6 +88,12 @@ module Railwatch
           Railwatch.debug { "dropped #{over_cap} records that did not fit in batch_bytes (#{@config.batch_bytes})" }
           dropped += over_cap
           dropped_bytes += over_cap_bytes
+        end
+        if encoded.unencodable.positive?
+          # Left out, not retried: the same record fails every attempt, and
+          # failing the attempt cost the whole batch and read as backpressure.
+          Railwatch.debug { "dropped #{encoded.unencodable} records that could not be encoded as JSON" }
+          dropped += encoded.unencodable
         end
         begin
           result = parse(post(body, dropped, dropped_bytes, backpressure_factor, batch_id), expected_count: sent)
@@ -178,23 +185,37 @@ module Railwatch
         # Net::HTTP currently defaults HTTPS clients to VERIFY_PEER. Set it
         # explicitly so a Ruby default change cannot silently weaken ingest.
         options[:verify_mode] = OpenSSL::SSL::VERIFY_PEER if options[:use_ssl]
-        Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
-          http.request(req) do |response|
-            body = String.new(encoding: Encoding::BINARY)
-            response.read_body do |chunk|
-              if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
-                raise ResponseTooLarge, "ingest response is larger than #{MAX_RESPONSE_BYTES} bytes"
+        # The timeouts above are per socket operation, so a receiver that
+        # sends one byte every couple of seconds could hold this request
+        # open indefinitely. This bounds the whole exchange.
+        Timeout.timeout(delivery_deadline, DeliveryTimeout, "ingest delivery exceeded #{delivery_deadline}s") do
+          Net::HTTP.start(@uri.host, @uri.port, **options) do |http|
+            http.request(req) do |response|
+              body = String.new(encoding: Encoding::BINARY)
+              response.read_body do |chunk|
+                if body.bytesize + chunk.bytesize > MAX_RESPONSE_BYTES
+                  raise ResponseTooLarge, "ingest response is larger than #{MAX_RESPONSE_BYTES} bytes"
+                end
+                body << chunk
               end
-              body << chunk
+              response.body = body
             end
-            response.body = body
           end
         end
       end
 
+      # A connect, then room for a write, the response head and the body at
+      # one read/write timeout each, with one more to spare: 13 s by default.
+      def delivery_deadline = @config.connect_timeout + (4 * @config.timeout)
+
       # Enforced while streaming, before Net::HTTP can buffer an unbounded
       # proxy error page or decompressed response inside the monitored app.
+      # The response head is bounded by net-http itself from 0.10 (1 MiB),
+      # which is why the gemspec requires it.
       class ResponseTooLarge < StandardError; end
+      # Not a Timeout::Error: Net::HTTP retries those itself for idempotent
+      # requests, and this must end the attempt.
+      class DeliveryTimeout < StandardError; end
       MAX_RESPONSE_BYTES = 64 * 1024
       # The longest delay we will take from a receiver, in either spelling.
       MAX_RETRY_AFTER = 86_400

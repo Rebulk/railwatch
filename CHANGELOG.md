@@ -6,6 +6,30 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security: **a rake process sends to the `ingest_url` its initializer set.**
+  A rake task builds the reporter before `config/initializers` runs, and
+  the transport resolved `ingest_url` then. With a token in the
+  environment and `c.ingest_url` set only in the initializer, the token
+  and the task's telemetry went to the endpoint named before boot --
+  Railwatch Cloud by default -- instead of the self-hosted server. The
+  transport is now rebuilt from the final configuration, as the buffer
+  already was. A transport passed in explicitly (with its own `endpoint:`)
+  is kept.
+- Security: **one record that is not valid UTF-8 no longer loses its whole
+  batch.** A header byte such as `\xFF` from any anonymous request made
+  every encode of its batch raise: the batch was retried eight times,
+  dropped, and the retries counted as receiver pressure, sampling the app
+  down to an eighth. Invalid bytes are now replaced with U+FFFD; a record
+  that still cannot be encoded is left out and counted as dropped.
+- Security: **an ingest response head and a whole delivery are bounded.**
+  The 64 KiB cap applied to the body only; net-http before 0.10 read a
+  header line of any length. The gem now requires `net-http >= 0.10`,
+  which caps the head at 1 MiB. A delivery also has an overall deadline
+  of `connect_timeout + 4 × timeout`, since `timeout` is per socket read.
+- Security: **`Railwatch.instrument_outgoing` drops URL credentials, the
+  query and the fragment,** as the Net::HTTP patch and `Railwatch::Faraday`
+  already did. It stored the URL as given.
+
 ## 1.6.3 (2026-11-21)
 
 - Security: **a secret inside a Hash, Array or params local is filtered.**
