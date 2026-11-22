@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.3 (2026-11-21)
+
 - Security: **a secret inside a Hash, Array or params local is filtered.**
   With `capture_exception_locals` on, each local was turned into one string
   and only then run through the parameter filter, which could see nothing
