@@ -77,6 +77,15 @@ RSpec.describe Railwatch::Transport::WireEncoder do
     expect(decode(encoded.body).lines.map { |line| JSON.parse(line)["t"] }).to eq(%w[a c])
   end
 
+  it "leaves out a record that refers to itself and counts it, keeping the rest" do
+    cyclic = { "t" => "b", "bad" => "x\xFF".b }
+    cyclic["self"] = cyclic
+    encoded = encoder.encode([ { "t" => "a" }, cyclic, { "t" => "c" } ])
+
+    expect(encoded.unencodable).to eq(1)
+    expect(decode(encoded.body).lines.map { |line| JSON.parse(line)["t"] }).to eq(%w[a c])
+  end
+
   it "encodes an empty batch without raising" do
     encoded = encoder.encode([])
     expect(encoded.sent).to eq(0)

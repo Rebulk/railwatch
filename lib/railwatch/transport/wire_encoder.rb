@@ -80,11 +80,19 @@ module Railwatch
         end
       end
 
-      def utf8(value)
+      # JSON's own nesting limit. A record a before_ingest hook made refer
+      # to itself would otherwise recurse here until the stack overflowed,
+      # which no rescue below catches.
+      MAX_DEPTH = 100
+      class TooDeep < StandardError; end
+
+      def utf8(value, depth = 0)
+        raise TooDeep if depth > MAX_DEPTH
+
         case value
         when String then utf8_string(value)
-        when Hash then value.to_h { |key, item| [ utf8(key), utf8(item) ] }
-        when Array then value.map { |item| utf8(item) }
+        when Hash then value.to_h { |key, item| [ utf8(key, depth + 1), utf8(item, depth + 1) ] }
+        when Array then value.map { |item| utf8(item, depth + 1) }
         else value
         end
       end

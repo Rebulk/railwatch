@@ -81,6 +81,25 @@ RSpec.describe "outgoing_request record" do
     expect(req[:host]).to eq("api.example.test")
   end
 
+  describe "Record.url_without_sensitive_components" do
+    def clean(url) = Railwatch::Record.url_without_sensitive_components(url, limit: 2048)
+
+    it "drops userinfo whose password holds an unencoded ? or #" do
+      expect(clean("https://user:secret?x@api.example.test/path")).to eq("https://api.example.test/path")
+      expect(clean("https://user:se#cret@api.example.test/path?q=1")).to eq("https://api.example.test/path")
+    end
+
+    it "drops userinfo from a value with no scheme" do
+      expect(clean("user:pass@api.example.test/path?k=v")).to eq("api.example.test/path")
+    end
+
+    it "leaves an @ that is only in the query to the query cut" do
+      expect(clean("https://api.example.test?x=a@b")).to eq("https://api.example.test")
+      expect(clean("https://api.example.test:8443?to=a@b/c")).to eq("https://api.example.test:8443")
+      expect(clean("/widgets/a@b?x=1")).to eq("/widgets/a@b")
+    end
+  end
+
   it "instrument_outgoing does not record anything when the yielded result has no #status" do
     Railwatch.start_execution(source: :command, sample_kind: :commands)
     result = Railwatch.instrument_outgoing("GET", "http://custom-adapter.test/x") { "plain string" }
