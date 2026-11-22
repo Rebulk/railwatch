@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.4 (2026-11-22)
+
 - Security: **a rake process sends to the `ingest_url` its initializer set.**
   A rake task builds the reporter before `config/initializers` runs, and
   the transport resolved `ingest_url` then. With a token in the
