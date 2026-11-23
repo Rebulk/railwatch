@@ -246,7 +246,9 @@ module Railwatch
       path = url[origin.length..].to_s
       return url unless path.start_with?("/")
 
-      slack = origin.downcase.end_with?("//#{SLACK_HOOKS_HOST}", "//#{SLACK_HOOKS_HOST}:443")
+      # The host compared whole, never by suffix (a lookalike host only ever
+      # masks more here, but a suffix test reads as one that admits).
+      slack = (URI.parse(origin).host.to_s.downcase == SLACK_HOOKS_HOST rescue false)
       segments = path.split("/", -1)
       last = segments.rindex { |segment| !segment.empty? }
       segments.each_with_index.map do |segment, i|
