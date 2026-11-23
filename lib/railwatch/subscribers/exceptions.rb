@@ -200,10 +200,10 @@ module Railwatch
         text = error.message.to_s
         # Masked before the cut: cut first, a long statement no longer
         # matches whole and its literals would pass unmasked. A message too
-        # long to mask in bounded work keeps only its first line, which is
-        # the driver's own description, never the statement.
+        # long to mask in bounded work is replaced by the error's class name:
+        # nothing says which part of it is free of the statement.
         unless Railwatch.config.capture_sql_values
-          text = text.bytesize > SQL_MASK_LIMIT && statement_error(statement_of) ? text.lines.first.to_s.chomp : without_sql_literals(text, statement_of)
+          text = text.bytesize > SQL_MASK_LIMIT && statement_error(statement_of) ? statement_of.class.name.to_s : without_sql_literals(text, statement_of)
         end
         text = text[0, 8192]
         Railwatch.redactor.filter_text_urls(text)

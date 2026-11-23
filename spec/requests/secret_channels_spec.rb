@@ -161,6 +161,19 @@ RSpec.describe "secrets in sibling channels", type: :request do
       expect(railwatch_records.to_s).not_to include("DUMMY-LONG-CARD")
     end
 
+    it "sends only the class name of a database error too long to mask, even one on a single line" do
+      stub_const("Railwatch::Subscribers::Exceptions::SQL_MASK_LIMIT", 1_000)
+      sql = "SELECT * FROM widgets WHERE secret = 'DUMMY-HUGE-CARD' AND pad = '#{"x" * 2_000}'"
+      in_command do
+        raise ActiveRecord::StatementInvalid.new("SQLite3::SQLException: no such column: secret: #{sql}", sql: sql)
+      rescue ActiveRecord::StatementInvalid => e
+        Rails.error.report(e, handled: false)
+      end
+
+      expect(railwatch_records(:exception).sole[:message]).to eq("ActiveRecord::StatementInvalid")
+      expect(railwatch_records.to_s).not_to include("DUMMY-HUGE-CARD")
+    end
+
     it "keeps the literal when capture_sql_values is on, as the query record does" do
       Railwatch.config.capture_sql_values = true
       in_command do
