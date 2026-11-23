@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.5 (2026-11-23)
+
 - Security: **a client's `X-Inertia` header no longer makes Railwatch read
   the response.** The Inertia props size was taken from `response.body`
   whenever the *request* said `X-Inertia: true`, on any action. On a
