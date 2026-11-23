@@ -6,6 +6,38 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security: **a client's `X-Inertia` header no longer makes Railwatch read
+  the response.** The Inertia props size was taken from `response.body`
+  whenever the *request* said `X-Inertia: true`, on any action. On a
+  `send_file` action that read the whole file into memory; on an
+  `ActionController::Live` action it drained the chunks the server had not
+  sent yet, so the client got a truncated body with status 200. The size
+  is now taken only from a JSON response that inertia_rails itself marked
+  with `X-Inertia`, held in memory as a plain buffer.
+- Security: **one malformed request header no longer drops the request's
+  telemetry.** A 400-digit `X-Request-Start` or `X-Queue-Start`, an HTTP
+  method Rails does not know, or an `X-Forwarded-Host` with no host in it
+  raised while the request record was built, and the request, its queries,
+  its logs and its session update were all discarded -- so a client could
+  opt its own probes out of the record. Each client-derived field now fails
+  on its own (`nil`, or the method as sent), and a request-start stamp more
+  than a day from the server's clock, or not finite, is ignored.
+- Security: **a client-sent session id can no longer join another user's
+  server-side session.** `X-Railwatch-Session` and the `railwatch_session`
+  cookie were used as the session key with only a length cut, so a client
+  sending `user:41` was counted in user 41's session (its errors and
+  crashes included). The key, and the beacon's session id, now accept only
+  the shape the browser client mints, which has no colon and so can never
+  name a `user:<id>` key. An id of any other shape is ignored, not cut.
+- Security: **the browser client's mount check agrees with URL parsing.** A
+  `railwatch-mount` value such as `/<tab>/evil.example` passed the
+  same-origin check, and the URL parser then deleted the tab and sent the
+  beacon to another origin. A mount containing any control character is
+  now ignored and the beacon posts to `/railwatch/beacon`. Apps that copied
+  the client (`app/frontend/lib/railwatch.ts`) need the same change in
+  their copy: `bin/rails generate railwatch:install --force --no-doctor`
+  updates it.
+
 ## 1.6.4 (2026-11-22)
 
 - Security: **a rake process sends to the `ingest_url` its initializer set.**

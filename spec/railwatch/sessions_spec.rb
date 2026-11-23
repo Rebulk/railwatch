@@ -51,6 +51,28 @@ RSpec.describe Railwatch::Sessions, type: :request do
     expect(flushed).to include(id: "user:7", user: "7")
   end
 
+  # The user fallback key is "user:<id>". A client that sends that as its
+  # session id must not be counted in that user's session: its crash would
+  # be filed as theirs.
+  it "keeps a client-sent id that names a user's key out of that user's session" do
+    users = Railwatch::Subscribers::Users
+    allow(users).to receive(:resolve_id).and_return(nil)
+    get "/boom", headers: { "X-Railwatch-Session" => "user:41" }
+    get "/boom", headers: { "HTTP_COOKIE" => "railwatch_session=user:41" }
+    allow(users).to receive(:resolve_id).and_return("41")
+    get "/widgets"
+
+    expect(sessions.keys).to eq([ "user:41" ])
+    expect(flushed).to include(id: "user:41", status: "ok", requests: 1, errors: 0, user: "41")
+  end
+
+  it "ignores a session id not shaped like one the browser client mints" do
+    get "/widgets", headers: { "X-Railwatch-Session" => "a" * 65 }
+    get "/widgets", headers: { "X-Railwatch-Session" => "s 1<script>" }
+
+    expect(sessions).to be_empty
+  end
+
   it "escalates ok to errored to crashed and never back down" do
     get "/widgets", headers: cookie
     expect(flushed).to include(status: "ok", requests: 1, errors: 0)

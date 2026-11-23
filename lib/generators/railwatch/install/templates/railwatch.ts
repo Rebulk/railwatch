@@ -173,13 +173,21 @@ const requestFailures = new WeakSet<object>()
 // one (<meta name="railwatch-mount">, lib/mount.ts; inlined because this
 // file is copied into apps on its own). An app's own pages have no such tag
 // and post to the engine at its default mount.
+//
+// The URL parser deletes tab, CR and LF wherever they appear, so
+// "/<tab>/evil.example" passes a test of its first two characters and still
+// resolves to //evil.example. A mount holding any control character is
+// therefore no mount.
 function endpoint() {
   const mount =
     document
       .querySelector<HTMLMetaElement>('meta[name="railwatch-mount"]')
       ?.content.trim()
       .replace(/\/+$/, "") ?? ""
-  return /^\/(?![/\\])/.test(mount) ? `${mount}/beacon` : "/railwatch/beacon"
+  const control = [...mount].some((c) => c < " " || c === "\x7f")
+  return /^\/(?![/\\])/.test(mount) && !control
+    ? `${mount}/beacon`
+    : "/railwatch/beacon"
 }
 
 function csrf() {

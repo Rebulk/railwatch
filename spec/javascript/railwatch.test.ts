@@ -254,6 +254,21 @@ describe("startRailwatch batching", () => {
     expect(calls[calls.length - 1][0]).toBe("/railwatch/beacon")
   })
 
+  it.each(["/\t/evil.example", "/\n/evil.example", "/\r/evil.example"])(
+    "ignores a mount whose control character the URL parser would delete (%j)",
+    (content) => {
+      const meta = document.createElement("meta")
+      meta.name = "railwatch-mount"
+      meta.content = content
+      document.head.append(meta)
+      completeVisit("/a")
+      vi.advanceTimersByTime(5000)
+
+      const calls = sendBeacon.mock.calls as [string, FakeBlob][]
+      expect(calls[calls.length - 1][0]).toBe("/railwatch/beacon")
+    },
+  )
+
   it("does not send an empty batch when the timer fires with nothing queued", () => {
     vi.advanceTimersByTime(5000)
     expect(sendBeacon).not.toHaveBeenCalled()

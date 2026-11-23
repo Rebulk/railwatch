@@ -95,9 +95,15 @@ module Railwatch
     # only where it would have keyed on the user: an anonymous request with
     # no cookie (a crawler, curl) opened no session before and opens none
     # now. Its browser, if it runs the client, opens it with the first beat.
+    #
+    # An id the client sent is used only when it has the shape the client
+    # mints (BROWSER_ID), the same check browser_fields applies; anything
+    # else counts as no id. That check is also what keeps the two key
+    # spaces apart: BROWSER_ID has no colon, so no header or cookie can
+    # name the "user:<id>" key below and write into that user's session.
     def key_for(exe, env)
-      id = sent_id(env)
-      return id[0, KEY_LIMIT] unless id.nil? || id.empty?
+      id = browser_id(sent_id(env))
+      return id if id
 
       user = exe.user_id
       return nil unless user

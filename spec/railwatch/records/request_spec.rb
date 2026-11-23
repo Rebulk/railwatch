@@ -220,5 +220,45 @@ RSpec.describe "request record", type: :request do
     it "is nil for an unparseable stamp" do
       expect(queue_time_for("t=nonsense")).to be_nil
     end
+
+    it "is nil for a stamp no clock could have written, rather than a forged wait" do
+      expect(queue_time_for("t=#{((Time.now.to_f + (3 * 86_400)) * 1_000).round}")).to be_nil
+    end
+  end
+
+  # Every value below is the client's. Each used to raise while the record
+  # was built, which dropped the request together with its queries and
+  # logs: one header opted the request out of telemetry.
+  describe "a request header Rails cannot read" do
+    def shipped(method = :get, headers = {})
+      process(method, "/widgets", headers: headers)
+      railwatch_records(:request).sole
+    end
+
+    it "costs only queue_time when X-Request-Start is 400 digits long" do
+      req = shipped(:get, "X-Request-Start" => "t=#{"9" * 400}")
+
+      expect(req).to include(method: "GET", path: "/widgets", status_code: 200, queue_time: nil)
+      expect(railwatch_records(:query)).not_to be_empty
+    end
+
+    it "costs only queue_time when X-Queue-Start is 400 digits long" do
+      req = shipped(:get, "X-Queue-Start" => "9" * 400)
+
+      expect(req).to include(method: "GET", path: "/widgets", queue_time: nil)
+    end
+
+    it "records an HTTP method Rails does not know as the client sent it" do
+      req = shipped(:foo)
+
+      expect(req).to include(method: "FOO", path: "/widgets", status_code: 405)
+    end
+
+    it "costs only the host when X-Forwarded-Host names none" do
+      req = shipped(:get, "X-Forwarded-Host" => ",")
+
+      expect(req).to include(method: "GET", path: "/widgets", url: "/widgets", route_domain: nil, status_code: 200)
+      expect(railwatch_records(:query)).not_to be_empty
+    end
   end
 end
