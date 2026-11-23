@@ -161,6 +161,19 @@ RSpec.describe "secrets in sibling channels", type: :request do
       expect(railwatch_records.to_s).not_to include("DUMMY-LONG-CARD")
     end
 
+    it "masks a single-line statement longer than the 8,192-character cut, literal near the start" do
+      sql = "SELECT * FROM widgets WHERE secret = 'DUMMY-ONE-LINE-CARD' AND pad = '#{"x" * 12_000}'"
+      in_command do
+        raise ActiveRecord::StatementInvalid.new("SQLite3::SQLException: no such column: secret: #{sql}", sql: sql)
+      rescue ActiveRecord::StatementInvalid => e
+        Rails.error.report(e, handled: false)
+      end
+
+      exc = railwatch_records(:exception).sole
+      expect(exc[:message]).to start_with("SQLite3::SQLException: no such column: secret:")
+      expect(railwatch_records.to_s).not_to include("DUMMY-ONE-LINE-CARD")
+    end
+
     it "sends only the class name of a database error too long to mask, even one on a single line" do
       stub_const("Railwatch::Subscribers::Exceptions::SQL_MASK_LIMIT", 1_000)
       sql = "SELECT * FROM widgets WHERE secret = 'DUMMY-HUGE-CARD' AND pad = '#{"x" * 2_000}'"
