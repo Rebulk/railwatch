@@ -174,8 +174,11 @@ module Railwatch
       session = object(session)
       return unless session
 
-      id = safe_string(session["id"], 64)
-      return if id.empty?
+      # Only an id shaped like one the client mints: the server half keys a
+      # signed-in user's cookieless requests on "user:<id>", and a beacon
+      # naming that id would be deduped into that user's session.
+      id = Sessions.browser_id(session["id"])
+      return unless id
 
       duration_ms = session["duration_ms"]
       Railwatch.record(:session,

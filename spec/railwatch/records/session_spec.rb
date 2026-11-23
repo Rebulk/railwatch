@@ -59,6 +59,17 @@ RSpec.describe "session record", type: :request do
     expect(railwatch_records(:session)).to be_empty
   end
 
+  # The server half keys a signed-in user's cookieless requests on
+  # "user:<id>"; a beacon naming that id would dedupe into their session.
+  it "ignores a session id not shaped like one the browser client mints" do
+    [ "user:41", "a" * 65, "s 1" ].each do |id|
+      post_beacon(visits: [ visit ], session: { id: id, started_at: started_ms })
+    end
+
+    expect(railwatch_records(:session)).to be_empty
+    expect(railwatch_records(:visit).size).to eq(3)
+  end
+
   it "threads the resolved user and the current tenant onto the session" do
     allow(Railwatch::Subscribers::Users).to receive(:resolve_id).and_return("42")
     stub_const("TenantRecord", Class.new { def self.current_tenant = "acme" })

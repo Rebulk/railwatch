@@ -40,9 +40,8 @@ module Railwatch
           env["railwatch.db_runtime"] = p[:db_runtime]&.round(2)
           exe.enter_stage(:middleware_after)
           resp = p[:response]
-          if resp && env["HTTP_X_INERTIA"] == "true"
-            env["railwatch.inertia_props_bytes"] = resp.body.bytesize rescue nil
-          end
+          bytes = resp && inertia_props_bytes(resp)
+          env["railwatch.inertia_props_bytes"] = bytes if bytes
         end
 
         subscribe("redirect_to.action_controller") do |event|
@@ -78,6 +77,25 @@ module Railwatch
           exe = execution or next
           exe.enter_stage(:render) if exe.stage == :action
         end
+      end
+
+      # The size of the page object Inertia rendered, for an Inertia visit
+      # only. The request header X-Inertia is the client's and can be sent
+      # to any action, and reading `body` is not free on every response: a
+      # send_file body answers it with File.binread of the whole file, and
+      # an ActionController::Live body by draining the chunks the server had
+      # not sent yet, which cuts the client's stream short. So the response
+      # must say it is one -- inertia_rails sets X-Inertia on the response
+      # only on its JSON branch -- and its body must be the plain in-memory
+      # buffer a `render json:` leaves (a Live buffer is a subclass).
+      def inertia_props_bytes(response)
+        return nil unless response.get_header("X-Inertia") == "true"
+        return nil unless response.media_type == "application/json"
+        return nil unless response.stream.instance_of?(ActionDispatch::Response::Buffer)
+
+        response.body.bytesize
+      rescue StandardError
+        nil
       end
 
       def route_pattern(request)

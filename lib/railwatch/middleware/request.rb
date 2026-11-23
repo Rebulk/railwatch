@@ -16,6 +16,10 @@ module Railwatch
       # our own start is how long it waited for a worker. Anything beyond this
       # is clock skew between the proxy and this box, not a real wait.
       MAX_QUEUE_TIME = 60_000_000 # microseconds
+      # A request-start stamp further than this from our own clock is not a
+      # time at all (a stamp of 400 digits is Infinity once parsed), and is
+      # dropped before any arithmetic is done with it.
+      MAX_STAMP_SKEW = 86_400 # seconds
       # Only a multipart request can carry an UploadedFile; same raw
       # CONTENT_TYPE test Subscribers::Requests uses before its params walk.
       MULTIPART = "multipart/form-data"
@@ -196,34 +200,49 @@ module Railwatch
         false
       end
 
+      # Every field read from the request is built on its own (#soft): the
+      # values come from the client, and Rails raises on some of them -- an
+      # HTTP method it does not know, an X-Forwarded-Host with no host in it.
+      # A raise here used to leave finish_execution before the children were
+      # written, dropping the request, its queries and its logs together, so
+      # one bad header opted a request out of telemetry. Now it costs only
+      # the field that header feeds.
       def parent_fields(env, exe, status, headers)
         req = ActionDispatch::Request.new(env)
         route = env["railwatch.route"] || {}
         pattern = route[:pattern] || (req.respond_to?(:route_uri_pattern) ? (req.route_uri_pattern rescue nil) : nil) || "unmatched"
         controller = route[:controller]
         action = route[:action]
-        method = req.request_method
+        # Rails raises on a verb it does not know; the verb itself is still
+        # what a probe sent, so it is recorded as sent, cut short.
+        method = soft(:method) { req.request_method } || env["REQUEST_METHOD"].to_s[0, 32]
+        host = soft(:host) { req.host }
         exe.preview ||= "#{method} #{pattern}"
 
         inertia = inertia_fields(env, headers)
-        payload = Railwatch.config.capture_request_payload && exe.counters[:exceptions].positive? ? Railwatch.redactor.params(req.filtered_parameters.except("controller", "action")) : nil
-        secrets = path_secrets(req, env)
-        url = Record.url_without_sensitive_components(req.original_url, limit: req.original_url.length)
+        payload = Railwatch.config.capture_request_payload && exe.counters[:exceptions].positive? ? soft(:payload) { Railwatch.redactor.params(req.filtered_parameters.except("controller", "action")) } : nil
+        secrets = path_secrets(req, env, method, host)
+        path = soft(:path) { Railwatch.redactor.filter_path(req.path, secrets) }
+        # original_url needs the host; without one the path is the url.
+        url = soft(:url) do
+          original = req.original_url
+          Railwatch.redactor.filter_path(Record.url_without_sensitive_components(original, limit: original.length), secrets)[0, 2048]
+        end || path
 
         {
           group: Record.group_hash(method, pattern),
           method: method,
-          url: Railwatch.redactor.filter_path(url, secrets)[0, 2048],
-          path: Railwatch.redactor.filter_path(req.path, secrets),
+          url: url,
+          path: path,
           route: pattern,
           route_methods: [ route[:verb] ].compact,
-          route_domain: req.host,
+          route_domain: host,
           controller: controller,
           action: action,
           format: request_format(req, env),
-          ip: req.remote_ip,
+          ip: soft(:ip) { req.remote_ip },
           status_code: status.to_i,
-          request_size: req.content_length.to_i,
+          request_size: soft(:request_size) { req.content_length.to_i },
           response_size: headers && (headers["Content-Length"] || headers["content-length"]).to_i,
           view_runtime: env["railwatch.view_runtime"],
           db_runtime: env["railwatch.db_runtime"],
@@ -232,13 +251,20 @@ module Railwatch
           unpermitted_parameters: env["railwatch.unpermitted_parameters"],
           rate_limited: env["railwatch.rate_limited"],
           inertia: inertia,
-          headers: request_headers(env, req),
+          headers: soft(:headers) { request_headers(env, host) },
           payload: payload,
-          queue_time: queue_time(env, exe),
-          user_agent: req.user_agent.to_s[0, 256],
-          files: env["railwatch.files"] || uploaded_files_fallback(req, env),
+          queue_time: soft(:queue_time) { queue_time(env, exe) },
+          user_agent: soft(:user_agent) { req.user_agent.to_s[0, 256] },
+          files: env["railwatch.files"] || soft(:files) { uploaded_files_fallback(req, env) },
           **Sessions.browser_fields(env)
         }
+      end
+
+      def soft(field)
+        yield
+      rescue StandardError => e
+        Railwatch.debug { "request #{field} skipped: #{e.class}: #{e.message}" }
+        nil
       end
 
       # The values of the route's credential-shaped dynamic segments
@@ -248,15 +274,21 @@ module Railwatch
       # has none, and one rendered by an exceptions_app that is the app's own
       # routes has its error route's (ShowExceptions keeps the path it came
       # in on): both are recognised again (Redactor#url_secrets).
-      def path_secrets(req, env)
+      #
+      # method and host are the ones parent_fields read, nil when the
+      # request's own could not be read; the lookup still runs (as a GET,
+      # with no host) rather than giving up, so a request with a bad Host
+      # header is not also one whose path keeps its token.
+      def path_secrets(req, env, method, host)
         redactor = Railwatch.redactor
+        method ||= "GET"
         original = env["action_dispatch.original_path"]
-        return redactor.url_secrets(original, method: env["action_dispatch.original_request_method"] || req.request_method, host: req.host) if original
+        return redactor.url_secrets(original, method: env["action_dispatch.original_request_method"] || method, host: host) if original
 
         params = env[ActionDispatch::Http::Parameters::PARAMETERS_KEY]
         return redactor.path_secrets(params) if params && !params.empty?
 
-        redactor.url_secrets(req.path, method: req.request_method, host: req.host)
+        redactor.url_secrets(req.path, method: method, host: host)
       rescue StandardError
         Redactor::NO_SECRETS
       end
@@ -319,10 +351,11 @@ module Railwatch
         return nil unless /\A\d+(?:\.\d+)?\z/.match?(raw)
 
         seconds = raw.to_f
-        if seconds > 10_000_000_000_000 then seconds / 1_000_000
+        seconds = if seconds > 10_000_000_000_000 then seconds / 1_000_000
         elsif seconds > 10_000_000_000 then seconds / 1_000
         else seconds
         end
+        seconds if seconds.finite? && (seconds - Clock.now).abs <= MAX_STAMP_SKEW
       end
 
       def inertia_fields(env, headers)
@@ -367,9 +400,20 @@ module Railwatch
       # app's. Origin is only scheme, host and port, so it has no route.
       PROXY_URL_HEADERS = %w[X-Original-Url X-Original-Uri X-Rewrite-Url].freeze
 
+      # A page URL when the request's own host could not be read: the router
+      # cannot be asked which of its segments are credentials (an absolute
+      # URL is only matched on its host), so no path is kept -- scheme, host
+      # and port of an absolute URL, nothing of a relative one.
+      def origin_only(value)
+        uri = URI.parse(Record.url_without_sensitive_components(value, limit: value.to_s.length))
+        uri.host ? "#{uri.scheme}://#{uri.host}#{":#{uri.port}" if uri.port && uri.port != uri.default_port}"[0, 512] : Redactor::FILTERED
+      rescue URI::Error
+        Redactor::FILTERED
+      end
+
       # Builds the (already redacted) header hash in one pass over env so the
       # redactor does not have to walk a second, intermediate hash.
-      def request_headers(env, req)
+      def request_headers(env, host)
         redactor = Railwatch.redactor
         out = {}
         env.each_pair do |k, v|
@@ -378,11 +422,11 @@ module Railwatch
           out[name] = if redactor.redact_header?(name)
             Redactor::FILTERED
           elsif name == "Referer"
-            redactor.browser_url(v, limit: 512, host: req.host)
+            host ? redactor.browser_url(v, limit: 512, host: host) : origin_only(v)
           elsif name == "Origin"
             Record.url_without_sensitive_components(v, limit: 512)
           elsif PROXY_URL_HEADERS.include?(name)
-            redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: req.host)[0, 512]
+            host ? redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: host)[0, 512] : origin_only(v)
           else
             v.to_s[0, 512]
           end
