@@ -242,6 +242,18 @@ RSpec.describe "secrets in sibling channels", type: :request do
       expect(railwatch_records(:exception).sole[:context]).not_to include("hunter2-NESTED")
     end
 
+    it "filters a params object the context scan cannot reach: past 100 entries, or deeper than it looks" do
+      wide = Array.new(100, "ok") + [ ActionController::Parameters.new(password: "hunter2-WIDE") ]
+      deep = { a: { b: { c: { d: { e: { f: ActionController::Parameters.new(password: "hunter2-DEEP") } } } } } }
+      in_command do
+        raise ArgumentError, "unreachable context demo"
+      rescue ArgumentError => e
+        Rails.error.report(e, handled: true, context: { request: wide, nested: deep })
+      end
+
+      expect(railwatch_records(:exception).sole[:context]).not_to match(/hunter2-WIDE|hunter2-DEEP/)
+    end
+
     it "sends an event payload too large to keep as {}, never as half an object" do
       events = []
       in_command { Rails.event.notify("big.event", blob: "x" * 20_000) }

@@ -62,15 +62,15 @@ module Railwatch
       json.bytesize > LIMIT ? truncate(filtered) : json
     end
 
+    # Fails closed: a container the scan cannot finish (deeper than 5, or
+    # wider than 100 entries) counts as holding one, so its value is
+    # scrubbed rather than serialized unread.
     def holds_params_object?(value, depth = 0)
       return true if params_object?(value)
-      return false if depth >= 5
+      return false unless value.is_a?(Hash) || value.is_a?(Array)
+      return true if depth >= 5 || value.size > 100
 
-      case value
-      when Hash then value.each_value.first(100).any? { holds_params_object?(_1, depth + 1) }
-      when Array then value.first(100).any? { holds_params_object?(_1, depth + 1) }
-      else false
-      end
+      (value.is_a?(Hash) ? value.each_value : value).any? { holds_params_object?(_1, depth + 1) }
     end
 
     def params_object?(value)
