@@ -260,5 +260,15 @@ RSpec.describe "request record", type: :request do
       expect(req).to include(method: "GET", path: "/widgets", url: "/widgets", route_domain: nil, status_code: 200)
       expect(railwatch_records(:query)).not_to be_empty
     end
+
+    it "keeps no path of a Referer or proxy URL when the host cannot be read, so no reset token survives" do
+      req = shipped(:get, "X-Forwarded-Host" => ",",
+        "Referer" => "https://app.example/passwords/reset-secret/edit",
+        "X-Original-Url" => "/passwords/reset-secret/edit")
+
+      expect(req[:headers]["Referer"]).to eq "https://app.example"
+      expect(req[:headers]["X-Original-Url"]).to eq Railwatch::Redactor::FILTERED
+      expect(req[:headers].values.join).not_to include("reset-secret")
+    end
   end
 end

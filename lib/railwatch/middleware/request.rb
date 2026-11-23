@@ -400,6 +400,17 @@ module Railwatch
       # app's. Origin is only scheme, host and port, so it has no route.
       PROXY_URL_HEADERS = %w[X-Original-Url X-Original-Uri X-Rewrite-Url].freeze
 
+      # A page URL when the request's own host could not be read: the router
+      # cannot be asked which of its segments are credentials (an absolute
+      # URL is only matched on its host), so no path is kept -- scheme, host
+      # and port of an absolute URL, nothing of a relative one.
+      def origin_only(value)
+        uri = URI.parse(Record.url_without_sensitive_components(value, limit: value.to_s.length))
+        uri.host ? "#{uri.scheme}://#{uri.host}#{":#{uri.port}" if uri.port && uri.port != uri.default_port}"[0, 512] : Redactor::FILTERED
+      rescue URI::Error
+        Redactor::FILTERED
+      end
+
       # Builds the (already redacted) header hash in one pass over env so the
       # redactor does not have to walk a second, intermediate hash.
       def request_headers(env, host)
@@ -411,11 +422,11 @@ module Railwatch
           out[name] = if redactor.redact_header?(name)
             Redactor::FILTERED
           elsif name == "Referer"
-            redactor.browser_url(v, limit: 512, host: host)
+            host ? redactor.browser_url(v, limit: 512, host: host) : origin_only(v)
           elsif name == "Origin"
             Record.url_without_sensitive_components(v, limit: 512)
           elsif PROXY_URL_HEADERS.include?(name)
-            redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: host)[0, 512]
+            host ? redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: host)[0, 512] : origin_only(v)
           else
             v.to_s[0, 512]
           end
