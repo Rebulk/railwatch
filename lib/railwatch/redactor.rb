@@ -29,14 +29,21 @@ module Railwatch
       )
       (?:-|\z)
     }ix
+    # The names SENSITIVE_HEADER_NAME takes because they name a person, not
+    # because they hold a credential. A Hash key (#scrub) is masked by the
+    # header rules without these: an "email" key in a local is the app's
+    # data, which its own filter_parameters decides about.
+    IDENTITY_HEADER_NAME = /(?:\A|-)(?:(?:forwarded|remote)-?(?:user|email)|(?:user-?)?email|preferred-?username)(?:-|\z)/i
     # The browser client's own session header: its value is the record's
     # session_id, a random id for grouping visits, not a credential.
     OWN_HEADERS = %w[x-railwatch-session].to_set.freeze
     # A dynamic route segment with one of these in its name carries a
     # credential: Rails 8's `resources :passwords, param: :token`, invite,
-    # magic-link and confirmation routes. So does one the app's own
+    # magic-link and confirmation routes, and Rails' signed ids -- Active
+    # Storage's :signed_id and :signed_blob_id, which download the file on
+    # their own, and a GlobalID's sgid. So does one the app's own
     # filter_parameters (or redact_params) names.
-    SENSITIVE_PATH_PARAMETER = /token|secret|key|code|signature|password/i
+    SENSITIVE_PATH_PARAMETER = /token|secret|key|code|signature|password|(?:\A|_)(?:signed|sgid)(?:_|\z)/i
     ROUTING_PATH_PARAMETERS = %i[controller action format].freeze
     NO_SECRETS = [].freeze
     # #scrub: nesting followed before a container is elided, which bounds the
@@ -53,6 +60,17 @@ module Railwatch
     # element of an Array at the root. No filter looks at it.
     SCRUB_NO_KEY = Object.new.freeze
     URL_ORIGIN = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*:)?//[^/]*}
+    # A URL inside free text (a log line, an exception message): an absolute
+    # URL, or a path Rails quotes ('No route matches [GET] "/x"').
+    TEXT_URL = %r{\b[A-Za-z][A-Za-z0-9+.-]*://[^\s"'<>`]+|"/[^"\s]*"}
+    # URLs in one text cleaned in full; any past this keep their origin
+    # only, so a line built to hold thousands costs no route lookups.
+    TEXT_URL_LIMIT = 20
+    # A third-party URL whose path is the credential (#filter_outgoing_path).
+    TELEGRAM_BOT_SEGMENT = /\Abot\d+:[\w-]+\z/
+    SLACK_HOOKS_HOST = "hooks.slack.com"
+    SLACK_TEAM = /\AT[A-Z0-9]+\z/
+    SLACK_BOT = /\AB[A-Z0-9]+\z/
 
     def initialize(config)
       @config = config
@@ -189,6 +207,62 @@ module Railwatch
       {}
     end
 
+    # text (a log line, an exception message) with every URL in it cleaned
+    # the way the request record cleans its own: no userinfo, query or
+    # fragment, this app's credential route segments filtered, and the
+    # third-party credential paths #filter_outgoing_path knows masked. A
+    # quoted path keeps its quotes. Text with neither "://" nor '"/' is
+    # returned as it is, without a regexp. Fails closed.
+    def filter_text_urls(text)
+      return text unless text.is_a?(String) && (text.include?("://") || text.include?("\"/"))
+
+      text = text.scrub unless text.valid_encoding?
+      seen = 0
+      text.gsub(TEXT_URL) do |match|
+        seen += 1
+        if match.start_with?("\"")
+          path = match[1..-2]
+          %("#{seen > TEXT_URL_LIMIT ? FILTERED : clean_url(path)}")
+        else
+          seen > TEXT_URL_LIMIT ? Record.url_without_sensitive_components(match[URL_ORIGIN].to_s, limit: 512) : clean_url(match)
+        end
+      end
+    rescue StandardError
+      FILTERED
+    end
+
+    # An outgoing URL (already without userinfo, query and fragment) with
+    # the path segments that are a third party's credential masked: a Slack
+    # incoming-webhook or workflow secret (hooks.slack.com, its last
+    # segment; /services/T<team>/B<bot>/<secret> on any host, as a proxy
+    # or a stub has it), a Telegram bot token (/bot<id>:<token>/, on any
+    # host, as
+    # self-hosted Bot API servers take it too), a Discord webhook token
+    # (/webhooks/<id>/<token>), and a segment that follows one the app's
+    # parameter filter names (/api_key/<key>, /token/<token>).
+    def filter_outgoing_path(url)
+      url = url.to_s
+      origin = url[URL_ORIGIN].to_s
+      path = url[origin.length..].to_s
+      return url unless path.start_with?("/")
+
+      slack = origin.downcase.end_with?("//#{SLACK_HOOKS_HOST}", "//#{SLACK_HOOKS_HOST}:443")
+      segments = path.split("/", -1)
+      last = segments.rindex { |segment| !segment.empty? }
+      segments.each_with_index.map do |segment, i|
+        next segment if segment.empty?
+        next FILTERED if slack && i == last && i >= 3
+        next FILTERED if i >= 4 && segments[i - 3] == "services" && segments[i - 2].match?(SLACK_TEAM) && segments[i - 1].match?(SLACK_BOT)
+        next "bot#{FILTERED}" if TELEGRAM_BOT_SEGMENT.match?(segment)
+        next FILTERED if i >= 2 && segments[i - 2] == "webhooks" && segments[i - 1].match?(/\A\d+\z/)
+        next FILTERED if i >= 2 && !segments[i - 1].empty? && filtered_name?(unescape(segments[i - 1]))
+
+        segment
+      end.then { |filtered| origin + filtered.join("/") }
+    rescue StandardError
+      url.to_s[URL_ORIGIN].to_s
+    end
+
     # For a value about to be turned into ONE string with #inspect (an
     # exception local, a span attribute): a copy with every value under a
     # filtered key masked. #params can only filter by the name the string is
@@ -236,6 +310,24 @@ module Railwatch
       ensure
         path.pop
       end
+    end
+
+    # One URL found in text: cleaned, then filtered as this app's when it
+    # is a path or names a host (the host it names is taken as this app's,
+    # which can only filter more), then masked as an outgoing URL.
+    def clean_url(url)
+      clean = Record.url_without_sensitive_components(url, limit: url.length)
+      host = clean.start_with?("/") ? nil : URI.parse(clean).host
+      filter_outgoing_path(filter_url(clean, host: host))
+    rescue URI::Error
+      clean ? clean[URL_ORIGIN].to_s : FILTERED
+    end
+
+    # Fails closed.
+    def filtered_name?(name)
+      param_filter.filter_param(name, name) != name
+    rescue StandardError
+      true
     end
 
     def shaped_secrets(path, entries)
@@ -320,13 +412,25 @@ module Railwatch
     # Fails closed, like #params. A dotted filter ("billing.number") names
     # the whole path, so a nested key is also tried with its parents. Any
     # key is matched by its #to_s, as the parameter filter matches one
-    # (`{ 42 => ... }` against /\A42\z/).
+    # (`{ 42 => ... }` against /\A42\z/). A key the header rules name as a
+    # credential (#credential_key?) is masked too.
     def scrub_key?(key, key_path)
       name = key.to_s
-      param_filter.filter_param(name, name) != name ||
+      credential_key?(name) ||
+        param_filter.filter_param(name, name) != name ||
         (key_path != name && param_filter.filter_param(key_path, key_path) != key_path)
     rescue StandardError
       true
+    end
+
+    # A headers Hash an API client built ("Authorization", "X-Api-Key",
+    # "Cookie") holds the credentials the request record masks by the same
+    # names, so a key is matched against the header rules: redact_headers
+    # and SENSITIVE_HEADER_NAME, less its identity names. The rules are
+    # written for hyphens; Ruby keys use underscores.
+    def credential_key?(name)
+      header = name.tr("_", "-")
+      redact_header?(header) && (@header_keys.include?(header.downcase) || !IDENTITY_HEADER_NAME.match?(header))
     end
 
     # A value under a key no filter names, given to the app's Proc filters
@@ -371,7 +475,13 @@ module Railwatch
     def sensitive_routes
       return NO_SECRETS unless defined?(Rails) && Rails.application
 
-      routes = Rails.application.routes.set.routes
+      # Rails 8 draws routes on first use; a process that has served no
+      # request (a job worker) would otherwise see none, and filter nothing
+      # in a log line or an error message. Not during boot, when the routes
+      # may not be drawable yet.
+      app = Rails.application
+      app.reload_routes_unless_loaded if app.respond_to?(:reload_routes_unless_loaded) && app.initialized?
+      routes = app.routes.set.routes
       key = [ routes.length, routes.last.object_id ]
       return @sensitive_routes if @sensitive_routes_key == key
 

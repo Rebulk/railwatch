@@ -50,9 +50,9 @@ module Railwatch
       url = env.url
       Railwatch.record(:outgoing_request, group: Record.group_hash(url.host, env.method.to_s.upcase),
                      timestamp: started_at, host: url.host, method: env.method.to_s.upcase,
-                     url: Record.url_without_sensitive_components(url, limit: 2048),
+                     url: Record.outgoing_url(url),
                      duration: Clock.micros_since(start), status_code: env.status.to_i,
-                     error: error && "#{error.class}: #{error.message}"[0, 255],
+                     error: error && "#{error.class}: #{Railwatch.redactor.filter_text_urls(error.message.to_s)}"[0, 255],
                      response_body: response_body(env),
                      in_transaction: Railwatch.execution&.in_transaction? || false)
     end

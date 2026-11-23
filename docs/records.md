@@ -318,7 +318,7 @@ lose the record.
 | `fingerprint` | The parts that were hashed, up to 10 strings of 200 chars each — by default class + top in-app frame's file/line + normalized message. Always present, so the platform can show *why* an occurrence grouped where it did. |
 | `fingerprint_source` | Where the fingerprint came from: `"default"`, `"report"` (`Railwatch.report(error, fingerprint: [...])`), `"error"` (the exception's own `#railwatch_fingerprint`), or `"resolver"` (a `Railwatch.fingerprint { }` block). |
 | `class` | Exception class name. |
-| `message` | Truncated to 4096 chars. |
+| `message` | Truncated to 4096 chars. URLs in it are cleaned like a request's (no userinfo, query or fragment; this app's credential route segments filtered). With `capture_sql_values` off, a database error's message has the statement it repeats masked as `query.sql` is. The cause's message and the parent's `exception_preview` are cleaned the same way. |
 | `handled` | Whether the error was rescued (`Rails.error.handle`) vs. unhandled (`Rails.error.report`/escaped). |
 | `severity` | `:error`/`:warning`/etc., as a string. |
 | `source` | Free-text source tag the raiser passed, e.g. `"application.active_job"`, `"application.action_cable"` (a channel action that raised), `"railwatch.middleware"`, `"action_controller.rescue_from"`, or `"browser"` for a JavaScript error (see below). |
@@ -510,12 +510,12 @@ never double-recorded.
 | `group` | Hash of host + method. |
 | `host` | Request host. |
 | `method` | HTTP verb. |
-| `url` | Scheme + host + path, with authority credentials, the entire query string, and fragment removed, truncated to 2048 chars. |
+| `url` | Scheme + host + path, with authority credentials, the entire query string, and fragment removed, truncated to 2048 chars. Path segments a third party puts its credential in are `[FILTERED]`: a Slack webhook's secret (`hooks.slack.com`, its last segment, or `/services/T…/B…/<secret>` anywhere), a Telegram bot token (`/bot[FILTERED]/`), a Discord webhook token (`/webhooks/<id>/[FILTERED]`), and a segment that follows one the parameter filter names (`/api_key/[FILTERED]`). Any other credential in a path is kept; scrub it with `Railwatch.redact_outgoing_requests`. |
 | `duration` | Microseconds. |
 | `status_code` | Response status, 0 if the request errored before a response. |
 | `request_size` | Bytes (Net::HTTP path only). |
 | `response_size` | Bytes, from `Content-Length` or body size. |
-| `error` | `"Class: message"`, truncated to 255 chars, if the request raised. |
+| `error` | `"Class: message"`, truncated to 255 chars, if the request raised. URLs in the message are cleaned like `url`. |
 | `response_body` | First 4 KiB of the response body, but only when `config.capture_response_body_on_error` is on (off by default) *and* the response was an error. A body that parses as a JSON object is run through the same parameter filter as request params and re-serialized; anything else is stored as it arrived. nil in every other case — including a connection failure, where there is no response (on the Net::HTTP path a body is read only if Net::HTTP already buffered it, so a response being streamed through `read_body` is never consumed; on the Faraday path the body is taken only once a status came back, so an outgoing request payload can never be filed as a response). |
 | `in_transaction` | True when the execution had a database transaction (or savepoint) of its own open for this call, so the transaction and its locks were held for the whole round trip and a rollback cannot undo what the call did. Only transactions the execution began count: one already open when it started, such as a test's transactional fixture, does not. Active Record begins a transaction at its first statement, so a `transaction do` block that has not yet run one is not open. A job performed inline inherits its parent's. The `have_railwatch_http_in_transaction` matcher fails a spec on it. |
 | `source` | App-code call site (Net::HTTP path only). |

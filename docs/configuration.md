@@ -327,13 +327,18 @@ aliases such as `X-AuthToken`, `X-ApiToken`, `X-AccessToken`,
 `redact_headers`. Ordinary diagnostic headers remain available.
 
 Headers that carry a URL are kept, cleaned. `Referer` keeps its path,
-and its query only with `capture_browser_query_strings`; `Origin`, and the
+and its query only with `capture_browser_query_strings`; `Origin`, the
 original URL a rewriting proxy passes on (`X-Original-Url`,
-`X-Original-Uri`, `X-Rewrite-Url`), keep no query. None keeps userinfo or a
-fragment.
+`X-Original-Uri`, `X-Rewrite-Url`, `X-Envoy-Original-Path`,
+`X-Forwarded-Uri`, `X-Forwarded-Path`, `X-Original-Path`), htmx's
+`HX-Current-URL`, and any other header whose whole value is a URL or a
+path, keep no query. None keeps userinfo or a fragment. When the request's
+own host could not be read, none keeps a path.
 
 **Secrets in the path.** A dynamic route segment whose name contains
-`token`, `secret`, `key`, `code`, `signature` or `password`, or that
+`token`, `secret`, `key`, `code`, `signature` or `password`, a signed id
+(`signed_id`, `signed_blob_id`, `sgid`: Active Storage's file URLs carry
+one, and it downloads the file on its own), or that
 `redact_params`/`filter_parameters` would filter as a parameter, is
 replaced by `[FILTERED]` wherever its URL is recorded: the request's
 `path` and `url`, `redirect_to`, the `Referer` and original-URL headers,

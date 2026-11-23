@@ -49,10 +49,19 @@ module Railwatch
     # Context is application data -- an app that puts an API token or a
     # password in it should get the same treatment request params get, rather
     # than having it written verbatim onto every record built while it is set.
+    # A params object given as a context value is filtered by key first
+    # (Redactor#scrub), as the Hash it holds: the parameter filter walks
+    # only Hash and Array, and JSON wrote a params object's #to_s, every
+    # value in it.
     def serialize(context)
-      filtered = Railwatch.redactor.params(context)
+      redactor = Railwatch.redactor
+      filtered = redactor.params(context.transform_values { |value| params_object?(value) ? redactor.scrub(value) : value })
       json = JSON.generate(filtered)
       json.bytesize > LIMIT ? truncate(filtered) : json
+    end
+
+    def params_object?(value)
+      defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
     end
 
     # An oversized context used to be byteslice'd, which cut the JSON
