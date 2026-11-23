@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.6 (2026-11-23)
+
 - Security: **an Active Storage signed id is filtered from recorded URLs.**
   `/rails/active_storage/blobs/redirect/:signed_id/*filename` (and the
   proxy and representation routes) kept the signed id in the request's
