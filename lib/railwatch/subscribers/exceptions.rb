@@ -191,11 +191,21 @@ module Railwatch
       # as the query record masks it. statement_of: the error whose #sql
       # this message may repeat -- a StatementInvalid's cause is the
       # driver's own error, which carries the same text.
+      # The longest database error message masked whole (#message_text).
+      SQL_MASK_LIMIT = 1_048_576
+
       def message_text(error, statement_of: error)
         # Twice the longest field it fills (message, 4096), which bounds the
         # work and still sees the "@" of a userinfo straddling that cut.
-        text = error.message.to_s[0, 8192]
-        text = without_sql_literals(text, statement_of) unless Railwatch.config.capture_sql_values
+        text = error.message.to_s
+        # Masked before the cut: cut first, a long statement no longer
+        # matches whole and its literals would pass unmasked. A message too
+        # long to mask in bounded work keeps only its first line, which is
+        # the driver's own description, never the statement.
+        unless Railwatch.config.capture_sql_values
+          text = text.bytesize > SQL_MASK_LIMIT && statement_error(statement_of) ? text.lines.first.to_s.chomp : without_sql_literals(text, statement_of)
+        end
+        text = text[0, 8192]
         Railwatch.redactor.filter_text_urls(text)
       rescue StandardError
         error.class.name.to_s

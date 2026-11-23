@@ -224,7 +224,10 @@ module Railwatch
           path = match[1..-2]
           %("#{seen > TEXT_URL_LIMIT ? FILTERED : clean_url(path)}")
         else
-          seen > TEXT_URL_LIMIT ? Record.url_without_sensitive_components(match[URL_ORIGIN].to_s, limit: 512) : clean_url(match)
+          # Prose punctuation after a URL ("(see https://x/reset/T/edit).")
+          # is not part of it: matched with it, the route never would be.
+          url, tail = split_trailing_punctuation(match)
+          (seen > TEXT_URL_LIMIT ? Record.url_without_sensitive_components(url[URL_ORIGIN].to_s, limit: 512) : clean_url(url)) + tail
         end
       end
     rescue StandardError
@@ -323,6 +326,26 @@ module Railwatch
       filter_outgoing_path(filter_url(clean, host: host))
     rescue URI::Error
       clean ? clean[URL_ORIGIN].to_s : FILTERED
+    end
+
+    # The URL and the punctuation prose put after it: trailing . , ; : ! ?
+    # and quotes always, and a closing ) ] } that has no opener in the URL.
+    def split_trailing_punctuation(match)
+      url = match.dup
+      tail = +""
+      loop do
+        last = url[-1]
+        break if last.nil?
+
+        closer = { ")" => "(", "]" => "[", "}" => "{" }[last]
+        if ".,;:!?'\"".include?(last) || (closer && url.count(closer) < url.count(last))
+          tail.prepend(last)
+          url.chop!
+        else
+          break
+        end
+      end
+      [ url, tail ]
     end
 
     # Fails closed.
@@ -430,9 +453,15 @@ module Railwatch
     # names, so a key is matched against the header rules: redact_headers
     # and SENSITIVE_HEADER_NAME, less its identity names. The rules are
     # written for hyphens; Ruby keys use underscores.
+    # An identity part ("Remote-User") never shields a credential part in
+    # the same name ("X-Remote-User-Authorization"): the name is a
+    # credential when it still matches with its identity parts taken out.
     def credential_key?(name)
       header = name.tr("_", "-")
-      redact_header?(header) && (@header_keys.include?(header.downcase) || !IDENTITY_HEADER_NAME.match?(header))
+      return false unless redact_header?(header)
+      return true if @header_keys.include?(header.downcase)
+
+      SENSITIVE_HEADER_NAME.match?(header.gsub(IDENTITY_HEADER_NAME, "-"))
     end
 
     # A value under a key no filter names, given to the app's Proc filters

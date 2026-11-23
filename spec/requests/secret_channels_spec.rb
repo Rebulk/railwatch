@@ -74,6 +74,14 @@ RSpec.describe "secrets in sibling channels", type: :request do
       expect(cleaned.join).not_to match(/K\d|key=|u:p@/)
     end
 
+    it "clean a URL that prose wraps in punctuation, and keep the punctuation" do
+      get "/widgets" # routes load lazily in the dummy app
+      cleaned = Railwatch.redactor.filter_text_urls("failed (https://app.example/reset_boom/RESET_PAREN_1). Retry.")
+
+      expect(cleaned).to eq("failed (https://app.example/reset_boom/[FILTERED]). Retry.")
+      expect(Railwatch.redactor.filter_text_urls("see https://app.example/wiki/A_(b)")).to eq("see https://app.example/wiki/A_(b)")
+    end
+
     it "leave a line with no URL in it as it is" do
       in_command { Rails.logger.info(%(user said "hello" at a://)) }
 
@@ -108,6 +116,13 @@ RSpec.describe "secrets in sibling channels", type: :request do
       Railwatch.config.capture_exception_locals = false
     end
 
+    it "are masked when an identity part sits beside a credential part in the name" do
+      scrubbed = Railwatch.redactor.scrub({ "X-Remote-User-Authorization" => "Bearer DUMMY-COMBINED", "Remote-User" => "jane" })
+
+      expect(scrubbed["X-Remote-User-Authorization"]).to eq("[FILTERED]")
+      expect(scrubbed["Remote-User"]).to eq("jane")
+    end
+
     it "are masked in a span attribute" do
       in_command { Railwatch.span("partner.call", headers: headers) { nil } }
 
@@ -129,6 +144,21 @@ RSpec.describe "secrets in sibling channels", type: :request do
       expect(exc[:message]).to include("no such column: missing_column")
       expect(exc[:message]).to include("missing_column = ?")
       expect(railwatch_records.to_s).not_to include("DUMMY-4111-CARD")
+    end
+
+    it "masks a literal in a database error whose statement is longer than the message cut" do
+      # The statement alone is far past the 8,192-character cut, and the
+      # secret literal comes first, inside the part the cut keeps.
+      ids = (1..2_500).map { "'ID-#{_1}'" }.join(",")
+      in_command do
+        Widget.where("missing_column = 'DUMMY-LONG-CARD' OR id IN (#{ids})").to_a
+      rescue ActiveRecord::StatementInvalid => e
+        Rails.error.report(e, handled: false)
+      end
+
+      exc = railwatch_records(:exception).sole
+      expect(exc[:message]).to include("no such column: missing_column")
+      expect(railwatch_records.to_s).not_to include("DUMMY-LONG-CARD")
     end
 
     it "keeps the literal when capture_sql_values is on, as the query record does" do
@@ -198,6 +228,25 @@ RSpec.describe "secrets in sibling channels", type: :request do
       context = JSON.parse(railwatch_records(:exception).sole[:context])
       expect(context["params"]).to eq("user" => { "name" => "a", "password" => "[FILTERED]" })
       expect(context["plain"]).to eq("user" => { "password" => "[FILTERED]" })
+    end
+
+    it "filters a params object nested inside error context" do
+      in_command do
+        raise ArgumentError, "nested context demo"
+      rescue ArgumentError => e
+        Rails.error.report(e, handled: true, context: {
+          request: { params: ActionController::Parameters.new(user: { password: "hunter2-NESTED" }) }
+        })
+      end
+
+      expect(railwatch_records(:exception).sole[:context]).not_to include("hunter2-NESTED")
+    end
+
+    it "sends an event payload too large to keep as {}, never as half an object" do
+      events = []
+      in_command { Rails.event.notify("big.event", blob: "x" * 20_000) }
+      events = railwatch_records(:log).select { _1[:message].to_s.include?("big.event") }
+      events.each { |log| expect { JSON.parse(log[:context].to_s.presence || "{}") }.not_to raise_error }
     end
 
     it "filters LLM tool arguments and results by key when capture_llm_content is on" do

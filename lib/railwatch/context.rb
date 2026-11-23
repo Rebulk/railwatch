@@ -49,15 +49,28 @@ module Railwatch
     # Context is application data -- an app that puts an API token or a
     # password in it should get the same treatment request params get, rather
     # than having it written verbatim onto every record built while it is set.
-    # A params object given as a context value is filtered by key first
-    # (Redactor#scrub), as the Hash it holds: the parameter filter walks
-    # only Hash and Array, and JSON wrote a params object's #to_s, every
-    # value in it.
+    # A context value holding a params object anywhere -- the value itself,
+    # or nested in a Hash or Array -- is scrubbed by key first
+    # (Redactor#scrub), so the object is filtered as the Hash it holds: the
+    # parameter filter walks only Hash and Array, and JSON wrote a params
+    # object's #to_s, every value in it. Other values go to the parameter
+    # filter as they are, so a wide context keeps every key for #truncate.
     def serialize(context)
       redactor = Railwatch.redactor
-      filtered = redactor.params(context.transform_values { |value| params_object?(value) ? redactor.scrub(value) : value })
+      filtered = redactor.params(context.transform_values { |value| holds_params_object?(value) ? redactor.scrub(value) : value })
       json = JSON.generate(filtered)
       json.bytesize > LIMIT ? truncate(filtered) : json
+    end
+
+    def holds_params_object?(value, depth = 0)
+      return true if params_object?(value)
+      return false if depth >= 5
+
+      case value
+      when Hash then value.each_value.first(100).any? { holds_params_object?(_1, depth + 1) }
+      when Array then value.first(100).any? { holds_params_object?(_1, depth + 1) }
+      else false
+      end
     end
 
     def params_object?(value)

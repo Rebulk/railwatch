@@ -148,7 +148,10 @@ module Railwatch
           end
           return "{}" unless payload.is_a?(Hash)
         end
-        JSON.generate(redactor.params(redactor.scrub(payload)))[0, 8192]
+        # Never cut: a cut JSON string cannot be parsed, so an oversized
+        # payload is sent as "{}" rather than as half an object.
+        json = JSON.generate(redactor.params(redactor.scrub(payload)))
+        json.bytesize > 8192 ? "{}" : json
       rescue StandardError
         "{}"
       end
