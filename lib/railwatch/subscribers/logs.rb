@@ -65,7 +65,7 @@ module Railwatch
             level: "event",
             message: name,
             tags: Array(event[:tags]).map(&:to_s),
-            context: (JSON.generate(event[:payload]) rescue "{}")[0, 8192],
+            context: Logs.event_context(event[:payload]),
             source: event.dig(:source_location, :filepath) && "#{event[:source_location][:filepath].delete_prefix(Backtrace.app_root)}:#{event[:source_location][:lineno]}")
         end
       end
@@ -108,6 +108,12 @@ module Railwatch
         return if text.start_with?("[railwatch]") || framework_noise?(text)
         exe.count(:logs)
         return unless recording?
+        # Rails' own lines repeat the URLs the request record cleans:
+        # "Redirected to <target>", the routing error's quoted path. So
+        # does any line an app writes with a URL in it. Cut to twice the
+        # stored length first, which bounds the work and still sees the "@"
+        # of a userinfo that straddles the final cut.
+        text = Railwatch.redactor.filter_text_urls(text[0, 16_384])
         cfg = Railwatch.config
         # One hash literal instead of kwargs-packing into Railwatch.record --
         # every captured Rails.logger line goes through here.
@@ -124,6 +130,30 @@ module Railwatch
           tags: current_tags,
           context: Context.serialized
         })
+      end
+
+      # A Rails.event payload as JSON, filtered by key like a span attribute
+      # (Redactor#scrub): Rails filters a Hash payload with filter_parameters
+      # only, not redact_params or the header rules, and does not filter an
+      # event object at all. An event object is read as the Hash of its
+      # members (a Struct, a Data) or of its #as_json first, so it is
+      # filtered by member name; one that gives no Hash is sent as "{}".
+      def event_context(payload)
+        redactor = Railwatch.redactor
+        unless payload.is_a?(Hash)
+          payload = if payload.is_a?(Struct) || (defined?(::Data) && payload.is_a?(::Data))
+            payload.to_h
+          elsif payload.respond_to?(:as_json)
+            payload.as_json
+          end
+          return "{}" unless payload.is_a?(Hash)
+        end
+        # Never cut: a cut JSON string cannot be parsed, so an oversized
+        # payload is sent as "{}" rather than as half an object.
+        json = JSON.generate(redactor.params(redactor.scrub(payload)))
+        json.bytesize > 8192 ? "{}" : json
+      rescue StandardError
+        "{}"
       end
 
       def current_tags

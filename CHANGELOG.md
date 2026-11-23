@@ -6,6 +6,46 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security: **an Active Storage signed id is filtered from recorded URLs.**
+  `/rails/active_storage/blobs/redirect/:signed_id/*filename` (and the
+  proxy and representation routes) kept the signed id in the request's
+  `path` and `url` and in later requests' `Referer`, and that path alone
+  downloads the file: signed ids do not expire by default and Active
+  Storage's controllers are public. A segment named `signed_id`,
+  `signed_blob_id` or `sgid` is now a credential like `:token`.
+- Security: **Rails' own log lines no longer repeat the URL secrets the
+  request record removes.** `Redirected to <url>` carried a password-reset
+  token, URL userinfo and query values that `redirect_to` filters, and the
+  routing-error line carried the raw path. Every URL in a captured log
+  line is now cleaned the way the request record's are.
+- Security: **`Authorization`, `Cookie`, `X-Api-Key` and other credential
+  header names are masked as Hash keys.** A headers Hash in an exception
+  local or a span attribute was sent whole, though the same names are
+  masked as request headers. The key filter now applies the header rules
+  too (not the identity names, such as `email`, which stay with the app's
+  own `filter_parameters`).
+- Security: **library error text no longer carries what the sibling
+  records remove.** With `capture_sql_values` off, a database error's
+  message (sqlite3 appends the statement) had its SQL literals; a Faraday
+  error carried the URL's query string, in the exception record and in
+  `outgoing_request.error`. The statement is now masked as `query.sql` is,
+  and URLs in exception and outgoing-request error text are cleaned.
+- Security: **`Rails.event` payloads, request parameters given as context,
+  and LLM tool arguments are filtered by key.** Event payloads now get
+  `redact_params` and the header rules, and a Struct or Data event is
+  filtered by member; an `ActionController::Parameters` context value was
+  sent as its `to_s`, every value in it; tool arguments and results
+  (`capture_llm_content`) were sent unfiltered.
+- Security: **request headers that carry a URL are cleaned like
+  `Referer`.** `HX-Current-URL`, `X-Envoy-Original-Path`, `X-Forwarded-Uri`
+  and any other header whose value is a URL or path kept their query and
+  token segments. None keeps a path when the request's host is unreadable.
+- Security: **webhook and bot-token secrets in an outgoing URL's path are
+  masked.** Slack webhook secrets, Telegram bot tokens, Discord webhook
+  tokens, and a segment following one the parameter filter names are now
+  `[FILTERED]` in `outgoing_request.url`. Other path credentials are still
+  sent; use `Railwatch.redact_outgoing_requests` for those.
+
 ## 1.6.5 (2026-11-23)
 
 - Security: **a client's `X-Inertia` header no longer makes Railwatch read

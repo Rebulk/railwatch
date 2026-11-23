@@ -46,7 +46,11 @@ configuration and record specs:
   converted with `inspect`, truncated to 200 characters, and parameter
   filtered: by the local's name, and by key inside a local that is a Hash,
   an Array or request parameters (so `attrs = { password: ... }` ships as
-  `[FILTERED]` under `password`). A secret held in a plain String under a
+  `[FILTERED]` under `password`). A key the header rules name as a
+  credential (`Authorization`, `Cookie`, `X-Api-Key`, `redact_headers`) is
+  masked too; span attributes, `Rails.event` payloads (Struct and Data
+  events by member), request parameters given as context, and LLM tool
+  arguments and results get the same key filter. A secret held in a plain String under a
   name the filter does not match, or printed by another object's own
   `inspect`, is sent as it is; leave this off where that can happen.
   `Locals.inspect_value` rescues an `inspect` implementation that
@@ -55,9 +59,18 @@ configuration and record specs:
   backtrace frames are recorded and sent to the configured server. Disable it if source context is outside the
   application's telemetry policy.
 
-Log record messages are sent exactly as supplied to `Rails.logger`. Railwatch
-does not attempt to parse and partially filter `key=value` text because doing
-so would be incomplete and could give a false assurance. Applications must not
+Log record messages are sent as supplied to `Rails.logger`, with one
+exception: every URL in a line is cleaned the way the request record's own
+URLs are (userinfo, query and fragment dropped, this app's credential route
+segments filtered, known third-party credential paths masked), so Rails'
+own `Redirected to <url>` and routing-error lines do not repeat what
+`redirect_to` and `path` filter. At most 20 URLs per line are cleaned in
+full; the rest keep only scheme and host. The same cleaning applies to
+exception messages and `outgoing_request.error` (Faraday's `status 401 for
+GET <url>`), and with `capture_sql_values` off a database error's message
+has the statement it repeats masked as the `query` record masks it.
+Railwatch does not attempt to parse and partially filter `key=value` text
+because doing so would be incomplete and could give a false assurance. Applications must not
 log secrets; `Railwatch.redact_logs` can implement an application-specific scrub,
 and `Railwatch.reject_logs` or `RAILWATCH_IGNORE_LOGS=true` can omit log records.
 

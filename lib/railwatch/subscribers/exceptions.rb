@@ -106,7 +106,7 @@ module Railwatch
         exe = execution
         if exe&.first_exception_observation?(error, handled)
           exe.count(:exceptions)
-          exe.exception_preview ||= "#{error.class}: #{error.message}"[0, 255]
+          exe.exception_preview ||= "#{error.class}: #{message_text(error)}"[0, 255]
         end
         # An interactive `rails runner` -- typed, piped, or a script in /tmp --
         # is an engineer at a shell, and their typo is not an issue. Their
@@ -138,14 +138,14 @@ module Railwatch
         remember_fingerprint(error, parts) if fingerprint
         rec = {
           class: error.class.name,
-          message: error.message.to_s[0, 4096],
+          message: message_text(error)[0, 4096],
           handled: handled,
           severity: severity.to_s,
           source: source.to_s,
           file: top[:file],
           line: top[:line],
           frames: frames,
-          cause: cause && { class: cause.class.name, message: cause.message.to_s[0, 1024] },
+          cause: cause && { class: cause.class.name, message: message_text(cause, statement_of: statement_error(cause) || error)[0, 1024] },
           context: Context.serialized_with(context),
           code: error_code(error),
           sql_state: sql_state_for(error),
@@ -180,6 +180,56 @@ module Railwatch
         error.instance_variable_set(:@__railwatch_reported, true)
       rescue StandardError
         nil
+      end
+
+      # The error's message as it is recorded. A library builds these, not
+      # the app, and repeats in them what the sibling records remove: the
+      # URL with its query (Faraday's "status 401 for GET <url>"), cleaned
+      # here as Redactor#filter_text_urls cleans a log line; and, with
+      # capture_sql_values off, the statement with its literals (sqlite3
+      # appends the whole statement to a prepare error), which is masked
+      # as the query record masks it. statement_of: the error whose #sql
+      # this message may repeat -- a StatementInvalid's cause is the
+      # driver's own error, which carries the same text.
+      # The longest database error message masked whole (#message_text).
+      SQL_MASK_LIMIT = 1_048_576
+
+      def message_text(error, statement_of: error)
+        # Twice the longest field it fills (message, 4096), which bounds the
+        # work and still sees the "@" of a userinfo straddling that cut.
+        text = error.message.to_s
+        # Masked before the cut: cut first, a long statement no longer
+        # matches whole and its literals would pass unmasked. A message too
+        # long to mask in bounded work is replaced by the error's class name:
+        # nothing says which part of it is free of the statement.
+        unless Railwatch.config.capture_sql_values
+          text = text.bytesize > SQL_MASK_LIMIT && statement_error(statement_of) ? statement_of.class.name.to_s : without_sql_literals(text, statement_of)
+        end
+        text = text[0, 8192]
+        Railwatch.redactor.filter_text_urls(text)
+      rescue StandardError
+        error.class.name.to_s
+      end
+
+      # A database error's message with the statement masked by
+      # SqlNormalizer: the statement where the message repeats it whole,
+      # and every line after the first, where drivers echo it (sqlite3's
+      # appended statement, Postgres' "LINE 1:" excerpt). The first line is
+      # the driver's own description and is kept. Anything else is left.
+      def without_sql_literals(text, error)
+        return text unless statement_error(error)
+
+        adapter = (error.connection_pool.db_config.adapter rescue nil)
+        sql = error.sql.to_s
+        text = text.gsub(sql) { SqlNormalizer.normalize(sql, adapter: adapter) } unless sql.empty?
+        first, rest = text.split("\n", 2)
+        return text if rest.nil?
+
+        [ first, *rest.split("\n", -1).map { |line| SqlNormalizer.normalize(line, adapter: adapter) } ].join("\n")
+      end
+
+      def statement_error(error)
+        error if defined?(::ActiveRecord::StatementInvalid) && error.is_a?(::ActiveRecord::StatementInvalid)
       end
 
       # The group hash `capture` would assign this error. Public so

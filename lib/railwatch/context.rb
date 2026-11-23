@@ -49,10 +49,32 @@ module Railwatch
     # Context is application data -- an app that puts an API token or a
     # password in it should get the same treatment request params get, rather
     # than having it written verbatim onto every record built while it is set.
+    # A context value holding a params object anywhere -- the value itself,
+    # or nested in a Hash or Array -- is scrubbed by key first
+    # (Redactor#scrub), so the object is filtered as the Hash it holds: the
+    # parameter filter walks only Hash and Array, and JSON wrote a params
+    # object's #to_s, every value in it. Other values go to the parameter
+    # filter as they are, so a wide context keeps every key for #truncate.
     def serialize(context)
-      filtered = Railwatch.redactor.params(context)
+      redactor = Railwatch.redactor
+      filtered = redactor.params(context.transform_values { |value| holds_params_object?(value) ? redactor.scrub(value) : value })
       json = JSON.generate(filtered)
       json.bytesize > LIMIT ? truncate(filtered) : json
+    end
+
+    # Fails closed: a container the scan cannot finish (deeper than 5, or
+    # wider than 100 entries) counts as holding one, so its value is
+    # scrubbed rather than serialized unread.
+    def holds_params_object?(value, depth = 0)
+      return true if params_object?(value)
+      return false unless value.is_a?(Hash) || value.is_a?(Array)
+      return true if depth >= 5 || value.size > 100
+
+      (value.is_a?(Hash) ? value.each_value : value).any? { holds_params_object?(_1, depth + 1) }
+    end
+
+    def params_object?(value)
+      defined?(::ActionController::Parameters) && ::ActionController::Parameters === value
     end
 
     # An oversized context used to be byteslice'd, which cut the JSON

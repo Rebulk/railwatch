@@ -323,7 +323,9 @@ module Railwatch
         return nil unless Railwatch.config.capture_llm_content
         return nil if value.nil?
 
-        text = value.to_s
+        # Tool arguments and results are Hashes: filtered by key before they
+        # become one string, like a span attribute.
+        text = (value.is_a?(String) ? value : Railwatch.redactor.scrub(value)).to_s
         return nil if text.empty?
         # byteslice, not [0, n]: the cap bounds what is buffered and shipped,
         # and 4096 characters of CJK is three times that in bytes. scrub

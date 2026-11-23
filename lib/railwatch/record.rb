@@ -128,6 +128,16 @@ module Railwatch
       url[0, limit]
     end
 
+    # An outgoing request's URL: cleaned as above, then with the path
+    # segments a third party puts its credential in masked
+    # (Redactor#filter_outgoing_path: Slack and Discord webhooks, Telegram
+    # bot tokens). Shared by the Net::HTTP patch, Railwatch::Faraday and
+    # Railwatch.instrument_outgoing.
+    def outgoing_url(value, limit: 2048)
+      clean = url_without_sensitive_components(value, limit: value.to_s.length)
+      Railwatch.redactor.filter_outgoing_path(clean)[0, limit]
+    end
+
     PLAUSIBLE_AUTHORITY = /\A(?:\[[0-9A-Fa-f:.]*\]|[^\s:\[\]@]*)(?::\d*)?\z/
 
     # Drops "user:pass@" from the authority. A URL without a scheme is read

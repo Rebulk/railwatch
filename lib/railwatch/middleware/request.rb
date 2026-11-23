@@ -395,10 +395,15 @@ module Railwatch
       # Headers whose value is a URL, cleaned the way the request's own url
       # is: the page the browser came from (its query only with
       # capture_browser_query_strings, like a beacon URL), and the original
-      # URL a rewriting proxy (IIS, Azure) passes on (never its query). Both
+      # URL a rewriting proxy (IIS, Azure, Envoy/Istio, Traefik forward
+      # auth) or a client library (htmx) passes on (never its query). Both
       # have their route's sensitive segments filtered when they are this
       # app's. Origin is only scheme, host and port, so it has no route.
-      PROXY_URL_HEADERS = %w[X-Original-Url X-Original-Uri X-Rewrite-Url].freeze
+      # Any other header whose whole value is a URL or a path is cleaned
+      # like the named ones (URL_HEADER_VALUE).
+      PROXY_URL_HEADERS = %w[X-Original-Url X-Original-Uri X-Rewrite-Url X-Envoy-Original-Path X-Forwarded-Uri
+                             X-Forwarded-Path X-Original-Path Hx-Current-Url].to_set.freeze
+      URL_HEADER_VALUE = %r{\A(?:[A-Za-z][A-Za-z0-9+.-]*://|/)\S*\z}
 
       # A page URL when the request's own host could not be read: the router
       # cannot be asked which of its segments are credentials (an absolute
@@ -425,7 +430,7 @@ module Railwatch
             host ? redactor.browser_url(v, limit: 512, host: host) : origin_only(v)
           elsif name == "Origin"
             Record.url_without_sensitive_components(v, limit: 512)
-          elsif PROXY_URL_HEADERS.include?(name)
+          elsif PROXY_URL_HEADERS.include?(name) || URL_HEADER_VALUE.match?(v.to_s)
             host ? redactor.filter_url(Record.url_without_sensitive_components(v, limit: v.to_s.length), host: host)[0, 512] : origin_only(v)
           else
             v.to_s[0, 512]
