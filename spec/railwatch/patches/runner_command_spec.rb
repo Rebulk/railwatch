@@ -195,4 +195,50 @@ RSpec.describe Railwatch::Patches::RunnerCommand do
       expect(railwatch_records(:command).size).to eq(1)
     end
   end
+
+  # Inline runner code was the command AND the execution_preview, which
+  # every record of the run (each query, transaction, log line) carries.
+  describe "secrets in inline code" do
+    after { Railwatch.config.redactors.clear }
+
+    def previews
+      railwatch_records.map { |record| record[:execution_preview] }
+    end
+
+    it "masks a filtered assignment and a credentialed URL in the command and in every record's execution_preview" do
+      run_runner(%q{Widget.create!(name: "w"); Struct.new(:password).new.password = "DUMMY-PW-2"; URI("https://ops:DUMMY-URL-PW@example.test/x?token=DUMMY-Q")})
+
+      command = railwatch_records(:command).sole[:command]
+      expect(command).to eq(%q{rails runner Widget.create!(name: "w"); Struct.new(:password).new.password = "[FILTERED]"; URI("https://example.test/x")})
+      expect(railwatch_records.size).to be > 1
+      expect(previews).to all(eq(command))
+      expect(previews.join).not_to include("DUMMY")
+    end
+
+    it "masks a filtered keyword argument and hash key, and leaves the rest as typed" do
+      run_runner(%q{attrs = Hash.new.merge(password: "DUMMY-PW-3", "secret_code" => 'DUMMY-CODE', :token => DUMMY, name: "kept", n: Railwatch::VERSION)})
+
+      expect(railwatch_records(:command).sole[:command]).to eq(
+        %q{rails runner attrs = Hash.new.merge(password: "[FILTERED]", "secret_code" => '[FILTERED]', :token => [FILTERED], name: "kept", n: Railwatch::VERSION)}
+      )
+    end
+
+    it "leaves no copy behind once the app's redact_commands hook masks the command" do
+      Railwatch.redact_commands { |c| c[:command] = "[hidden by app]" }
+      run_runner(%q{Widget.create!(name: "w"); new_value = "DUMMY-APP-SECRET"})
+
+      expect(railwatch_records(:command).sole[:command]).to eq("[hidden by app]")
+      expect(railwatch_records.size).to be > 1
+      expect(previews).to all(eq("[hidden by app]"))
+    end
+
+    it "keeps the bare label on every record when the app's hook raises" do
+      Railwatch.redact_commands { |_c| raise "hook bug" }
+      run_runner(%q{Widget.create!(name: "w"); new_value = "DUMMY-APP-SECRET"})
+
+      expect(railwatch_records(:command)).to be_empty
+      expect(previews).not_to be_empty
+      expect(previews).to all(eq("rails runner"))
+    end
+  end
 end

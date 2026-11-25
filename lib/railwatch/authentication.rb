@@ -10,9 +10,38 @@ module Railwatch
   # appends a `railwatch:` entry to the credentials file the environment
   # reads.
   module Authentication
+    # What a failed configure raises instead of the error it hit.
+    class Error < StandardError; end
+
     module_function
 
+    # This task holds the environment's DECRYPTED credentials: as a String
+    # inside ActiveSupport::EncryptedFile#write (its `contents`), inside
+    # Rails' and Psych's parsers, and as the Hash below. Any of them that
+    # raises -- an unwritable config directory, a full disk, YAML that does
+    # not parse -- raises in a frame whose locals hold that plaintext, and
+    # the task runs under the rake patch, which reports the unhandled error
+    # with those locals when capture_exception_locals is on (the first 200
+    # characters of the document: all of a generated secret_key_base). The
+    # parameter filter cannot help, since the local is a String under a
+    # neutral name. So whatever fails is replaced by an Error raised from
+    # #fail_without_document, whose only local is the message, and with no
+    # cause, so the original (which carries the snapshot) is not kept. The
+    # task still fails, with the system error (and its path) in the message;
+    # any other error is named by its class only, since a parser error can
+    # quote the document.
     def configure(io: $stdin, out: $stdout)
+      configure_credentials(io, out)
+    rescue StandardError => e
+      detail = e.is_a?(SystemCallError) ? "#{e.class}: #{e.message}" : e.class.name
+      fail_without_document("Could not update the Rails credentials for `#{Rails.env}` (#{detail}).")
+    end
+
+    def fail_without_document(message)
+      raise Error, message, cause: nil
+    end
+
+    def configure_credentials(io, out)
       unless credentials_accessible?
         out.puts "Rails credentials are not configured or the key is not available for `#{Rails.env}`. " \
                  "Set them up (`bin/rails credentials:help`) or set RAILWATCH_HTTP_BASIC_AUTH_USER and " \

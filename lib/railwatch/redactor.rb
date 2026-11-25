@@ -66,6 +66,18 @@ module Railwatch
     # URLs in one text cleaned in full; any past this keep their origin
     # only, so a line built to hold thousands costs no route lookups.
     TEXT_URL_LIMIT = 20
+    # A command's invocation text is cleaned from at most this much of it.
+    COMMAND_TEXT_LIMIT = 16_384
+    # A name, quoted or not, then =, ==, => or : (not ::, a constant
+    # path), then a quoted or bare value: `password=x` in a rake argument,
+    # `password: "x"`, `"token" => x`, `:token => x` or
+    # `user.password = "x"` in inline runner code.
+    COMMAND_PAIR = /
+      (?<!\w)
+      (["']?)([A-Za-z_][\w.-]*)\1
+      (\s*(?:=>|={1,3}|:(?!:))\s*)
+      ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;)\]}]+)
+    /x
     # A third-party URL whose path is the credential (#filter_outgoing_path).
     TELEGRAM_BOT_SEGMENT = /\Abot\d+:[\w-]+\z/
     SLACK_HOOKS_HOST = "hooks.slack.com"
@@ -232,6 +244,47 @@ module Railwatch
       end
     rescue StandardError
       FILTERED
+    end
+
+    # A command's invocation text (a rake task and its arguments, inline
+    # `rails runner` code), which every record of the execution repeats as
+    # its execution_preview: each URL in it cleaned as #filter_text_urls
+    # cleans a log line's, then the value of each `name=value`,
+    # `name: value` or `name => value` pair whose name the parameter filter
+    # or the header rules name (as #scrub masks a Hash key) masked. A
+    # quoted value keeps its quotes. Fails closed.
+    def filter_command(text)
+      text = text.to_s[0, COMMAND_TEXT_LIMIT]
+      text = text.scrub unless text.valid_encoding?
+      text = filter_text_urls(text)
+      # A pair whose name is not filtered consumes only its name and
+      # separator, so a pair inside its value (`attrs = x.merge(password:
+      # "...")`) is still looked at.
+      out = +""
+      position = 0
+      while (pair = COMMAND_PAIR.match(text, position))
+        value = pair[4]
+        if scrub_key?(pair[2], pair[2])
+          out << text[position...pair.begin(4)]
+          out << (value.start_with?("\"", "'") ? "#{value[0]}#{FILTERED}#{value[0]}" : FILTERED)
+          position = pair.end(4)
+        else
+          out << text[position...pair.end(3)]
+          position = pair.end(3)
+        end
+      end
+      out << text[position..]
+    rescue StandardError
+      FILTERED
+    end
+
+    # A rake task's argument values: [FILTERED] where the name the task
+    # declares for it is one #scrub would mask, else #filter_command.
+    def command_arguments(names, values)
+      values.each_with_index.map do |value, i|
+        name = names[i]&.to_s
+        name && scrub_key?(name, name) ? FILTERED : filter_command(value)
+      end
     end
 
     # An outgoing URL (already without userinfo, query and fragment) with

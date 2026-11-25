@@ -70,9 +70,28 @@ exception messages and `outgoing_request.error` (Faraday's `status 401 for
 GET <url>`), and with `capture_sql_values` off a database error's message
 has the statement it repeats masked as the `query` record masks it.
 Railwatch does not attempt to parse and partially filter `key=value` text
-because doing so would be incomplete and could give a false assurance. Applications must not
+in a log line, because doing so would be incomplete and could give a false assurance. Applications must not
 log secrets; `Railwatch.redact_logs` can implement an application-specific scrub,
 and `Railwatch.reject_logs` or `RAILWATCH_IGNORE_LOGS=true` can omit log records.
+
+A `command` record's invocation (rake task arguments, inline `rails
+runner` code) gets the same URL cleaning, and there the value of a
+`name=value`, `name: value` or `name => value` pair whose name the
+parameter filter or the header rules name is masked, as is a rake argument
+the task declares under such a name. That is the one place key/value text
+is parsed, because an operator types it rather than an application
+logging it, and inline runner code is also every record's
+`execution_preview`. It is still a best effort: a secret under a neutral
+name (`Vendor.connect("hunter2")`) is sent. `Railwatch.redact_commands`
+hooks run on that preview too, so a hook that masks `command` leaves no
+copy on the run's other records.
+
+`railwatch:authentication:configure` decrypts the environment's Rails
+credentials. If it fails (an unwritable config directory, a full disk, a
+file that does not parse) it raises `Railwatch::Authentication::Error`
+from a frame whose only local is the message, with no `cause`, so that
+`capture_exception_locals` never records the frame that held the
+decrypted document.
 
 ## Browser beacon
 
@@ -118,7 +137,8 @@ application/deployment secret and must not be committed.
 - Review `redact_headers`, `redact_params`, and Rails `filter_parameters` for
   application-specific credentials and personal data.
 - Keep secrets out of exception messages, log text, source files, tenant ids,
-  user resolvers, and custom context.
+  user resolvers, custom context, and command lines (rake arguments, inline
+  `rails runner` code).
 - With railwatch-sidecar, set dashboard credentials (or your own gate) before
   deploying; see [Configuration](configuration.md#dashboard-gate-railwatch-sidecar).
 - Use HTTPS in production and keep TLS verification enabled.

@@ -434,4 +434,86 @@ RSpec.describe "railwatch rake tasks" do
   def cleanup_app_files
     TEMP_APP_DIRS.each { |dir| FileUtils.rm_rf(Rails.root.join(dir)) }
   end
+
+  # With capture_exception_locals on, a write that fails inside
+  # ActiveSupport::EncryptedFile#write raised in a frame whose `contents`
+  # local is the whole decrypted credentials document, and the rake patch
+  # reported it, locals and all.
+  describe "railwatch:authentication:configure" do
+    DUMMY_SECRET_KEY_BASE = "dummy0123456789ab" * 8
+
+    around do |example|
+      Dir.mktmpdir("railwatch-credentials-") do |dir|
+        @credentials_dir = dir
+        example.run
+      end
+    end
+
+    before do
+      key_path = File.join(@credentials_dir, "dummy.key")
+      File.write(key_path, ActiveSupport::EncryptedFile.generate_key)
+      @credentials = ActiveSupport::EncryptedConfiguration.new(
+        config_path: File.join(@credentials_dir, "credentials.yml.enc"), key_path: key_path,
+        env_key: "RAILWATCH_SPEC_DUMMY_MASTER_KEY", raise_if_missing_key: true
+      )
+      @credentials.write("secret_key_base: #{DUMMY_SECRET_KEY_BASE}\nvendor_api: DUMMY-VENDOR-VALUE\n")
+      allow(Railwatch::Authentication).to receive(:credentials).and_return(@credentials)
+      Rake::Task["railwatch:authentication:configure"].reenable
+      Railwatch.config.capture_exception_locals = true
+      Railwatch::Subscribers::Exceptions::Locals.install!
+    end
+
+    after do
+      Railwatch::Subscribers::Exceptions::Locals.uninstall!
+      Railwatch.config.capture_exception_locals = false
+      Rake::Task["railwatch:authentication:configure"].reenable
+    end
+
+    def run_configure
+      original_stdin, original_stdout = $stdin, $stdout
+      $stdin = StringIO.new("ops\n")
+      $stdout = StringIO.new
+      Rake::Task["railwatch:authentication:configure"].execute
+    ensure
+      $stdin, $stdout = original_stdin, original_stdout
+    end
+
+    def shipped
+      JSON.generate(railwatch_records)
+    end
+
+    it "fails a write it cannot make without sending the decrypted credentials" do
+      # EncryptedFile#write writes "<file>.tmp" first. A directory there
+      # fails that write inside #write's own frame, as an unwritable config
+      # directory does, and the same way for root (which writes through a
+      # 0555 directory) as for anyone else.
+      Dir.mkdir(File.join(@credentials_dir, "credentials.yml.enc.tmp"))
+
+      expect { run_configure }.to raise_error(StandardError, /Is a directory/)
+
+      expect(railwatch_records(:command).sole[:exit_code]).to eq(1)
+      expect(shipped).not_to include("dummy0123456789ab")
+      expect(shipped).not_to include("DUMMY-VENDOR-VALUE")
+      exception = railwatch_records(:exception).sole
+      expect(exception[:class]).to eq("Railwatch::Authentication::Error")
+      expect(exception[:cause]).to be_nil
+      expect(exception[:locals].keys).to eq([ "message" ])
+    end
+
+    it "fails a credentials file that does not parse without sending what the parser quotes" do
+      @credentials.write("secret_key_base: #{DUMMY_SECRET_KEY_BASE}\n  bad: [indent\n")
+
+      expect { run_configure }.to raise_error(StandardError)
+
+      expect(shipped).not_to include("dummy0123456789ab")
+      expect(railwatch_records(:exception).sole[:class]).to eq("Railwatch::Authentication::Error")
+    end
+
+    it "still writes the credentials when the file is writable" do
+      output = StringIO.new
+      expect(Railwatch::Authentication.configure(io: StringIO.new("ops\n"), out: output)).to be(true)
+
+      expect(@credentials.read).to include("secret_key_base: #{DUMMY_SECRET_KEY_BASE}").and include("http_basic_auth_user: ops")
+    end
+  end
 end
