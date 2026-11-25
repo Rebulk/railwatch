@@ -68,7 +68,11 @@ for this workflow"* while everything before it passes:
 
 - On <https://rubygems.org/gems/railwatch>, under **Trusted publishers**,
   add a GitHub Actions publisher with repository `Rebulk/railwatch`,
-  workflow `release.yml`, and no environment.
+  workflow `release.yml`, and environment `release`.
+- In the repository's **Settings → Environments**, create `release` and
+  protect it (required reviewers, or deployment tags limited to `v*`). The
+  `publish` job runs in it, and also refuses a tag whose commit is not on
+  `main`.
 - A gem that has never been published uses a **pending** trusted
   publisher on the profile page instead, which the first release consumes.
 

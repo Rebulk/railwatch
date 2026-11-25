@@ -90,12 +90,28 @@ jobs:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    # A protected environment, so a v* tag pushed by anyone with write
+    # access cannot publish on its own: the RubyGems trusted publisher is
+    # bound to this environment and refuses the exchange from any other.
+    environment: release
     permissions:
       contents: read
       id-token: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      # A tag can name any commit, including one on a branch nobody
+      # reviewed. Only what main already holds is published.
+      - name: The tagged commit must be on main
+        run: |
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on main; merge it first, then tag main."
+            exit 1
+          fi
+          echo "${GITHUB_REF_NAME} is on main."
 
       # bundler-cache installs the bundle. Without it `bundle exec` below
       # raises before it reaches rake, which is how the publish job fails
