@@ -252,9 +252,13 @@ module Railwatch
     # cleans a log line's, then the value of each `name=value`,
     # `name: value` or `name => value` pair whose name the parameter filter
     # or the header rules name (as #scrub masks a Hash key) masked. A
-    # quoted value keeps its quotes. Fails closed.
+    # quoted value keeps its quotes. Text longer than COMMAND_TEXT_LIMIT is
+    # replaced whole. Fails closed.
     def filter_command(text)
-      text = text.to_s[0, COMMAND_TEXT_LIMIT]
+      text = text.to_s
+      # Past the limit the cut can land inside a value, leaving part of a
+      # secret where no pair can match it. Keep nothing rather than guess.
+      return FILTERED if text.length > COMMAND_TEXT_LIMIT
       text = text.scrub unless text.valid_encoding?
       text = filter_text_urls(text)
       # A pair whose name is not filtered consumes only its name and

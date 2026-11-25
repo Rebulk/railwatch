@@ -215,7 +215,19 @@ RSpec.describe Railwatch::Patches::RunnerCommand do
       expect(previews.join).not_to include("DUMMY")
     end
 
+    it "replaces inline code longer than the limit whole, so a cut never leaves part of a secret" do
+      padding = "x = 1; " * ((Railwatch::Redactor::COMMAND_TEXT_LIMIT / 7) - 1)
+      run_runner(%(#{padding}Struct.new(:password).new.password = "DUMMY-PW-LONG-#{"y" * 64}"))
+
+      expect(railwatch_records(:command).sole[:command]).to eq("rails runner [FILTERED]")
+      expect(previews.join).not_to include("DUMMY")
+    end
+
     it "masks a filtered keyword argument and hash key, and leaves the rest as typed" do
+      # The runner evaluates this code; an undefined DUMMY would make Rails
+      # print "Please specify a valid ruby command" and exit 1 before the
+      # assertion runs.
+      stub_const("DUMMY", "dummy-token")
       run_runner(%q{attrs = Hash.new.merge(password: "DUMMY-PW-3", "secret_code" => 'DUMMY-CODE', :token => DUMMY, name: "kept", n: Railwatch::VERSION)})
 
       expect(railwatch_records(:command).sole[:command]).to eq(
