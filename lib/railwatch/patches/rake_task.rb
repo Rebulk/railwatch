@@ -19,7 +19,7 @@ module Railwatch
       # is not nil and just run plain, nesting inside the one command record instead
       # of each starting (and finishing) their own.
       def invoke(*args)
-        run_as_command(args.any? ? "[#{args.join(',')}]" : "") { super }
+        run_as_command(args.any? ? arguments_suffix(args) : "") { super }
       end
 
       private
@@ -86,7 +86,17 @@ module Railwatch
       end
 
       def args_suffix(args)
-        args.respond_to?(:to_a) && args.to_a.any? ? "[#{args.to_a.join(',')}]" : ""
+        args.respond_to?(:to_a) && args.to_a.any? ? arguments_suffix(args.to_a) : ""
+      end
+
+      # The arguments as typed, each cleaned on its own: [FILTERED] when the
+      # task declares it under a name the parameter filter matches (`task
+      # :import, [:api_key]`), else with its URLs cleaned the way a log
+      # line's are and the value of a `password=...` pair masked
+      # (Redactor#filter_command). One at a time, because a URL's query cut
+      # would otherwise run on into the arguments after it.
+      def arguments_suffix(values)
+        "[#{Railwatch.redactor.command_arguments(arg_names, values).join(',')}]"
       end
 
       def vendor_excluded?

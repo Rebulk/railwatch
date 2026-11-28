@@ -212,7 +212,7 @@ vs `#execute`. `db:migrate` and other tasks in
 | `group` | Hash of the task/command name. |
 | `class` | `"Rake::Task"` or `"Rails::Command::RunnerCommand"`. |
 | `name` | Task name, or `"runner"`. |
-| `command` | Full invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`. |
+| `command` | The invocation, e.g. `"rake db:seed[foo]"` or `"rails runner SomeScript.run"`, cleaned: URLs lose userinfo, query and fragment (as in a log line), the value of a `name=value`, `name: value` or `name => value` pair the parameter filter names is `[FILTERED]`, and a rake argument declared under a filtered name is `[FILTERED]`. Inline runner code is cut to 200 characters, and is also every record's `execution_preview`, after the app's `redact_commands` hooks have run on it. |
 | `exit_code` | 0 on success, `SystemExit`'s status, or 1 on an unhandled exception, clamped to 0-255. |
 | `interactive` | `true` on a `bin/rails runner` an engineer typed or piped (`-`, inline code, or a `.rb` file under `config.interactive_runner_paths`); absent otherwise. Such a run ships this record — with its `exit_code` and `exception_preview` — but its exception is not reported. A deployed script (`rails runner script/nightly.rb`), a rake task, and a job are never interactive. See [Console and runner sessions](replacing-sentry.md#12-console-and-runner-sessions). |
 

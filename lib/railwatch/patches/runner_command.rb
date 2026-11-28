@@ -61,9 +61,9 @@ module Railwatch
       # Opens the command execution around the runner's work, withholding the
       # exception (but not the command record) for an interactive run.
       def self.instrument(code_or_file)
-        preview = code_or_file.to_s[0, 200]
         interactive = interactive?(code_or_file)
-        exe = Railwatch.start_execution(source: :command, sample_kind: :commands, preview: "rails runner #{preview}")
+        command = "rails runner #{Railwatch.redactor.filter_command(code_or_file.to_s)[0, 200]}"
+        exe = Railwatch.start_execution(source: :command, sample_kind: :commands, preview: preview(command))
         exe.interactive = true if interactive
         exe.enter_stage(:action)
         exit_code = 0
@@ -86,7 +86,7 @@ module Railwatch
             group: Record.group_hash("runner"),
             class: "Rails::Command::RunnerCommand",
             name: "runner",
-            command: "rails runner #{preview}",
+            command: command,
             exit_code: exit_code.to_i.clamp(0, 255)
           }
           fields[:interactive] = true if interactive
@@ -95,6 +95,35 @@ module Railwatch
           # at_exit shutdown is the bounded delivery, and it runs for a runner
           # exactly as it does for a task.
         end
+      end
+
+      # The command record's `command` and the execution_preview every
+      # record of the run carries are the same text: inline code cleaned
+      # like a log line (Redactor#filter_command: URL userinfo, query and
+      # credential segments; the value of a `password: "..."` or
+      # `token = "..."` pair the parameter filter names), cut to 200
+      # characters after, so a cut cannot part a secret from the "@" or the
+      # name that marks it.
+      #
+      # The preview is copied into each record's envelope when that record
+      # is built, long before the command record exists, so the app's
+      # Railwatch.redact_commands hooks, which run on the command record,
+      # would reach only its own copy. They are run here first, on a
+      # command record holding just this text, and what they leave in
+      # `command` (or put in `execution_preview`) is the preview. `command`
+      # itself is left for the hooks to rewrite on the real record, once,
+      # as they always have. A hook that raises drops the command record
+      # (Railwatch.run_redactors); here it leaves the bare "rails runner".
+      def self.preview(command)
+        hooks = Railwatch.config.redactors.fetch(:commands, [])
+        return command if hooks.empty?
+
+        probe = { t: "command", class: "Rails::Command::RunnerCommand", name: "runner",
+                  command: command.dup, execution_preview: command.dup }
+        hooks.each { |hook| hook.call(probe) }
+        (probe[:execution_preview] == command ? probe[:command] : probe[:execution_preview]).to_s
+      rescue StandardError
+        "rails runner"
       end
 
       # Typed or piped by a human, rather than loaded from a deployed file.

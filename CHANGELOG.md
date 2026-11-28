@@ -6,6 +6,24 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+- Security: **rake arguments and inline `rails runner` code are cleaned
+  before they are sent.** `rake import[https://ops:pw@host/x?api_key=K]`
+  and `rails runner 'user.update!(password: "...")'` were sent as typed,
+  and the runner code was also every record's `execution_preview`. URLs in
+  the invocation are now cleaned the way a log line's are, the value of a
+  `name=value` / `name: value` / `name => value` pair the parameter filter
+  names is `[FILTERED]`, and so is a rake argument declared under such a
+  name. `Railwatch.redact_commands` hooks now also decide the runner's
+  `execution_preview`, so masking `command` leaves no copy on the run's
+  queries, transactions and log lines.
+- Security: **a failed `railwatch:authentication:configure` no longer sends
+  the decrypted credentials.** With `capture_exception_locals` on, a write
+  that failed (an unwritable config directory, a full disk) was reported
+  with `ActiveSupport::EncryptedFile#write`'s `contents` local: the start
+  of the decrypted credentials, usually all of `secret_key_base`. Any
+  failure now raises `Railwatch::Authentication::Error`, with the system
+  error in its message and no cause, from a frame holding nothing else.
+
 ## 1.6.6 (2026-11-23)
 
 - Security: **an Active Storage signed id is filtered from recorded URLs.**

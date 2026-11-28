@@ -82,4 +82,30 @@ RSpec.describe Railwatch::Patches::RakeTask do
 
     expect(railwatch_records(:command).size).to eq(1)
   end
+
+  # A deploy script or an operator puts a credentialed URL or a password on
+  # the command line; the same URL in a log line is already cleaned.
+  describe "secrets in the arguments" do
+    after { Rake::Task[:railwatch_spec_secret_args].reenable if Rake::Task.task_defined?(:railwatch_spec_secret_args) }
+
+    it "sends a URL argument without userinfo or query, and masks a filtered name=value pair" do
+      Rake::Task.define_task(:railwatch_spec_secret_args, [ :url, :opts ])
+      Rake::Task[:railwatch_spec_secret_args].invoke(
+        "https://ops:DUMMY-URL-PW@example.test/export?api_key=DUMMY-QUERY-KEY", "password=DUMMY-PW-1"
+      )
+
+      command = railwatch_records(:command).sole[:command]
+      expect(command).to eq("rake railwatch_spec_secret_args[https://example.test/export,password=[FILTERED]]")
+      expect(command).not_to include("DUMMY")
+    end
+
+    it "masks an argument the task declares under a filtered name, and leaves ordinary arguments as typed" do
+      Rake::Task.define_task(:railwatch_spec_named_secret, [ :region, :secret_code ])
+      Rake::Task[:railwatch_spec_named_secret].execute(
+        Rake::TaskArguments.new([ :region, :secret_code ], [ "us-east", "DUMMY-CODE" ])
+      )
+
+      expect(railwatch_records(:command).sole[:command]).to eq("rake railwatch_spec_named_secret[us-east,[FILTERED]]")
+    end
+  end
 end
