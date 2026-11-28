@@ -6,6 +6,8 @@
      filled in by the release commit, which is also the only commit that
      touches lib/railwatch/version.rb and Gemfile.lock. See CONTRIBUTING.md. -->
 
+## 1.6.7 (2026-11-27)
+
 - Security: **rake arguments and inline `rails runner` code are cleaned
   before they are sent.** `rake import[https://ops:pw@host/x?api_key=K]`
   and `rails runner 'user.update!(password: "...")'` were sent as typed,
